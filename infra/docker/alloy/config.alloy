@@ -1,0 +1,16 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+otelcol.receiver.otlp "default" {
+  grpc {}
+  http {}
+
+  output {
+    logs = []
+    metrics = []
+    traces = []
+  }
+}
+

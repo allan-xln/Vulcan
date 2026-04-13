@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  web-and-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create virtual environment
+        run: python -m venv .venv
+
+      - name: Install AI API dependencies
+        run: ./.venv/bin/pip install -e ./services/ai-api[dev]
+
+      - name: Verify Phase 1
+        run: ./scripts/verify-phase1.sh
