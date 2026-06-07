@@ -15,6 +15,6 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 1
 fi
 
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/infra/supabase/validation/004_phase4_normalization_checks.sql"
-"$ROOT_DIR/.venv/bin/python" -m pytest "$ROOT_DIR/services/jobs/tests"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/database/supabase/validation/004_phase4_normalization_checks.sql"
+"$ROOT_DIR/.venv/bin/python" -m pytest "$ROOT_DIR/backend/jobs/tests"
 

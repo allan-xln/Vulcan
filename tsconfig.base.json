@@ -15,8 +15,8 @@
     "incremental": true,
     "baseUrl": ".",
     "paths": {
-      "@repo/domain": ["packages/domain/src/index.ts"],
-      "@repo/domain/*": ["packages/domain/src/*"]
+      "@vulcan/domain": ["shared/domain/src/index.ts"],
+      "@vulcan/domain/*": ["shared/domain/src/*"]
     }
   }
 }

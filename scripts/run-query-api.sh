@@ -15,11 +15,11 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set +a
 fi
 
-export PYTHONPATH="$ROOT_DIR/services/query-api${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$ROOT_DIR/backend/query-api${PYTHONPATH:+:$PYTHONPATH}"
 
 "$ROOT_DIR/.venv/bin/uvicorn" app.main:app \
   --reload \
   --host "${QUERY_API_HOST:-0.0.0.0}" \
   --port "${QUERY_API_PORT:-8020}" \
-  --app-dir "$ROOT_DIR/services/query-api"
+  --app-dir "$ROOT_DIR/backend/query-api"
 

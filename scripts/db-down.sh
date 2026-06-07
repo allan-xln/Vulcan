@@ -2,5 +2,6 @@
 
 set -euo pipefail
 
-docker compose stop db
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+docker compose -f "$ROOT_DIR/docker/compose.yml" stop db

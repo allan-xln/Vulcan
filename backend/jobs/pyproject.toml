@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jobs-service"
+version = "0.1.0"
+description = "Deterministic background jobs for operational event normalization."
+requires-python = ">=3.10"
+dependencies = [
+  "pydantic==2.11.7",
+  "psycopg[binary]==3.2.9"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.1"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+

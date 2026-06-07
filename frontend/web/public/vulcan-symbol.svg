@@ -1,0 +1,27 @@
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="vx-symbol-mark" x1="43" y1="27" x2="147" y2="151" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB15E"/>
+      <stop offset="0.46" stop-color="#FF7A1A"/>
+      <stop offset="1" stop-color="#D6026C"/>
+    </linearGradient>
+    <filter id="vx-symbol-glow" x="-18" y="-18" width="190" height="210" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 1 0 0 0 0 0.48 0 0 0 0 0.102 0 0 0 0.45 0"/>
+      <feBlend in="SourceGraphic" mode="screen"/>
+    </filter>
+  </defs>
+
+  <rect width="180" height="180" rx="24" fill="#050507"/>
+  <g filter="url(#vx-symbol-glow)">
+    <path d="M92 22L153 58V122L92 158L31 122V58L92 22Z" fill="url(#vx-symbol-mark)"/>
+    <path d="M92 42L133 66V113L92 137L51 113V66L92 42Z" fill="#050507" fill-opacity="0.92"/>
+    <path d="M62 62L87 121H101L126 62H109L94 101L79 62H62Z" fill="white"/>
+    <path d="M62 62L87 121H101L126 62" stroke="#FF7A1A" stroke-opacity="0.55" stroke-width="2"/>
+    <path d="M47 89H25" stroke="#FF7A1A" stroke-width="5" stroke-linecap="round"/>
+    <path d="M159 89H137" stroke="#D6026C" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="92" cy="22" r="4" fill="#FFB15E"/>
+    <circle cx="92" cy="158" r="4" fill="#D6026C"/>
+  </g>
+</svg>

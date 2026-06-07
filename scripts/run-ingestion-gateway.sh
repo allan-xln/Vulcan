@@ -19,5 +19,5 @@ fi
   --reload \
   --host "${INGESTION_API_HOST:-0.0.0.0}" \
   --port "${INGESTION_API_PORT:-8010}" \
-  --app-dir "$ROOT_DIR/services/ingestion-gateway"
+  --app-dir "$ROOT_DIR/backend/ingestion-gateway"
 

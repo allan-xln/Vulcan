@@ -19,4 +19,4 @@ fi
   --reload \
   --host "${AI_API_HOST:-0.0.0.0}" \
   --port "${AI_API_PORT:-8000}" \
-  --app-dir "$ROOT_DIR/services/ai-api"
+  --app-dir "$ROOT_DIR/ai/api"

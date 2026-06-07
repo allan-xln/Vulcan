@@ -29,8 +29,10 @@ jobs:
       - name: Create virtual environment
         run: python -m venv .venv
 
-      - name: Install AI API dependencies
-        run: ./.venv/bin/pip install -e ./services/ai-api[dev]
+      - name: Install Python service dependencies
+        run: |
+          ./.venv/bin/pip install -e ./ai/api[dev]
+          ./.venv/bin/pip install -e ./backend/api[dev]
 
       - name: Verify Phase 1
         run: ./scripts/verify-phase1.sh

@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "2026-06-operational-events.v1",
+  "batchId": "vulcan-local-batch-002",
+  "sentAt": "2026-04-12T12:31:00Z",
+  "events": [
+    {
+      "eventId": "20000000-0000-0000-0000-000000000001",
+      "eventType": "session_login",
+      "occurredAt": "2026-04-12T12:00:00Z",
+      "source": {
+        "workstationId": "00000000-0000-0000-0000-000000000901",
+        "agentInstallationId": "00000000-0000-0000-0000-000000001001",
+        "agentVersion": "0.1.0"
+      },
+      "payload": {
+        "sessionId": "local-session-001",
+        "username": "owner@local.test"
+      }
+    },
+    {
+      "eventId": "20000000-0000-0000-0000-000000000002",
+      "eventType": "foreground_application_change",
+      "occurredAt": "2026-04-12T12:01:00Z",
+      "source": {
+        "workstationId": "00000000-0000-0000-0000-000000000901",
+        "agentInstallationId": "00000000-0000-0000-0000-000000001001",
+        "agentVersion": "0.1.0"
+      },
+      "payload": {
+        "sessionId": "local-session-001",
+        "appName": "Excel",
+        "executablePath": "C:/Program Files/Microsoft Office/root/Office16/EXCEL.EXE",
+        "windowTitle": "Budget FY26"
+      }
+    },
+    {
+      "eventId": "20000000-0000-0000-0000-000000000003",
+      "eventType": "idle_start",
+      "occurredAt": "2026-04-12T12:05:00Z",
+      "source": {
+        "workstationId": "00000000-0000-0000-0000-000000000901",
+        "agentInstallationId": "00000000-0000-0000-0000-000000001001",
+        "agentVersion": "0.1.0"
+      },
+      "payload": {
+        "sessionId": "local-session-001",
+        "idleThresholdSeconds": 300
+      }
+    },
+    {
+      "eventId": "20000000-0000-0000-0000-000000000004",
+      "eventType": "idle_end",
+      "occurredAt": "2026-04-12T12:10:00Z",
+      "source": {
+        "workstationId": "00000000-0000-0000-0000-000000000901",
+        "agentInstallationId": "00000000-0000-0000-0000-000000001001",
+        "agentVersion": "0.1.0"
+      },
+      "payload": {
+        "sessionId": "local-session-001",
+        "idleThresholdSeconds": 300
+      }
+    },
+    {
+      "eventId": "20000000-0000-0000-0000-000000000005",
+      "eventType": "session_logout",
+      "occurredAt": "2026-04-12T12:30:00Z",
+      "source": {
+        "workstationId": "00000000-0000-0000-0000-000000000901",
+        "agentInstallationId": "00000000-0000-0000-0000-000000001001",
+        "agentVersion": "0.1.0"
+      },
+      "payload": {
+        "sessionId": "local-session-001",
+        "username": "owner@local.test"
+      }
+    }
+  ]
+}

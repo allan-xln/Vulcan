@@ -2,5 +2,6 @@
 
 set -euo pipefail
 
-docker compose up -d db
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+docker compose -f "$ROOT_DIR/docker/compose.yml" up -d db

@@ -1,0 +1,107 @@
+# Agentes
+
+Esta página resume a operação dos agentes Vulcan. A documentação detalhada permanece em `docs/AGENT.md`.
+
+## Plataformas
+
+- Linux: agente Python com instalador amigável e serviço `systemd --user`.
+- Windows: pacote enterprise com serviço, coletor de sessão, instalador e scripts para GPO/Intune/RMM.
+- macOS: estrutura reservada para versão futura.
+
+## Linux Local
+
+Instalar o agente no notebook atual vinculado ao usuário `teste`:
+
+```bash
+cd /home/allan/Dev/Vulcan/agentes/installers/linux
+bash ./instalar-vulcan-teste.sh \
+  --backend-url "http://localhost:3001" \
+  --install-deps \
+  --collect-window-title \
+  --collect-process-list
+```
+
+Status:
+
+```bash
+./status.sh
+systemctl --user status vulcan-agent.service --no-pager
+```
+
+Logs:
+
+```bash
+journalctl --user -u vulcan-agent.service -f
+tail -f ~/.local/state/vulcan-agent/logs/agent.log
+```
+
+Reiniciar:
+
+```bash
+systemctl --user restart vulcan-agent.service
+```
+
+Desinstalar:
+
+```bash
+cd /home/allan/Dev/Vulcan/agentes/installers/linux
+bash ./uninstall.sh
+```
+
+Remover tudo:
+
+```bash
+bash ./uninstall.sh --purge
+```
+
+## Windows
+
+Pacote esperado:
+
+```text
+agentes/installers/windows/VulcanAgent-Windows-x64.zip
+```
+
+Instalação local em PowerShell Admin:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1 `
+  -TenantId "00000000-0000-0000-0000-000000000301" `
+  -BackendUrl "http://localhost:3001" `
+  -EnrollmentToken "vulcan-local-enrollment-token" `
+  -LinkedUser "teste" `
+  -RoleLevel "user" `
+  -Department "Operacoes"
+```
+
+## O Que O Agente Envia
+
+- aplicativo ativo;
+- título da janela quando permitido por política;
+- duração;
+- tempo ativo;
+- tempo ocioso;
+- trocas de contexto;
+- heartbeat;
+- qualidade da coleta;
+- status de sincronização;
+- fila offline;
+- hostname;
+- sistema operacional;
+- versão do agente;
+- IP local;
+- erros do agente.
+
+## O Que O Agente Não Envia
+
+- senhas;
+- teclas digitadas;
+- conteúdo de conversas;
+- prints contínuos;
+- webcam;
+- áudio;
+- clipboard irrestrito;
+- cookies;
+- tokens.
+

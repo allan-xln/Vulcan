@@ -15,5 +15,5 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 1
 fi
 
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/infra/supabase/validation/001_phase2_checks.sql"
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/infra/supabase/validation/002_phase2_rls_smoke.sql"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/database/supabase/validation/001_phase2_checks.sql"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/database/supabase/validation/002_phase2_rls_smoke.sql"

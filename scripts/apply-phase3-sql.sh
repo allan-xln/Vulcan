@@ -15,6 +15,6 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 1
 fi
 
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/infra/supabase/migrations/20260412000400_ingestion_foundation.sql"
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/infra/supabase/seeds/002_phase3_local_dev.sql"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/database/supabase/migrations/20260412000400_ingestion_foundation.sql"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/database/supabase/seeds/002_phase3_local_dev.sql"
 

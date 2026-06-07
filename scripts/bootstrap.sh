@@ -6,8 +6,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$ROOT_DIR"
 
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo "pnpm is required" >&2
+if command -v pnpm >/dev/null 2>&1; then
+  PNPM_CMD=(pnpm)
+elif command -v corepack >/dev/null 2>&1; then
+  PNPM_CMD=(corepack pnpm)
+else
+  echo "pnpm or corepack is required" >&2
   exit 1
 fi
 
@@ -17,7 +21,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if ! command -v psql >/dev/null 2>&1; then
-  echo "psql is required for Phase 2 validation" >&2
+  echo "psql is required for database validation" >&2
   exit 1
 fi
 
@@ -28,7 +32,7 @@ else
   echo ".env already exists"
 fi
 
-pnpm install
+"${PNPM_CMD[@]}" install
 
 if [ ! -d ".venv" ]; then
   python3 -m venv .venv
@@ -36,9 +40,10 @@ if [ ! -d ".venv" ]; then
 fi
 
 "$ROOT_DIR/.venv/bin/python" -m pip install --upgrade pip >/dev/null
-"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/services/ai-api[dev]" >/dev/null
-"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/services/ingestion-gateway[dev]" >/dev/null
-"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/services/jobs[dev]" >/dev/null
-"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/services/query-api[dev]" >/dev/null
+"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/ai/api[dev]" >/dev/null
+"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/backend/api[dev]" >/dev/null
+"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/backend/ingestion-gateway[dev]" >/dev/null
+"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/backend/jobs[dev]" >/dev/null
+"$ROOT_DIR/.venv/bin/pip" install --no-build-isolation "$ROOT_DIR/backend/query-api[dev]" >/dev/null
 
 echo "Bootstrap complete"

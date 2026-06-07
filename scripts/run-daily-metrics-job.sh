@@ -15,7 +15,7 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set +a
 fi
 
-export PYTHONPATH="$ROOT_DIR/services/jobs${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$ROOT_DIR/backend/jobs${PYTHONPATH:+:$PYTHONPATH}"
 
-"$ROOT_DIR/.venv/bin/python" "$ROOT_DIR/services/jobs/app/run_daily_metrics.py" "$@"
+"$ROOT_DIR/.venv/bin/python" "$ROOT_DIR/backend/jobs/app/run_daily_metrics.py" "$@"
 

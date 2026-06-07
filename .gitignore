@@ -1,16 +1,49 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Dependencies and generated output
 node_modules
 .next
+.turbo
 dist
+build
 coverage
 .vitest
 .pytest_cache
 __pycache__
 .venv
+.tools
 *.pyc
 *.tsbuildinfo
 *.egg-info
-.env
-.env.local
+
+# Local/editor noise
 .DS_Store
+.vscode/settings.json
+*.log
 playwright-report
 test-results
+
+# Local databases
+*.sqlite
+*.db
+
+# Supabase local state
+supabase/.branches
+supabase/.temp
+
+# Agent generated binaries and release artifacts
+agentes/**/bin
+agentes/**/obj
+agentes/**/dist
+agentes/**/*.exe
+agentes/**/*.msi
+agentes/**/*.zip
+agentes/**/*.log
