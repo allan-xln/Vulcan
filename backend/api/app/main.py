@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from psycopg import Error as PsycopgError
 
 from app.ai_router import analyze_facts, answer_copilot
@@ -70,21 +71,27 @@ from app.whatsapp import WhatsAppConnection, WhatsAppNotificationService
 
 app = FastAPI(title="Vulcan API", version="0.1.0")
 AGENT_GATEWAY_VERSION = "0.1.0"
+settings = get_settings()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-    ],
+    allow_origins=list(settings.api_allowed_origins),
+    allow_origin_regex=settings.api_allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(PsycopgError)
+async def database_exception_handler(request: Request, exc: PsycopgError) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "detail": "Banco de dados indisponível. Verifique DATABASE_URL, pooler Supabase ou conectividade de rede.",
+            "code": "database_unavailable",
+        },
+    )
 
 
 @app.get("/health", response_model=HealthResponse)

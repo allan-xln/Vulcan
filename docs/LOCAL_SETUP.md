@@ -145,6 +145,14 @@ docs/HIERARCHY.md
 docs/QA.md
 ```
 
+Validate the commercial demo scopes through the API:
+
+```bash
+corepack pnpm demo:validate
+```
+
+This command logs in as every demo profile and verifies hierarchy visibility, devices, operational intelligence and notifications. It fails if a profile sees names or device owners outside its expected reporting tree.
+
 ## WhatsApp, E-mail E Notificações
 
 O Vulcan já expõe endpoints para status e teste de WhatsApp/e-mail. Sem credenciais reais, eles retornam estado controlado de configuração pendente.

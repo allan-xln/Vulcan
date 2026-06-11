@@ -36,6 +36,9 @@ Vulcan uses a shared-database, shared-schema SaaS model. Tenant isolation is enf
 - Risk: missing tenant filter in application SQL.
   Control: RLS plus repository-level tenant filters.
 
+- Risk: unassigned agent rows leak before a device is linked.
+  Control: RLS requires tenant membership before allowing null `owner_membership_id` or null `membership_id` rows to be read.
+
 - Risk: service-role bypass of RLS.
   Control: service-role usage must be limited to internal workflows and tested with tenant-specific inputs.
 
@@ -58,3 +61,10 @@ The backend repository mirrors RLS rules before every direct Postgres query:
 - self scope: active membership only.
 
 Direct database access uses backend secrets and can bypass RLS at the PostgreSQL role level, so service-side filters and tests are mandatory. Browser and Supabase Auth access must rely on public keys plus RLS.
+
+## Commercial Smoke Tests
+
+The current MVP includes two explicit commercial isolation checks:
+
+- `corepack pnpm verify:phase2`: validates RLS, creates a temporary foreign tenant inside a rolled-back transaction and verifies that a normal authenticated user cannot see it or its unassigned device/event/metric/insight rows.
+- `corepack pnpm demo:validate`: logs in as each demo profile and verifies that hierarchy names and device owners stay inside the expected reporting tree.

@@ -33,6 +33,8 @@ DEFAULT_POLICY = {
     "redactSensitiveTerms": True,
     "syncIntervalSeconds": 30,
     "heartbeatIntervalSeconds": 60,
+    "syncBatchSize": 100,
+    "httpTimeoutSeconds": 30,
     "offlineQueueEnabled": True,
     "maxOfflineQueueSize": 10000,
     "allowUserPause": True,
@@ -181,6 +183,8 @@ def load_policy(config: dict | None = None) -> dict:
     policy.update({key: loaded.get(key, value) for key, value in DEFAULT_POLICY.items()})
     policy["syncIntervalSeconds"] = max(int(policy.get("syncIntervalSeconds") or 30), 15)
     policy["heartbeatIntervalSeconds"] = max(int(policy.get("heartbeatIntervalSeconds") or 60), 15)
+    policy["syncBatchSize"] = max(min(int(policy.get("syncBatchSize") or 100), 500), 10)
+    policy["httpTimeoutSeconds"] = max(min(int(policy.get("httpTimeoutSeconds") or 30), 120), 5)
     policy["maxOfflineQueueSize"] = max(int(policy.get("maxOfflineQueueSize") or 10000), 100)
     policy["idleThresholdSeconds"] = max(int(policy.get("idleThresholdSeconds") or 300), 30)
     return policy
@@ -496,7 +500,7 @@ def queue_depth() -> int:
     return sum(1 for _ in queue_path().open("r", encoding="utf-8"))
 
 
-def post_json(url: str, payload: dict) -> dict:
+def post_json(url: str, payload: dict, timeout: int = 30) -> dict:
     body = json.dumps(payload).encode("utf-8")
     req = request.Request(
         url,
@@ -505,7 +509,7 @@ def post_json(url: str, payload: dict) -> dict:
         method="POST",
     )
     try:
-        with request.urlopen(req, timeout=15) as response:
+        with request.urlopen(req, timeout=timeout) as response:
             data = response.read().decode("utf-8")
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
@@ -516,6 +520,7 @@ def post_json(url: str, payload: dict) -> dict:
 
 
 def enroll(config: dict) -> None:
+    policy = load_policy(config)
     response = post_json(
         f"{config['backendUrl']}/agent/enroll",
         {
@@ -533,6 +538,7 @@ def enroll(config: dict) -> None:
             "department": config.get("department"),
             "note": "linux-agent",
         },
+        timeout=int(policy.get("httpTimeoutSeconds", 30)),
     )
     if response.get("deviceId") and response["deviceId"] != config.get("deviceId"):
         config["deviceId"] = response["deviceId"]
@@ -572,11 +578,13 @@ def heartbeat(config: dict, status: str = "online", last_error: str = "", metada
                 **(metadata or {}),
             },
         },
+        timeout=int(policy.get("httpTimeoutSeconds", 30)),
     )
 
 
 def sync(config: dict) -> None:
-    events = read_events()
+    policy = load_policy(config)
+    events = read_events(int(policy.get("syncBatchSize", 100)))
     if not events:
         return
     response = post_json(
@@ -590,6 +598,7 @@ def sync(config: dict) -> None:
             "hostname": config["hostname"],
             "events": events,
         },
+        timeout=int(policy.get("httpTimeoutSeconds", 30)),
     )
     stored = int(response.get("stored") or len(events))
     drop_events(stored)
@@ -850,6 +859,8 @@ def print_status() -> None:
     print(f"CollectIdleTime: {policy.get('collectIdleTime')}")
     print(f"CollectBrowserUrl: {policy.get('collectBrowserUrl')}")
     print(f"CollectProcessList: {policy.get('collectProcessList')}")
+    print(f"SyncBatchSize: {policy.get('syncBatchSize')}")
+    print(f"HttpTimeoutSeconds: {policy.get('httpTimeoutSeconds')}")
     print(f"QueueDepth: {queue_depth()}")
     print(f"Log: {log_path()}")
 

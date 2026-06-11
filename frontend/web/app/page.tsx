@@ -202,6 +202,7 @@ type SupabaseStatus = {
   serviceRoleConfigured: boolean;
   databaseUrlConfigured: boolean;
   restReachable: boolean | null;
+  databaseReachable: boolean | null;
   authProvider: string;
   requiredItems: string[];
 };
@@ -251,6 +252,16 @@ type ReportTemplate = {
   cadence: string;
   channels: string[];
   enabled: boolean;
+};
+
+type AIStatus = {
+  provider: string;
+  openaiConfigured: boolean;
+  llamaConfigured: boolean;
+  llamaProvider: string;
+  complexModel: string;
+  operationalModel: string;
+  routePolicy: string;
 };
 
 const fallbackMetrics: Metric[] = [
@@ -410,6 +421,7 @@ const fallbackSupabaseStatus: SupabaseStatus = {
   serviceRoleConfigured: false,
   databaseUrlConfigured: false,
   restReachable: null,
+  databaseReachable: null,
   authProvider: "local",
   requiredItems: []
 };
@@ -440,6 +452,16 @@ const fallbackEmailStatuses: EmailProviderStatus[] = [
     lastCheckedAt: new Date(0).toISOString()
   }
 ];
+
+const fallbackAIStatus: AIStatus = {
+  provider: "hybrid",
+  openaiConfigured: false,
+  llamaConfigured: false,
+  llamaProvider: "openai-compatible",
+  complexModel: "GPT executivo pendente",
+  operationalModel: "Llama operacional pendente",
+  routePolicy: "operacional -> Llama | executivo -> GPT"
+};
 
 const fallbackSchedules: NotificationSchedule[] = [
   {
@@ -633,6 +655,181 @@ function buildHeatmap(operationalIntelligence: OperationalIntelligence) {
   });
 }
 
+function buildLossBreakdown({
+  idleSeconds,
+  contextSwitches,
+  pendingQueue,
+  offlineDevices,
+  qualityIssues,
+  automationHours
+}: {
+  idleSeconds: number;
+  contextSwitches: number;
+  pendingQueue: number;
+  offlineDevices: number;
+  qualityIssues: number;
+  automationHours: number;
+}) {
+  const idleHours = idleSeconds / 3600;
+  const contextHours = contextSwitches * 0.018;
+  const offlineHours = offlineDevices * 1.4;
+  const queueHours = pendingQueue * 0.08;
+  const qualityHours = qualityIssues * 1.1;
+  const manualHours = Math.max(automationHours * 0.42, 0);
+  return [
+    {
+      label: "Ociosidade operacional",
+      cause: "Tempo sem atividade produtiva detectado pelo agente.",
+      impact: idleHours,
+      money: idleHours * 95,
+      action: "Revisar carga, fila de trabalho e janelas de espera."
+    },
+    {
+      label: "Troca de contexto",
+      cause: "Alternância constante entre sistemas aumenta retrabalho.",
+      impact: contextHours,
+      money: contextHours * 95,
+      action: "Consolidar etapas repetidas em fluxo guiado."
+    },
+    {
+      label: "Processos manuais",
+      cause: "Tarefas repetitivas aparecem como automação possível.",
+      impact: manualHours,
+      money: manualHours * 95,
+      action: "Priorizar automação com maior retorno e menor complexidade."
+    },
+    {
+      label: "Agentes offline ou fila alta",
+      cause: "Dispositivo sem sync reduz visibilidade gerencial.",
+      impact: offlineHours + queueHours,
+      money: (offlineHours + queueHours) * 95,
+      action: "Reinstalar agente, reduzir lote ou validar conectividade."
+    },
+    {
+      label: "Coleta limitada",
+      cause: "Sistema operacional bloqueou detalhes finos de janela/app.",
+      impact: qualityHours,
+      money: qualityHours * 95,
+      action: "Ajustar política, ambiente gráfico ou orientação do usuário."
+    }
+  ].filter((item) => item.impact > 0 || item.money > 0);
+}
+
+function buildRecommendedActions(
+  insights: Insight[],
+  operationalIntelligence: OperationalIntelligence,
+  pendingNotifications: number,
+  financialSavings: number
+) {
+  const insightActions = insights.slice(0, 3).map((insight, index) => ({
+    id: `insight-action-${insight.id}`,
+    title: insight.recommendation,
+    impact: `${insight.automationSavingsHours}h potenciais`,
+    urgency: insight.impact === "high" ? "Alta" : insight.impact === "medium" ? "Média" : "Baixa",
+    scope: index === 0 ? "Financeiro" : index === 1 ? "Backoffice" : "Operações",
+    owner: index === 0 ? "Gerente operacional" : index === 1 ? "Supervisor" : "Coordenação",
+    money: insight.automationSavingsHours * 95
+  }));
+  const aiActions = operationalIntelligence.aiRecommendations.slice(0, 2).map((recommendation, index) => ({
+    id: `ai-action-${index}`,
+    title: recommendation,
+    impact: "Ação preventiva",
+    urgency: operationalIntelligence.distractionScore > 45 ? "Alta" : "Média",
+    scope: "Operação atual",
+    owner: "Gestor do turno",
+    money: Math.max(financialSavings * 0.12, 0)
+  }));
+  const notificationAction = pendingNotifications
+    ? [{
+        id: "notification-action",
+        title: "Configurar canais pendentes para alertas chegarem fora do painel.",
+        impact: `${pendingNotifications} alerta${pendingNotifications === 1 ? "" : "s"} pendente${pendingNotifications === 1 ? "" : "s"}`,
+        urgency: "Alta",
+        scope: "Notificações",
+        owner: "Administrador",
+        money: 0
+      }]
+    : [];
+  return [...insightActions, ...aiActions, ...notificationAction].slice(0, 6);
+}
+
+function buildBottlenecks(insights: Insight[], appUsageData: { app: string; minutes: number; category?: string; percent?: number }[], departments: { name: string; score: number; active?: number; idle?: number }[]) {
+  const insightRows = insights.slice(0, 3).map((insight, index) => ({
+    id: `bottleneck-${insight.id}`,
+    system: index === 0 ? "ERP / planilhas" : index === 1 ? "E-mail / CRM" : "Portal de aprovações",
+    sector: departments[index]?.name ?? (index === 0 ? "Financeiro" : "Operações"),
+    affected: index === 0 ? "Equipe financeira" : index === 1 ? "Backoffice" : "Gestores",
+    time: `${insight.automationSavingsHours}h/mês`,
+    severity: insight.impact === "high" ? "crítico" : "atenção",
+    trend: insight.impact === "high" ? "subindo" : "estável",
+    recommendation: insight.recommendation
+  }));
+  const appRows = appUsageData.slice(0, 2).map((app, index) => ({
+    id: `app-bottleneck-${app.app}`,
+    system: app.app,
+    sector: departments[index]?.name ?? "Operações",
+    affected: `${Math.max(2, index + 3)} pessoa${index === 0 ? "s" : "s"}`,
+    time: `${app.minutes}min analisados`,
+    severity: index === 0 ? "alto uso" : "monitorar",
+    trend: index === 0 ? "concentrado" : "normal",
+    recommendation: "Validar se o tempo no sistema é trabalho produtivo ou espera operacional."
+  }));
+  return [...insightRows, ...appRows].slice(0, 5);
+}
+
+function buildAutomationOpportunities(insights: Insight[], automationHours: number) {
+  const rows = insights.map((insight, index) => ({
+    id: `automation-${insight.id}`,
+    process: index === 0 ? "Validação de faturamento" : index === 1 ? "Triagem de exceções" : "Aprovação e escalonamento",
+    frequency: index === 0 ? "diária" : index === 1 ? "múltiplas vezes ao dia" : "semanal",
+    wasted: `${insight.automationSavingsHours}h/mês`,
+    suggestion: insight.recommendation,
+    roi: formatMoneyBRL(insight.automationSavingsHours * 95),
+    complexity: index === 0 ? "média" : index === 1 ? "baixa" : "média"
+  }));
+  if (rows.length) {
+    return rows;
+  }
+  return [{
+    id: "automation-empty",
+    process: "Mapeamento inicial",
+    frequency: "após coleta",
+    wasted: `${automationHours}h/mês`,
+    suggestion: "Rodar agentes por alguns dias para ranquear processos repetitivos.",
+    roi: formatMoneyBRL(automationHours * 95),
+    complexity: "baixa"
+  }];
+}
+
+function buildOnboardingChecklist({
+  supabaseStatus,
+  hierarchy,
+  devices,
+  whatsAppStatus,
+  emailStatuses,
+  aiStatus,
+  schedules
+}: {
+  supabaseStatus: SupabaseStatus;
+  hierarchy: HierarchyNode[];
+  devices: Device[];
+  whatsAppStatus: WhatsAppStatus;
+  emailStatuses: EmailProviderStatus[];
+  aiStatus: AIStatus;
+  schedules: NotificationSchedule[];
+}) {
+  const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
+  return [
+    { label: "Empresa e banco configurados", done: supabaseStatus.configured && supabaseStatus.databaseReachable !== false, detail: supabaseStatus.projectRef ?? "Supabase pendente" },
+    { label: "Usuários e hierarquia", done: hierarchy.length > 1, detail: `${hierarchy.length} pessoa${hierarchy.length === 1 ? "" : "s"} na árvore` },
+    { label: "Agentes conectados", done: devices.some((device) => ["online", "syncing"].includes(device.status)), detail: `${devices.length} dispositivo${devices.length === 1 ? "" : "s"}` },
+    { label: "IA operacional/executiva", done: aiStatus.openaiConfigured || aiStatus.llamaConfigured, detail: aiStatus.openaiConfigured ? aiStatus.complexModel : "chaves pendentes" },
+    { label: "WhatsApp de alertas", done: whatsAppStatus.connected || Boolean(whatsAppStatus.rootChannelNumber), detail: whatsAppStatus.rootChannelNumber ?? "número raiz pendente" },
+    { label: "E-mail de relatórios", done: emailReady, detail: emailReady ? "envio configurado" : "SMTP/OAuth pendente" },
+    { label: "Relatórios agendados", done: schedules.some((schedule) => schedule.enabled), detail: `${schedules.filter((schedule) => schedule.enabled).length} agenda${schedules.filter((schedule) => schedule.enabled).length === 1 ? "" : "s"} ativa${schedules.filter((schedule) => schedule.enabled).length === 1 ? "" : "s"}` }
+  ];
+}
+
 function formatMoneyBRL(value: number) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -792,6 +989,7 @@ export default function HomePage() {
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus>(fallbackSupabaseStatus);
   const [whatsAppStatus, setWhatsAppStatus] = useState<WhatsAppStatus>(fallbackWhatsAppStatus);
   const [emailStatuses, setEmailStatuses] = useState<EmailProviderStatus[]>(fallbackEmailStatuses);
+  const [aiStatus, setAIStatus] = useState<AIStatus>(fallbackAIStatus);
   const [schedules, setSchedules] = useState<NotificationSchedule[]>(fallbackSchedules);
   const [reportTemplates, setReportTemplates] = useState<ReportTemplate[]>(fallbackReportTemplates);
   const [lastRefreshAt, setLastRefreshAt] = useState<Date | null>(null);
@@ -882,20 +1080,85 @@ export default function HomePage() {
       setHierarchy([]);
     }
 
-    void Promise.all([
-      fetchProtected<Metric[]>("/metrics", token, metricFallback).then(setMetrics),
-      fetchProtected<Insight[]>("/insights", token, insightFallback).then(setInsights),
-      fetchProtected<NotificationItem[]>("/notifications", token, notificationFallback).then(setNotifications),
-      fetchProtected<Device[]>("/devices", token, deviceFallback).then(setDevices),
-      fetchProtected<OperationalMetric[]>("/operational-metrics", token, []).then(setOperationalMetrics),
-      fetchProtected<OperationalIntelligence>("/operational-intelligence", token, emptyOperationalIntelligence).then(setOperationalIntelligence),
-      fetchProtected<HierarchyNode[]>("/hierarchy", token, hierarchyFallback).then(setHierarchy),
-      fetchProtected<SupabaseStatus>("/supabase/status", token, fallbackSupabaseStatus).then(setSupabaseStatus),
-      fetchProtected<WhatsAppStatus>("/integrations/whatsapp/status", token, fallbackWhatsAppStatus).then(setWhatsAppStatus),
-      fetchProtected<EmailProviderStatus[]>("/integrations/email/status", token, fallbackEmailStatuses).then(setEmailStatuses),
-      fetchProtected<NotificationSchedule[]>("/notifications/schedules", token, fallbackSchedules).then(setSchedules),
-      fetchProtected<ReportTemplate[]>("/reports/templates", token, fallbackReportTemplates).then(setReportTemplates)
-    ]).then(() => setLastRefreshAt(new Date()));
+    let cancelled = false;
+
+    async function loadDashboard() {
+      const [
+        nextSupabaseStatus,
+        nextWhatsAppStatus,
+        nextEmailStatuses,
+        nextAIStatus,
+        nextSchedules,
+        nextReportTemplates
+      ] = await Promise.all([
+        fetchProtected<SupabaseStatus>("/supabase/status", token!, fallbackSupabaseStatus),
+        fetchProtected<WhatsAppStatus>("/integrations/whatsapp/status", token!, fallbackWhatsAppStatus),
+        fetchProtected<EmailProviderStatus[]>("/integrations/email/status", token!, fallbackEmailStatuses),
+        fetchProtected<AIStatus>("/ai/status", token!, fallbackAIStatus),
+        fetchProtected<NotificationSchedule[]>("/notifications/schedules", token!, fallbackSchedules),
+        fetchProtected<ReportTemplate[]>("/reports/templates", token!, fallbackReportTemplates)
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      setSupabaseStatus(nextSupabaseStatus);
+      setWhatsAppStatus(nextWhatsAppStatus);
+      setEmailStatuses(nextEmailStatuses);
+      setAIStatus(nextAIStatus);
+      setSchedules(nextSchedules);
+      setReportTemplates(nextReportTemplates);
+
+      if (nextSupabaseStatus.databaseReachable === false) {
+        setMetrics(metricFallback);
+        setInsights(insightFallback);
+        setNotifications(notificationFallback);
+        setDevices(deviceFallback);
+        setOperationalMetrics([]);
+        setOperationalIntelligence(emptyOperationalIntelligence);
+        setHierarchy(hierarchyFallback);
+        setLastRefreshAt(new Date());
+        return;
+      }
+
+      const [
+        nextMetrics,
+        nextInsights,
+        nextNotifications,
+        nextDevices,
+        nextOperationalMetrics,
+        nextOperationalIntelligence,
+        nextHierarchy
+      ] = await Promise.all([
+        fetchProtected<Metric[]>("/metrics", token!, metricFallback),
+        fetchProtected<Insight[]>("/insights", token!, insightFallback),
+        fetchProtected<NotificationItem[]>("/notifications", token!, notificationFallback),
+        fetchProtected<Device[]>("/devices", token!, deviceFallback),
+        fetchProtected<OperationalMetric[]>("/operational-metrics", token!, []),
+        fetchProtected<OperationalIntelligence>("/operational-intelligence", token!, emptyOperationalIntelligence),
+        fetchProtected<HierarchyNode[]>("/hierarchy", token!, hierarchyFallback)
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      setMetrics(nextMetrics);
+      setInsights(nextInsights);
+      setNotifications(nextNotifications);
+      setDevices(nextDevices);
+      setOperationalMetrics(nextOperationalMetrics);
+      setOperationalIntelligence(nextOperationalIntelligence);
+      setHierarchy(nextHierarchy);
+      setLastRefreshAt(new Date());
+    }
+
+    void loadDashboard();
+
+    return () => {
+      cancelled = true;
+    };
   }, [token, liveTestMode]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -1035,6 +1298,7 @@ export default function HomePage() {
             supabaseStatus={supabaseStatus}
             whatsAppStatus={whatsAppStatus}
             emailStatuses={emailStatuses}
+            aiStatus={aiStatus}
             schedules={schedules}
             reportTemplates={reportTemplates}
             highImpact={highImpact}
@@ -1301,6 +1565,7 @@ function DashboardShell({
   supabaseStatus,
   whatsAppStatus,
   emailStatuses,
+  aiStatus,
   schedules,
   reportTemplates,
   highImpact,
@@ -1325,6 +1590,7 @@ function DashboardShell({
   supabaseStatus: SupabaseStatus;
   whatsAppStatus: WhatsAppStatus;
   emailStatuses: EmailProviderStatus[];
+  aiStatus: AIStatus;
   schedules: NotificationSchedule[];
   reportTemplates: ReportTemplate[];
   highImpact: number;
@@ -1356,6 +1622,7 @@ function DashboardShell({
           authMode={authMode}
           onlineAgents={onlineAgents}
           liveStatusLabel={liveStatusLabel}
+          supabaseStatus={supabaseStatus}
           onOpenCommand={() => setCommandOpen(true)}
           onLogout={onLogout}
         />
@@ -1370,6 +1637,11 @@ function DashboardShell({
               operationalMetrics={operationalMetrics}
               operationalIntelligence={operationalIntelligence}
               hierarchy={hierarchy}
+              supabaseStatus={supabaseStatus}
+              whatsAppStatus={whatsAppStatus}
+              emailStatuses={emailStatuses}
+              aiStatus={aiStatus}
+              schedules={schedules}
               onlineAgents={onlineAgents}
               liveStatusLabel={liveStatusLabel}
               allowDemoFallback={allowDemoFallback}
@@ -1421,6 +1693,7 @@ function Header({
   authMode,
   onlineAgents,
   liveStatusLabel,
+  supabaseStatus,
   onOpenCommand,
   onLogout
 }: {
@@ -1430,10 +1703,16 @@ function Header({
   authMode: "supabase" | "local";
   onlineAgents: number;
   liveStatusLabel: string;
+  supabaseStatus: SupabaseStatus;
   onOpenCommand: () => void;
   onLogout: () => void;
 }) {
   const currentCommand = commands.find((item) => item.key === activeView) ?? commands[0];
+  const supabaseLabel = !supabaseStatus.configured
+    ? "Supabase pendente"
+    : supabaseStatus.databaseReachable === false
+      ? "Supabase degradado"
+      : "Supabase conectado";
 
   return (
     <motion.header
@@ -1477,7 +1756,7 @@ function Header({
         </motion.button>
         <StatusPill icon={ShieldCheck} label="empresa isolada" />
         <StatusPill icon={Brain} label={`${highImpact} alto impacto`} />
-        <StatusPill icon={DatabaseZap} label="Supabase conectado" />
+        <StatusPill icon={DatabaseZap} label={supabaseLabel} />
         <StatusPill icon={UserRound} label={`${authMode}: ${identity}`} />
         <motion.button
           type="button"
@@ -1826,6 +2105,11 @@ function DashboardView({
   operationalMetrics,
   operationalIntelligence,
   hierarchy,
+  supabaseStatus,
+  whatsAppStatus,
+  emailStatuses,
+  aiStatus,
+  schedules,
   onlineAgents,
   liveStatusLabel,
   allowDemoFallback
@@ -1837,6 +2121,11 @@ function DashboardView({
   operationalMetrics: OperationalMetric[];
   operationalIntelligence: OperationalIntelligence;
   hierarchy: HierarchyNode[];
+  supabaseStatus: SupabaseStatus;
+  whatsAppStatus: WhatsAppStatus;
+  emailStatuses: EmailProviderStatus[];
+  aiStatus: AIStatus;
+  schedules: NotificationSchedule[];
   onlineAgents: number;
   liveStatusLabel: string;
   allowDemoFallback: boolean;
@@ -1865,6 +2154,40 @@ function DashboardView({
   const sentNotifications = notifications.filter((item) => item.status === "sent").length;
   const automationHours = insights.reduce((total, insight) => total + insight.automationSavingsHours, 0);
   const financialSavings = automationHours * 95;
+  const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
+  const dataPlaneReady = supabaseStatus.configured && supabaseStatus.databaseReachable !== false && supabaseStatus.restReachable !== false;
+  const aiReady = aiStatus.openaiConfigured || aiStatus.llamaConfigured;
+  const lossBreakdown = useMemo(
+    () => buildLossBreakdown({ idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours }),
+    [idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours]
+  );
+  const recommendedActions = useMemo(
+    () => buildRecommendedActions(insights, operationalIntelligence, pendingNotifications, financialSavings),
+    [insights, operationalIntelligence, pendingNotifications, financialSavings]
+  );
+  const bottlenecks = useMemo(
+    () => buildBottlenecks(insights, appUsageData, departmentPerformance),
+    [insights, appUsageData, departmentPerformance]
+  );
+  const automationOpportunities = useMemo(
+    () => buildAutomationOpportunities(insights, automationHours),
+    [insights, automationHours]
+  );
+  const onboardingChecklist = useMemo(
+    () => buildOnboardingChecklist({ supabaseStatus, hierarchy, devices, whatsAppStatus, emailStatuses, aiStatus, schedules }),
+    [supabaseStatus, hierarchy, devices, whatsAppStatus, emailStatuses, aiStatus, schedules]
+  );
+  const onboardingReady = onboardingChecklist.filter((item) => item.done).length;
+  const topLoss = lossBreakdown.reduce<(typeof lossBreakdown)[number] | null>(
+    (current, item) => (!current || item.money > current.money ? item : current),
+    null
+  );
+  const primaryAction = recommendedActions[0] ?? null;
+  const channelReadiness = [
+    whatsAppStatus.connected || Boolean(whatsAppStatus.rootChannelNumber),
+    emailReady,
+    schedules.some((schedule) => schedule.enabled)
+  ].filter(Boolean).length;
   const dashboardMetrics: Metric[] = [
     ...metrics,
     { id: "tracked-time", label: "Tempo analisado", value: formatDuration(trackedSeconds), trend: operationalIntelligence.periodLabel, tone: "neutral" },
@@ -1903,8 +2226,56 @@ function DashboardView({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <LiveBadge label="Tempo real ativo" detail={`${onlineAgents} agente${onlineAgents === 1 ? "" : "s"} sincronizando | última atualização ${liveStatusLabel}`} />
         <span className="border border-orange-400/25 bg-orange-950/15 px-3 py-2 text-xs uppercase tracking-[0.2em] text-orange-200">
-          {allowDemoFallback ? "Ambiente demonstrativo" : "Somente dados reais"}
+          {!dataPlaneReady ? "Modo degradado: banco indisponível" : allowDemoFallback ? "Ambiente demonstrativo" : "Somente dados reais"}
         </span>
+      </div>
+
+      <div className="mb-5 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <ConnectionSummary label="Banco operacional" value={dataPlaneReady ? "pronto" : "atenção"} tone={dataPlaneReady ? "ok" : "warn"} />
+        <ConnectionSummary label="IA híbrida" value={aiReady ? "configurada" : "mock explícito"} tone={aiReady ? "ok" : "warn"} />
+        <ConnectionSummary label="WhatsApp" value={whatsAppStatus.connected ? "conectado" : statusPt(whatsAppStatus.status)} tone={whatsAppStatus.connected ? "ok" : "warn"} />
+        <ConnectionSummary label="E-mail" value={emailReady ? "envio pronto" : "pendente"} tone={emailReady ? "ok" : "warn"} />
+        <ConnectionSummary label="Agentes online" value={`${onlineAgents}/${devices.length}`} tone={onlineAgents ? "ok" : "warn"} />
+        <ConnectionSummary label="Eventos hoje" value={`${operationalIntelligence.totalEvents || metrics.find((metric) => metric.id === "events")?.value || 0}`} tone={operationalIntelligence.totalEvents ? "ok" : "warn"} />
+      </div>
+
+      <div className="mb-5 grid gap-3 xl:grid-cols-[0.9fr_1.2fr_0.9fr]">
+        <motion.div
+          className="border border-orange-400/25 bg-[linear-gradient(135deg,rgba(249,115,22,0.14),rgba(9,9,11,0.72))] p-5 shadow-[0_0_28px_rgba(249,115,22,0.08)]"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
+          <p className="text-xs uppercase tracking-[0.2em] text-orange-200">Perda financeira prioritaria</p>
+          <p className="mt-3 text-3xl font-semibold text-zinc-50">{formatMoneyBRL(topLoss?.money ?? financialSavings)}</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">{topLoss ? `${topLoss.label}: ${topLoss.action}` : "Aguardando mais eventos para estimar o primeiro gargalo financeiro."}</p>
+        </motion.div>
+
+        <motion.div
+          className="border border-zinc-800 bg-black/45 p-5"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.04 }}
+        >
+          <p className="text-xs uppercase tracking-[0.2em] text-orange-200">O que fazer agora</p>
+          <p className="mt-3 text-xl font-semibold text-zinc-50">{primaryAction?.title ?? "Rodar os agentes por algumas horas e revisar o primeiro ranking de gargalos."}</p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <ConnectionSummary label="Urgência" value={primaryAction?.urgency ?? "Média"} tone={primaryAction?.urgency === "Alta" ? "warn" : "ok"} />
+            <ConnectionSummary label="Responsável" value={primaryAction?.owner ?? "Gestor"} tone="ok" />
+            <ConnectionSummary label="Economia" value={formatMoneyBRL(primaryAction?.money ?? financialSavings)} tone={(primaryAction?.money ?? financialSavings) ? "ok" : "warn"} />
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="border border-zinc-800 bg-zinc-950/70 p-5"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.08 }}
+        >
+          <p className="text-xs uppercase tracking-[0.2em] text-orange-200">Piloto pago em 60 segundos</p>
+          <p className="mt-3 text-3xl font-semibold text-zinc-50">{onboardingReady}/{onboardingChecklist.length}</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">Base configurada com {channelReadiness}/3 canais essenciais para alertar gestor, supervisor e diretoria.</p>
+        </motion.div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
@@ -1968,6 +2339,137 @@ function DashboardView({
               </AreaChart>
             </ResponsiveContainer>
           </div>
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <Panel title="Onde a empresa está perdendo dinheiro" icon={Flame}>
+          <div className="grid gap-3">
+            {lossBreakdown.length ? (
+              lossBreakdown.map((item, index) => (
+                <motion.div
+                  key={item.label}
+                  className="border border-zinc-800 bg-black/42 p-4"
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-zinc-100">{item.label}</p>
+                      <p className="mt-1 text-sm leading-6 text-zinc-500">{item.cause}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-semibold text-orange-200">{formatMoneyBRL(item.money)}</p>
+                      <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{formatDuration(item.impact * 3600)}</p>
+                    </div>
+                  </div>
+                  <p className="mt-3 border-l border-orange-400/35 pl-3 text-sm leading-6 text-zinc-300">{item.action}</p>
+                </motion.div>
+              ))
+            ) : (
+              <EmptyState title="Sem perdas mensuráveis ainda" description="Quando os agentes enviarem eventos suficientes, o Vulcan calcula o impacto por ociosidade, troca de contexto, filas e automação." />
+            )}
+          </div>
+        </Panel>
+
+        <Panel title="Ações recomendadas pela IA" icon={Brain}>
+          <div className="grid gap-3">
+            {recommendedActions.map((action, index) => (
+              <motion.div
+                key={action.id}
+                className="border border-orange-400/15 bg-orange-950/10 p-4"
+                initial={{ opacity: 0, x: 18 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: index * 0.05 }}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="max-w-2xl">
+                    <p className="font-semibold text-orange-50">{action.title}</p>
+                    <p className="mt-2 text-sm text-zinc-400">Setor: {action.scope} | Responsável sugerido: {action.owner}</p>
+                  </div>
+                  <span className="border border-orange-400/25 px-3 py-1 text-xs uppercase tracking-[0.16em] text-orange-200">Urgência {action.urgency}</span>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <ConnectionSummary label="Impacto esperado" value={action.impact} tone="ok" />
+                  <ConnectionSummary label="Economia estimada" value={formatMoneyBRL(action.money)} tone={action.money ? "ok" : "warn"} />
+                  <ConnectionSummary label="Próximo passo" value="criar alerta" tone="ok" />
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {["Ver detalhes", "Criar alerta", "Enviar por WhatsApp/e-mail"].map((label) => (
+                    <button key={label} type="button" className="border border-zinc-800 bg-black/35 px-3 py-2 text-xs text-zinc-200 transition hover:border-orange-400/50 hover:text-orange-100">
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <Panel title="Gargalos que travam a operação" icon={Gauge}>
+          <div className="grid gap-3">
+            {bottlenecks.map((item, index) => (
+              <div key={item.id} className="border border-zinc-800 bg-black/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-zinc-100">{item.system}</p>
+                    <p className="mt-1 text-sm text-zinc-500">{item.sector} | {item.affected}</p>
+                  </div>
+                  <span className="text-sm text-orange-200">{item.time}</span>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                  <ConnectionSummary label="Severidade" value={item.severity} tone={item.severity === "crítico" ? "warn" : "ok"} />
+                  <ConnectionSummary label="Tendência" value={item.trend} tone={item.trend === "subindo" ? "warn" : "ok"} />
+                  <ConnectionSummary label="Prioridade" value={index < 2 ? "agir agora" : "monitorar"} tone={index < 2 ? "warn" : "ok"} />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-zinc-400">{item.recommendation}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel title="Plano de automação e ROI" icon={Zap}>
+          <div className="grid gap-3">
+            {automationOpportunities.map((item) => (
+              <div key={item.id} className="border border-zinc-800 bg-black/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-zinc-100">{item.process}</p>
+                    <p className="mt-1 text-sm text-zinc-500">Frequência: {item.frequency} | Complexidade: {item.complexity}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-orange-200">{item.roi}</p>
+                    <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{item.wasted}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-zinc-400">{item.suggestion}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="mt-5">
+        <Panel title="Checklist para piloto pago" icon={CheckCircle2}>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {onboardingChecklist.map((item) => (
+              <div key={item.label} className="border border-zinc-800 bg-black/35 p-4">
+                <div className="flex items-start gap-3">
+                  <span className={`mt-1 h-3 w-3 rounded-full ${item.done ? "bg-emerald-400" : "bg-orange-400"}`} />
+                  <div>
+                    <p className="font-medium text-zinc-100">{item.label}</p>
+                    <p className="mt-1 text-sm text-zinc-500">{item.detail}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-sm text-zinc-400">
+            Prontidão do piloto: {onboardingReady}/{onboardingChecklist.length} blocos essenciais configurados. O objetivo é sair da apresentação com empresa, hierarquia, agente e canal de alerta funcionando.
+          </p>
         </Panel>
       </div>
 
@@ -2588,7 +3090,7 @@ function SettingsView({
               <ConnectionSummary label="Projeto" value={supabaseStatus.projectRef ?? "não definido"} tone={supabaseStatus.projectRef ? "ok" : "warn"} />
               <ConnectionSummary label="Auth" value={supabaseStatus.authProvider} tone="ok" />
               <ConnectionSummary label="REST" value={supabaseStatus.restReachable === null ? "não testado" : supabaseStatus.restReachable ? "alcançável" : "bloqueado"} tone={supabaseStatus.restReachable ? "ok" : "warn"} />
-              <ConnectionSummary label="Banco" value={supabaseStatus.databaseUrlConfigured ? "configurado" : "pendente"} tone={supabaseStatus.databaseUrlConfigured ? "ok" : "warn"} />
+              <ConnectionSummary label="Banco" value={supabaseStatus.databaseReachable === null ? supabaseStatus.databaseUrlConfigured ? "configurado" : "pendente" : supabaseStatus.databaseReachable ? "alcançável" : "bloqueado"} tone={supabaseStatus.databaseReachable === false ? "warn" : supabaseStatus.databaseUrlConfigured ? "ok" : "warn"} />
             </div>
             <ActionRow primary="Testar conexão" secondary="Salvar configuração" />
           </Panel>
@@ -2724,6 +3226,32 @@ function SettingsView({
             ]}
           />
         </div>
+
+        <Panel title="LGPD e privacidade operacional" icon={ShieldCheck}>
+          <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+            <div className="border border-emerald-400/20 bg-emerald-950/10 p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-emerald-200">Mensagem central</p>
+              <p className="mt-3 text-2xl font-semibold text-zinc-50">O Vulcan mede fluxo operacional, não conteúdo pessoal.</p>
+              <p className="mt-3 text-sm leading-6 text-zinc-400">
+                A coleta é orientada por política corporativa, consentimento e transparência. O objetivo é revelar gargalos, filas, ociosidade e oportunidades de automação sem capturar conteúdo privado.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {[
+                ["Coleta", "app ativo, duração, troca de contexto, status do agente e métricas agregadas"],
+                ["Não coleta", "senhas, teclas digitadas, áudio, webcam, prints contínuos ou mensagens privadas"],
+                ["Controles", "retenção, auditoria, permissões por hierarquia e isolamento por tenant"],
+                ["Confiança", "colaborador sabe o que é medido e gestores enxergam apenas o escopo autorizado"]
+              ].map(([title, text]) => (
+                <div key={title} className="border border-zinc-800 bg-black/35 p-4">
+                  <p className="font-semibold text-zinc-100">{title}</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-400">{text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <ActionRow primary="Revisar política" secondary="Exportar dados" tertiary="Registrar consentimento" />
+        </Panel>
       </div>
     </ViewFrame>
   );

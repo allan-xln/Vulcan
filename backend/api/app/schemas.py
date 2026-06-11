@@ -546,6 +546,7 @@ class SupabaseStatus(ApiModel):
     service_role_configured: bool = Field(alias="serviceRoleConfigured")
     database_url_configured: bool = Field(alias="databaseUrlConfigured")
     rest_reachable: bool | None = Field(alias="restReachable")
+    database_reachable: bool | None = Field(default=None, alias="databaseReachable")
     auth_provider: str = Field(alias="authProvider")
     required_items: list[str] = Field(alias="requiredItems")
 

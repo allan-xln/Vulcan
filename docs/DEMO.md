@@ -17,7 +17,7 @@ A demo permite demonstrar:
 ## Como Gerar
 
 ```bash
-cd /home/allan/Dev/Vulcan
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 corepack pnpm seed:demo
 ```
 

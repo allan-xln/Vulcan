@@ -93,6 +93,19 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 - IP local;
 - erros do agente.
 
+## Confiabilidade De Sincronização
+
+O backend trata `eventId` do agente como `source_event_id` idempotente por tenant. Se o agente reenviar o mesmo evento por timeout ou queda de rede, o banco mantém apenas uma linha em `activity_events`.
+
+Para reduzir timeout em Supabase remoto:
+
+- Linux sincroniza lotes de 100 eventos por padrão.
+- Windows sincroniza lotes de 100 eventos por padrão.
+- Timeout HTTP dos agentes foi elevado para 30 segundos.
+- O backend grava auditoria por lote em vez de uma linha de auditoria por evento.
+
+O agente ainda mantém fila offline local. Se a API ficar fora do ar, os eventos permanecem no arquivo local e são reenviados quando o backend voltar.
+
 ## O Que O Agente Não Envia
 
 - senhas;
@@ -104,4 +117,3 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 - clipboard irrestrito;
 - cookies;
 - tokens.
-

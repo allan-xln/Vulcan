@@ -759,7 +759,7 @@ func sendHeartbeat(cfg Config, status string, depth int, lastErr string, metadat
 }
 
 func syncQueuedEvents(cfg Config) error {
-	events, err := readEvents(defaultQueuePath(), 200)
+	events, err := readEvents(defaultQueuePath(), 100)
 	if err != nil {
 		return err
 	}
@@ -798,7 +798,7 @@ func postJSON(url string, request interface{}, response interface{}) error {
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err

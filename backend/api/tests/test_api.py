@@ -54,6 +54,37 @@ def test_protected_endpoint_rejects_missing_token() -> None:
     assert response.status_code == 401
 
 
+def test_cors_allows_dynamic_localhost_ports_and_blocks_unknown_origins() -> None:
+    allowed_response = client.options(
+        "/auth/login",
+        headers={
+            "Origin": "http://127.0.0.1:3012",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert allowed_response.status_code == 200
+    assert allowed_response.headers["access-control-allow-origin"] == "http://127.0.0.1:3012"
+
+    commercial_response = client.options(
+        "/auth/login",
+        headers={
+            "Origin": "https://vulcan.lanfuture.dev",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert commercial_response.status_code == 200
+    assert commercial_response.headers["access-control-allow-origin"] == "https://vulcan.lanfuture.dev"
+
+    blocked_response = client.options(
+        "/auth/login",
+        headers={
+            "Origin": "https://malicioso.example",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert blocked_response.status_code == 400
+
+
 def test_ai_analyze_routes_operational_to_llama() -> None:
     token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
     response = client.post(
@@ -86,6 +117,7 @@ def test_supabase_status_is_available() -> None:
 
     assert response.status_code == 200
     assert "requiredItems" in response.json()
+    assert "databaseReachable" in response.json()
 
 
 def test_integration_status_endpoints_are_available() -> None:

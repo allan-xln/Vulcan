@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import psycopg
 
 from app.config import Settings
 from app.schemas import SupabaseStatus
@@ -33,6 +34,7 @@ def supabase_status(settings: Settings) -> SupabaseStatus:
     rest_url = _rest_url(settings)
     api_key = settings.supabase_publishable_key or settings.supabase_anon_key
     rest_reachable: bool | None = None
+    database_reachable: bool | None = None
 
     if rest_url and api_key:
         try:
@@ -44,6 +46,14 @@ def supabase_status(settings: Settings) -> SupabaseStatus:
             rest_reachable = response.status_code < 500
         except httpx.HTTPError:
             rest_reachable = False
+
+    if settings.database_url:
+        try:
+            with psycopg.connect(settings.database_url, connect_timeout=3) as conn:
+                conn.execute("select 1").fetchone()
+            database_reachable = True
+        except psycopg.Error:
+            database_reachable = False
 
     configured = all(
         [
@@ -64,6 +74,7 @@ def supabase_status(settings: Settings) -> SupabaseStatus:
         serviceRoleConfigured=settings.supabase_service_role_key is not None,
         databaseUrlConfigured=settings.database_url is not None,
         restReachable=rest_reachable,
+        databaseReachable=database_reachable,
         authProvider=settings.auth_provider,
         requiredItems=REQUIRED_ITEMS,
     )

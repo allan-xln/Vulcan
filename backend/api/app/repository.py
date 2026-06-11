@@ -988,21 +988,26 @@ class VulcanRepository:
                             device_id,
                         ),
                     )
+            inserted_events = 0
+            duplicate_events = 0
+            event_type_counts: dict[str, int] = defaultdict(int)
             for event in request.events:
                 event_type = event.event_type or "app_focus_ended"
                 row = conn.execute(
                     """
                     insert into public.activity_events (
-                      tenant_id, membership_id, device_id, event_type, app_name,
+                      tenant_id, membership_id, device_id, source_event_id, event_type, app_name,
                       window_title, category, duration_seconds, occurred_at, metadata
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (tenant_id, source_event_id) where source_event_id is not null do nothing
                     returning id
                     """,
                     (
                         request.tenant_id,
                         event_membership_id,
                         device_id,
+                        event.event_id,
                         event_type,
                         event.app_name,
                         event.window_title,
@@ -1023,6 +1028,9 @@ class VulcanRepository:
                         ),
                     ),
                 ).fetchone()
+                if not row:
+                    duplicate_events += 1
+                    continue
                 for metric_key, metric_label, metric_value in self._metrics_for_agent_event(event_type, event):
                     conn.execute(
                         """
@@ -1043,14 +1051,8 @@ class VulcanRepository:
                             Jsonb({"source": "vulcan-agent", "eventId": event.event_id, "category": event.category, "eventType": event_type}),
                         ),
                     )
-                self.write_agent_audit(
-                    conn,
-                    request.tenant_id,
-                    "agent.event.stored",
-                    "activity_event",
-                    row["id"],
-                    {"event_id": event.event_id, "event_type": event_type, "app_name": event.app_name},
-                )
+                inserted_events += 1
+                event_type_counts[event_type] += 1
                 stored += 1
             if device_id:
                 conn.execute(
@@ -1063,13 +1065,33 @@ class VulcanRepository:
                     where id = %s and tenant_id = %s
                     """,
                     (
-                        Jsonb({"lastSyncAt": datetime.now(timezone.utc).isoformat(), "lastSyncedEvents": stored}),
+                        Jsonb(
+                            {
+                                "lastSyncAt": datetime.now(timezone.utc).isoformat(),
+                                "lastSyncedEvents": stored,
+                                "lastDuplicateEvents": duplicate_events,
+                            }
+                        ),
                         device_id,
                         request.tenant_id,
                     ),
                 )
+            self.write_agent_audit(
+                conn,
+                request.tenant_id,
+                "agent.events.batch_stored",
+                "device",
+                device_id,
+                {
+                    "hostname": request.hostname,
+                    "received": len(request.events),
+                    "inserted": inserted_events,
+                    "duplicates": duplicate_events,
+                    "event_type_counts": dict(event_type_counts),
+                },
+            )
             conn.commit()
-        return AgentEventsResponse(accepted=True, received=len(request.events), stored=stored)
+        return AgentEventsResponse(accepted=True, received=len(request.events), stored=len(request.events))
 
     def _metrics_for_agent_event(self, event_type: str, event: AgentEvent) -> list[tuple[str, str, float]]:
         duration = float(event.duration_seconds or 0)

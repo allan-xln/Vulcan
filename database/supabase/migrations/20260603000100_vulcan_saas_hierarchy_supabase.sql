@@ -149,6 +149,7 @@ create table if not exists public.activity_events (
   tenant_id uuid not null references public.tenants (id) on delete cascade,
   membership_id uuid references public.memberships (id) on delete set null,
   device_id uuid references public.devices (id) on delete set null,
+  source_event_id text,
   event_type text not null,
   app_name text,
   window_title text,
@@ -253,8 +254,12 @@ create index if not exists idx_departments_tenant_parent on public.departments (
 create index if not exists idx_memberships_tenant_manager on public.memberships (tenant_id, direct_manager_membership_id);
 create index if not exists idx_membership_closure_descendant on public.membership_closure (tenant_id, descendant_membership_id);
 create index if not exists idx_devices_tenant_owner on public.devices (tenant_id, owner_membership_id);
+alter table public.activity_events add column if not exists source_event_id text;
 create index if not exists idx_activity_events_tenant_occurred on public.activity_events (tenant_id, occurred_at desc);
 create index if not exists idx_activity_events_tenant_member on public.activity_events (tenant_id, membership_id);
+create unique index if not exists idx_activity_events_tenant_source_event
+  on public.activity_events (tenant_id, source_event_id)
+  where source_event_id is not null;
 create index if not exists idx_operational_metrics_tenant_period on public.operational_metrics (tenant_id, period_start desc, period_end desc);
 create index if not exists idx_ai_insights_tenant_created on public.ai_insights (tenant_id, created_at desc);
 create index if not exists idx_notifications_tenant_recipient on public.notifications (tenant_id, recipient_membership_id, created_at desc);
@@ -452,7 +457,7 @@ drop policy if exists devices_read_hierarchy on public.devices;
 create policy devices_read_hierarchy on public.devices
 for select using (
   public.vulcan_has_tenant_scope(tenant_id)
-  or owner_membership_id is null
+  or (public.vulcan_is_tenant_member(tenant_id) and owner_membership_id is null)
   or public.vulcan_can_view_membership(tenant_id, owner_membership_id)
 );
 
@@ -460,7 +465,7 @@ drop policy if exists activity_events_read_hierarchy on public.activity_events;
 create policy activity_events_read_hierarchy on public.activity_events
 for select using (
   public.vulcan_has_tenant_scope(tenant_id)
-  or membership_id is null
+  or (public.vulcan_is_tenant_member(tenant_id) and membership_id is null)
   or public.vulcan_can_view_membership(tenant_id, membership_id)
 );
 
@@ -468,7 +473,7 @@ drop policy if exists metrics_read_hierarchy on public.operational_metrics;
 create policy metrics_read_hierarchy on public.operational_metrics
 for select using (
   public.vulcan_has_tenant_scope(tenant_id)
-  or membership_id is null
+  or (public.vulcan_is_tenant_member(tenant_id) and membership_id is null)
   or public.vulcan_can_view_membership(tenant_id, membership_id)
 );
 
@@ -476,7 +481,7 @@ drop policy if exists insights_read_hierarchy on public.ai_insights;
 create policy insights_read_hierarchy on public.ai_insights
 for select using (
   public.vulcan_has_tenant_scope(tenant_id)
-  or membership_id is null
+  or (public.vulcan_is_tenant_member(tenant_id) and membership_id is null)
   or public.vulcan_can_view_membership(tenant_id, membership_id)
 );
 

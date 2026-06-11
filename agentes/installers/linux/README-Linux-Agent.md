@@ -41,6 +41,8 @@ O arquivo de política fica em:
 - qualidade da coleta: `high`, `medium`, `low`, `blocked_by_os`;
 - erros de coleta/sync;
 - fila offline;
+- lote de sincronização limitado por `syncBatchSize` para reduzir timeout;
+- `eventId` idempotente no backend para evitar duplicidade quando houver retry;
 - categoria do aplicativo;
 - saúde do agente.
 

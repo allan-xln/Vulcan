@@ -57,9 +57,26 @@ Authorization: Bearer dev-vulcan-admin-token
 
 Production protected routes must validate Supabase Auth JWTs and resolve tenant membership before querying business data.
 
+## CORS
+
+Local development accepts configured origins from:
+
+```env
+API_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3002,http://localhost:3102,http://127.0.0.1:3102,https://vulcan.lanfuture.dev,https://vulcan-demo.lanfuture.dev,https://vulcan-staging.lanfuture.dev
+API_ALLOWED_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1):[0-9]+$
+```
+
+`API_ALLOWED_ORIGINS` accepts CSV or a JSON array. `ALLOWED_ORIGINS` is accepted as an alias for deploy platforms. In production, define exact public origins and avoid a broad regex. CORS preflight is covered by backend tests and was manually validated with a dynamic local port.
+
+When deployed on Vercel, `VERCEL_URL` or `NEXT_PUBLIC_VERCEL_URL` is also converted into one exact allowed origin. Broad `*.vercel.app` regexes should stay limited to temporary staging environments.
+
+If PostgreSQL is unreachable, data endpoints return `503 database_unavailable` with a clear message instead of leaking a driver traceback or pretending that mock data is real.
+
 Membership manager changes reject cycles and refresh `membership_closure`. Activity event ingestion persists the event, writes an `operational_metrics` row, and records an audit log.
 
 Agent endpoints are intentionally separated from dashboard auth. They require `enrollmentToken` matching `AGENT_ENROLLMENT_TOKEN`, write tenant-scoped device/activity/metric records, and keep local agent operation independent from a human dashboard session.
+
+Agent sync is idempotent by `eventId`: the backend persists it as `activity_events.source_event_id` with uniqueness per tenant. Retries after timeout do not duplicate the operational event. A successful batch response returns `stored` as the number of accepted events so agents can safely clear their local queue after a committed transaction.
 
 `PUT /devices/{device_id}/owner` move ou desvincula um dispositivo alterando `owner_membership_id`. A API valida tenant, hierarquia visível e registra auditoria.
 

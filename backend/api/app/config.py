@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from os import getenv
 
@@ -14,6 +15,8 @@ class Settings:
     local_test_password: str
     mock_auth: bool
     mock_data: bool
+    api_allowed_origins: tuple[str, ...]
+    api_allowed_origin_regex: str | None
     openai_configured: bool
     llama_provider: str
     llama_base_url: str | None
@@ -79,11 +82,42 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _origin_list_env(names: tuple[str, ...], default: tuple[str, ...]) -> tuple[str, ...]:
+    value = next((getenv(name) for name in names if getenv(name)), None)
+    if value is None:
+        return default
+    raw_value = value.strip()
+    if raw_value.startswith("["):
+        try:
+            parsed = json.loads(raw_value)
+            if isinstance(parsed, list):
+                items = tuple(str(item).strip() for item in parsed if str(item).strip())
+                return items or default
+        except json.JSONDecodeError:
+            raw_value = raw_value.strip("[]")
+    items = tuple(item.strip().strip("[]") for item in raw_value.split(",") if item.strip().strip("[]"))
+    return items or default
+
+
+def _vercel_origin() -> tuple[str, ...]:
+    vercel_url = getenv("VERCEL_URL") or getenv("NEXT_PUBLIC_VERCEL_URL")
+    if not vercel_url:
+        return ()
+    origin = vercel_url.strip()
+    if not origin:
+        return ()
+    if not origin.startswith(("http://", "https://")):
+        origin = f"https://{origin}"
+    return (origin.rstrip("/"),)
+
+
 def get_settings() -> Settings:
+    environment = getenv("NEXT_PUBLIC_ENVIRONMENT", "local")
+    default_origin_regex = None if environment == "production" else r"^https?://(localhost|127\.0\.0\.1):[0-9]+$"
     return Settings(
         host=getenv("LOCAL_API_HOST", "0.0.0.0"),
         port=int(getenv("LOCAL_API_PORT", "3001")),
-        environment=getenv("NEXT_PUBLIC_ENVIRONMENT", "local"),
+        environment=environment,
         admin_username=getenv("LOCAL_ADMIN_USERNAME", "admin"),
         admin_password=getenv("LOCAL_ADMIN_PASSWORD", "admin"),
         local_test_auth_enabled=_bool_env("LOCAL_TEST_AUTH_ENABLED", getenv("NEXT_PUBLIC_ENVIRONMENT", "local") != "production"),
@@ -91,6 +125,28 @@ def get_settings() -> Settings:
         local_test_password=getenv("LOCAL_TEST_PASSWORD", "teste"),
         mock_auth=_bool_env("MOCK_AUTH", False),
         mock_data=_bool_env("MOCK_DATA", False),
+        api_allowed_origins=_origin_list_env(
+            ("API_ALLOWED_ORIGINS", "ALLOWED_ORIGINS"),
+            (
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://localhost:3002",
+                "http://localhost:3003",
+                "http://localhost:3004",
+                "http://localhost:3102",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3001",
+                "http://127.0.0.1:3002",
+                "http://127.0.0.1:3003",
+                "http://127.0.0.1:3004",
+                "http://127.0.0.1:3102",
+                "https://vulcan.lanfuture.dev",
+                "https://vulcan-demo.lanfuture.dev",
+                "https://vulcan-staging.lanfuture.dev",
+                *_vercel_origin(),
+            ),
+        ),
+        api_allowed_origin_regex=getenv("API_ALLOWED_ORIGIN_REGEX", default_origin_regex) or None,
         openai_configured=bool(getenv("OPENAI_API_KEY")),
         llama_provider=getenv("LLAMA_PROVIDER", "openai-compatible"),
         llama_base_url=getenv("LLAMA_BASE_URL") or None,

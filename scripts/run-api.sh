@@ -19,6 +19,7 @@ export PYTHONPATH="$ROOT_DIR/backend/api${PYTHONPATH:+:$PYTHONPATH}"
 
 "$ROOT_DIR/.venv/bin/uvicorn" app.main:app \
   --reload \
+  --reload-dir "$ROOT_DIR/backend/api" \
   --host "${LOCAL_API_HOST:-0.0.0.0}" \
   --port "${LOCAL_API_PORT:-3001}" \
   --app-dir "$ROOT_DIR/backend/api"

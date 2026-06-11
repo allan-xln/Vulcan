@@ -21,11 +21,12 @@ Slogan:
 ## Local Setup
 
 ```bash
-cd /home/allan/Dev/Vulcan
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 ./scripts/bootstrap.sh
 corepack pnpm supabase:validate
 corepack pnpm supabase:migrate
 corepack pnpm seed:demo
+corepack pnpm demo:validate
 corepack pnpm dev
 ```
 
@@ -47,8 +48,9 @@ If `3000` is busy, the frontend automatically tries `3002`, `3003`, and `3004`. 
 Gere a demo completa:
 
 ```bash
-cd /home/allan/Dev/Vulcan
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 corepack pnpm seed:demo
+corepack pnpm demo:validate
 ```
 
 Usuarios locais da demo:
@@ -145,4 +147,16 @@ cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/agentes/installers/linux
 bash ./instalar-vulcan-teste.sh --backend-url "http://localhost:3001" --install-deps
 ```
 
-See `docs/AGENT.md` and `agentes/linux/README.md` for privacy policy flags, logs, uninstall and collection-quality notes for GNOME/Wayland.
+See `docs/AGENT.md`, `docs/LINUX_AGENT.md` and `agentes/linux/README.md` for privacy policy flags, logs, uninstall and collection-quality notes for GNOME/Wayland.
+
+## Venda E Piloto Pago
+
+O Vulcan deve ser demonstrado como uma central de inteligencia operacional, nao como um painel decorativo. O roteiro recomendado esta em `docs/SALES_DEMO.md`.
+
+Documentos de produto e operacao:
+
+- `docs/ONBOARDING.md`: como ativar uma empresa nova.
+- `docs/LGPD.md` e `docs/PRIVACY.md`: limites de coleta e mensagem de confianca.
+- `docs/WHATSAPP.md` e `docs/EMAIL.md`: notificacoes fora do painel.
+- `docs/OBSERVABILITY.md`: health checks, logs, auditoria e producao.
+- `docs/WINDOWS_AGENT.md`, `docs/LINUX_AGENT.md`, `docs/MACOS_AGENT.md`: instalacao e estado dos agentes.
