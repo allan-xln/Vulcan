@@ -85,7 +85,9 @@ class MembershipCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     tenant_id: UUID = Field(alias="tenantId")
-    user_id: UUID = Field(alias="userId")
+    user_id: UUID | None = Field(default=None, alias="userId")
+    username: str | None = Field(default=None, min_length=3)
+    password: str | None = Field(default=None, min_length=4)
     role_id: UUID | None = Field(default=None, alias="roleId")
     department_id: UUID | None = Field(default=None, alias="departmentId")
     direct_manager_membership_id: UUID | None = Field(default=None, alias="directManagerMembershipId")
@@ -100,6 +102,8 @@ class MembershipCreate(BaseModel):
 class MembershipUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    username: str | None = Field(default=None, min_length=3)
+    password: str | None = Field(default=None, min_length=4)
     role_id: UUID | None = Field(default=None, alias="roleId")
     department_id: UUID | None = Field(default=None, alias="departmentId")
     direct_manager_membership_id: UUID | None = Field(default=None, alias="directManagerMembershipId")

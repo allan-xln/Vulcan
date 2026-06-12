@@ -2,7 +2,9 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import httpx
+import psycopg
 from fastapi import Depends, Header, HTTPException, status
+from psycopg.rows import dict_row
 
 from app.config import Settings, get_settings
 from app.schemas import LoginRequest, LoginResponse
@@ -11,6 +13,7 @@ from app.schemas import LoginRequest, LoginResponse
 DEV_TOKEN = "dev-vulcan-admin-token"
 TEST_DEV_TOKEN = "dev-vulcan-test-token"
 LOCAL_TENANT_ID = UUID("00000000-0000-0000-0000-000000000301")
+DYNAMIC_DEV_TOKEN_PREFIX = "dev-vulcan-user-"
 
 DEMO_LOCAL_ACCOUNTS = {
     "diretor": {
@@ -134,10 +137,10 @@ def login_with_local_admin(request: LoginRequest, settings: Settings | None = No
     account = local_accounts.get(username) or local_accounts.get(request.username)
 
     if not account or request.password != account["password"]:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid local credentials",
-        )
+        dynamic_response = _login_with_dynamic_local_user(request, settings)
+        if dynamic_response:
+            return dynamic_response
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid local credentials")
 
     return LoginResponse(
         accessToken=str(account["token"]),
@@ -149,6 +152,61 @@ def login_with_local_admin(request: LoginRequest, settings: Settings | None = No
             "role": account["role"],
         },
         warning=str(account["warning"]),
+    )
+
+
+def _role_from_scope(scope: str) -> str:
+    if scope in {"tenant", "global"}:
+        return "tenant_admin"
+    if scope == "hierarchy":
+        return "hierarchy"
+    return "user"
+
+
+def _login_with_dynamic_local_user(request: LoginRequest, settings: Settings) -> LoginResponse | None:
+    if not settings.database_url:
+        return None
+    username = request.username.strip().lower()
+    try:
+        with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+            row = conn.execute(
+                """
+                select au.id,
+                       au.email,
+                       m.full_name,
+                       m.tenant_id,
+                       coalesce(r.scope, 'self') as scope
+                from auth.users au
+                join public.memberships m on m.user_id = au.id and m.status = 'active'
+                left join public.roles r on r.id = m.role_id
+                where lower(au.email) = lower(%s)
+                   or lower(coalesce(au.raw_user_meta_data ->> 'login', '')) = lower(%s)
+                order by m.created_at desc
+                limit 1
+                """,
+                (username, username),
+            ).fetchone()
+            if not row:
+                return None
+            password_ok = conn.execute(
+                "select encrypted_password = crypt(%s, encrypted_password) as ok from auth.users where id = %s",
+                (request.password, row["id"]),
+            ).fetchone()
+            if not password_ok or not password_ok["ok"]:
+                return None
+    except (psycopg.Error, RuntimeError):
+        return None
+
+    return LoginResponse(
+        accessToken=f"{DYNAMIC_DEV_TOKEN_PREFIX}{row['id']}",
+        tokenType="bearer",
+        user={
+            "id": str(row["id"]),
+            "name": row["full_name"],
+            "email": row["email"],
+            "role": _role_from_scope(str(row["scope"])),
+        },
+        warning="Dynamic local auth is for commercial testing only. Replace with Supabase Auth before production.",
     )
 
 
@@ -220,6 +278,20 @@ def require_auth(
         )
 
     token = authorization.removeprefix("Bearer ").strip()
+    if token.startswith(DYNAMIC_DEV_TOKEN_PREFIX) and _local_development_auth_enabled(settings):
+        user_id = token.removeprefix(DYNAMIC_DEV_TOKEN_PREFIX)
+        try:
+            UUID(user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid dynamic local token") from exc
+        return AuthContext(
+            user_id=user_id,
+            email=None,
+            tenant_id=tenant_id,
+            role="user",
+            provider="local",
+        )
+
     if settings.auth_provider == "supabase":
         return _validate_supabase_token(token, settings, tenant_id)
 

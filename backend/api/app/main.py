@@ -239,6 +239,21 @@ def update_membership_manager(
     return Membership.model_validate(updated)
 
 
+@app.delete("/memberships/{membership_id}", response_model=Membership)
+def delete_membership(
+    membership_id: UUID,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Membership:
+    try:
+        deleted = repo.delete_membership(context, membership_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="membership not found")
+    return Membership.model_validate(deleted)
+
+
 @app.get("/users", response_model=list[User])
 def list_users(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[User]:
     return [User.model_validate(item) for item in repo.list_users(context)]

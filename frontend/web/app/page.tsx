@@ -194,6 +194,39 @@ type HierarchyNode = {
   visibleScope: "self" | "subtree" | "tenant" | "global";
 };
 
+type DepartmentOption = {
+  id: string;
+  tenantId: string;
+  parentDepartmentId?: string | null;
+  name: string;
+  slug: string;
+  description?: string | null;
+};
+
+type RoleOption = {
+  id: string;
+  tenantId?: string | null;
+  slug: string;
+  name: string;
+  description?: string | null;
+  scope: "self" | "hierarchy" | "tenant" | "global";
+  isSystem: boolean;
+};
+
+type HierarchyMemberFormPayload = {
+  id?: string;
+  parentId: string | null;
+  level: number;
+  fullName: string;
+  title: string;
+  departmentId: string | null;
+  workEmail: string;
+  username: string;
+  password: string;
+  phone: string;
+  whatsapp: string;
+};
+
 type SupabaseStatus = {
   configured: boolean;
   projectRef: string | null;
@@ -858,6 +891,20 @@ const commandSummary: Record<ViewKey, string> = {
   settings: "Empresa, Supabase, IA, segurança, WhatsApp, e-mail e integrações."
 };
 
+const hierarchyLevelCatalog = [
+  { value: 0, label: "Dono / Presidência", shortLabel: "Dono", scope: "tenant" },
+  { value: 1, label: "Diretor", shortLabel: "Diretor", scope: "hierarchy" },
+  { value: 2, label: "Superintendente", shortLabel: "Superintendente", scope: "hierarchy" },
+  { value: 3, label: "Head / Coordenador", shortLabel: "Coordenação", scope: "hierarchy" },
+  { value: 4, label: "Gerente", shortLabel: "Gerente", scope: "hierarchy" },
+  { value: 5, label: "Supervisor", shortLabel: "Supervisor", scope: "hierarchy" },
+  { value: 6, label: "Líder", shortLabel: "Líder", scope: "hierarchy" },
+  { value: 7, label: "Monitor", shortLabel: "Monitor", scope: "hierarchy" },
+  { value: 8, label: "Analista", shortLabel: "Analista", scope: "self" },
+  { value: 9, label: "Operador / Usuário", shortLabel: "Usuário", scope: "self" },
+  { value: 10, label: "Terceiro / Temporário", shortLabel: "Terceiro", scope: "self" }
+] as const;
+
 async function fetchProtected<T>(path: string, token: string, fallback: T): Promise<T> {
   try {
     const response = await fetch(`${API_URL}${path}`, {
@@ -988,6 +1035,8 @@ export default function HomePage() {
   const [operationalMetrics, setOperationalMetrics] = useState<OperationalMetric[]>([]);
   const [operationalIntelligence, setOperationalIntelligence] = useState<OperationalIntelligence>(emptyOperationalIntelligence);
   const [hierarchy, setHierarchy] = useState<HierarchyNode[]>(fallbackHierarchy);
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus>(fallbackSupabaseStatus);
   const [whatsAppStatus, setWhatsAppStatus] = useState<WhatsAppStatus>(fallbackWhatsAppStatus);
   const [emailStatuses, setEmailStatuses] = useState<EmailProviderStatus[]>(fallbackEmailStatuses);
@@ -1080,6 +1129,8 @@ export default function HomePage() {
       setOperationalMetrics([]);
       setOperationalIntelligence(emptyOperationalIntelligence);
       setHierarchy([]);
+      setDepartments([]);
+      setRoles([]);
     }
 
     let cancelled = false;
@@ -1120,6 +1171,8 @@ export default function HomePage() {
         setOperationalMetrics([]);
         setOperationalIntelligence(emptyOperationalIntelligence);
         setHierarchy(hierarchyFallback);
+        setDepartments([]);
+        setRoles([]);
         setLastRefreshAt(new Date());
         return;
       }
@@ -1131,7 +1184,9 @@ export default function HomePage() {
         nextDevices,
         nextOperationalMetrics,
         nextOperationalIntelligence,
-        nextHierarchy
+        nextHierarchy,
+        nextDepartments,
+        nextRoles
       ] = await Promise.all([
         fetchProtected<Metric[]>("/metrics", token!, metricFallback),
         fetchProtected<Insight[]>("/insights", token!, insightFallback),
@@ -1139,7 +1194,9 @@ export default function HomePage() {
         fetchProtected<Device[]>("/devices", token!, deviceFallback),
         fetchProtected<OperationalMetric[]>("/operational-metrics", token!, []),
         fetchProtected<OperationalIntelligence>("/operational-intelligence", token!, emptyOperationalIntelligence),
-        fetchProtected<HierarchyNode[]>("/hierarchy", token!, hierarchyFallback)
+        fetchProtected<HierarchyNode[]>("/hierarchy", token!, hierarchyFallback),
+        fetchProtected<DepartmentOption[]>("/departments", token!, []),
+        fetchProtected<RoleOption[]>("/roles", token!, [])
       ]);
 
       if (cancelled) {
@@ -1153,6 +1210,8 @@ export default function HomePage() {
       setOperationalMetrics(nextOperationalMetrics);
       setOperationalIntelligence(nextOperationalIntelligence);
       setHierarchy(nextHierarchy);
+      setDepartments(nextDepartments);
+      setRoles(nextRoles);
       setLastRefreshAt(new Date());
     }
 
@@ -1268,6 +1327,90 @@ export default function HomePage() {
     }
   }
 
+  function roleIdForHierarchyLevel(level: number) {
+    const desiredScope = hierarchyLevelCatalog.find((item) => item.value === level)?.scope ?? "self";
+    const scopedRole = roles.find((role) => role.scope === desiredScope);
+    if (scopedRole) {
+      return scopedRole.id;
+    }
+    return roles.find((role) => role.scope === "hierarchy")?.id ?? roles[0]?.id ?? null;
+  }
+
+  async function refreshHierarchyData() {
+    if (!token) {
+      return;
+    }
+    const [nextHierarchy, nextDevices, nextDepartments, nextRoles] = await Promise.all([
+      fetchProtected<HierarchyNode[]>("/hierarchy", token, liveTestMode ? [] : fallbackHierarchy),
+      fetchProtected<Device[]>("/devices", token, liveTestMode ? [] : fallbackDevices),
+      fetchProtected<DepartmentOption[]>("/departments", token, []),
+      fetchProtected<RoleOption[]>("/roles", token, [])
+    ]);
+    setHierarchy(nextHierarchy);
+    setDevices(nextDevices);
+    setDepartments(nextDepartments);
+    setRoles(nextRoles);
+    setLastRefreshAt(new Date());
+  }
+
+  async function handleHierarchyMemberSave(payload: HierarchyMemberFormPayload) {
+    if (!token) {
+      throw new Error("Sessão expirada.");
+    }
+    const roleId = roleIdForHierarchyLevel(payload.level);
+    if (!roleId) {
+      throw new Error("Perfis de acesso ainda não foram carregados.");
+    }
+    const body: Record<string, unknown> = {
+      tenantId: DEMO_TENANT_ID,
+      username: payload.username.trim(),
+      roleId,
+      departmentId: payload.departmentId,
+      directManagerMembershipId: payload.parentId,
+      fullName: payload.fullName.trim(),
+      workEmail: payload.workEmail.trim(),
+      phone: payload.phone.trim() || null,
+      whatsapp: payload.whatsapp.trim() || null,
+      title: payload.title.trim(),
+      hierarchyLevel: payload.level
+    };
+    if (payload.password.trim()) {
+      body.password = payload.password.trim();
+    }
+    const response = await fetch(`${API_URL}${payload.id ? `/memberships/${payload.id}` : "/memberships"}`, {
+      method: payload.id ? "PUT" : "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Tenant-Id": DEMO_TENANT_ID
+      },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Não foi possível salvar." }));
+      throw new Error(String(error.detail ?? "Não foi possível salvar."));
+    }
+    await refreshHierarchyData();
+  }
+
+  async function handleHierarchyMemberDelete(membershipId: string) {
+    if (!token) {
+      throw new Error("Sessão expirada.");
+    }
+    const response = await fetch(`${API_URL}/memberships/${membershipId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Tenant-Id": DEMO_TENANT_ID
+      }
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Não foi possível excluir." }));
+      throw new Error(String(error.detail ?? "Não foi possível excluir."));
+    }
+    await refreshHierarchyData();
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#070707] text-zinc-100">
       <AnimatedAtmosphere />
@@ -1297,6 +1440,8 @@ export default function HomePage() {
             operationalMetrics={operationalMetrics}
             operationalIntelligence={operationalIntelligence}
             hierarchy={hierarchy}
+            departments={departments}
+            roles={roles}
             supabaseStatus={supabaseStatus}
             whatsAppStatus={whatsAppStatus}
             emailStatuses={emailStatuses}
@@ -1309,6 +1454,8 @@ export default function HomePage() {
             allowDemoFallback={!liveTestMode}
             token={token}
             onDeviceOwnerChange={handleDeviceOwnerChange}
+            onHierarchyMemberSave={handleHierarchyMemberSave}
+            onHierarchyMemberDelete={handleHierarchyMemberDelete}
           />
         )}
       </AnimatePresence>
@@ -1564,6 +1711,8 @@ function DashboardShell({
   operationalMetrics,
   operationalIntelligence,
   hierarchy,
+  departments,
+  roles,
   supabaseStatus,
   whatsAppStatus,
   emailStatuses,
@@ -1575,7 +1724,9 @@ function DashboardShell({
   liveStatusLabel,
   allowDemoFallback,
   token,
-  onDeviceOwnerChange
+  onDeviceOwnerChange,
+  onHierarchyMemberSave,
+  onHierarchyMemberDelete
 }: {
   activeView: ViewKey;
   setView: (view: ViewKey) => void;
@@ -1589,6 +1740,8 @@ function DashboardShell({
   operationalMetrics: OperationalMetric[];
   operationalIntelligence: OperationalIntelligence;
   hierarchy: HierarchyNode[];
+  departments: DepartmentOption[];
+  roles: RoleOption[];
   supabaseStatus: SupabaseStatus;
   whatsAppStatus: WhatsAppStatus;
   emailStatuses: EmailProviderStatus[];
@@ -1601,6 +1754,8 @@ function DashboardShell({
   allowDemoFallback: boolean;
   token: string;
   onDeviceOwnerChange: (deviceId: string, ownerMembershipId: string | null) => void;
+  onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
+  onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
 }) {
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -1649,7 +1804,18 @@ function DashboardShell({
               allowDemoFallback={allowDemoFallback}
             />
           )}
-          {activeView === "hierarchy" && <HierarchyView key="hierarchy" hierarchy={hierarchy} devices={devices} onDeviceOwnerChange={onDeviceOwnerChange} />}
+          {activeView === "hierarchy" && (
+            <HierarchyView
+              key="hierarchy"
+              hierarchy={hierarchy}
+              devices={devices}
+              departments={departments}
+              roles={roles}
+              onDeviceOwnerChange={onDeviceOwnerChange}
+              onHierarchyMemberSave={onHierarchyMemberSave}
+              onHierarchyMemberDelete={onHierarchyMemberDelete}
+            />
+          )}
           {activeView === "metrics" && (
             <MetricsView
               key="metrics"
@@ -1883,16 +2049,41 @@ function CommandOverlay({
 function HierarchyView({
   hierarchy,
   devices,
-  onDeviceOwnerChange
+  departments,
+  roles,
+  onDeviceOwnerChange,
+  onHierarchyMemberSave,
+  onHierarchyMemberDelete
 }: {
   hierarchy: HierarchyNode[];
   devices: Device[];
+  departments: DepartmentOption[];
+  roles: RoleOption[];
   onDeviceOwnerChange: (deviceId: string, ownerMembershipId: string | null) => void;
+  onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
+  onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
 }) {
   const [expandedNode, setExpandedNode] = useState<string | null>(null);
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(hierarchy[0]?.id ?? null);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<HierarchyMemberFormPayload>({
+    parentId: hierarchy[0]?.id ?? null,
+    level: 1,
+    fullName: "",
+    title: "Gerente",
+    departmentId: departments[0]?.id ?? null,
+    workEmail: "",
+    username: "",
+    password: "",
+    phone: "",
+    whatsapp: ""
+  });
   const sortedNodes = [...hierarchy].sort((a, b) => a.hierarchyLevel - b.hierarchyLevel);
   const tenantScope = hierarchy.filter((node) => node.visibleScope === "tenant" || node.visibleScope === "global").length;
   const subtreeScope = hierarchy.filter((node) => node.visibleScope === "subtree").length;
+  const individualScope = hierarchy.length - tenantScope - subtreeScope;
   const devicesByOwner = useMemo(() => {
     const map = new Map<string, Device[]>();
     devices.forEach((device) => {
@@ -1904,11 +2095,167 @@ function HierarchyView({
     return map;
   }, [devices]);
   const unassignedDevices = devices.filter((device) => !device.ownerMembershipId);
+  const selectedParent = hierarchy.find((node) => node.id === form.parentId) ?? hierarchy.find((node) => node.id === selectedParentId) ?? null;
+  const editingNode = hierarchy.find((node) => node.id === editingNodeId) ?? null;
+  const levelOptions = hierarchyLevelCatalog.filter((level) => !selectedParent || level.value > selectedParent.hierarchyLevel);
+  const primaryRoleLabel = roles.length
+    ? roles.map((role) => `${role.name}: ${scopePt(role.scope === "hierarchy" ? "subtree" : role.scope)}`).join(" | ")
+    : "Perfis serão carregados do backend";
+  const membersWithContact = hierarchy.filter((node) => node.email || node.whatsapp || node.phone).length;
+  const departmentNameById = new Map(departments.map((department) => [department.id, department.name]));
+
+  useEffect(() => {
+    if (editingNodeId) {
+      return;
+    }
+    const firstNode = hierarchy[0] ?? null;
+    if (!firstNode) {
+      if (selectedParentId) {
+        setSelectedParentId(null);
+      }
+      return;
+    }
+    const parentExists = form.parentId ? hierarchy.some((node) => node.id === form.parentId) : false;
+    if (!parentExists) {
+      const nextLevel = hierarchyLevelCatalog.find((item) => item.value > firstNode.hierarchyLevel)?.value ?? firstNode.hierarchyLevel + 1;
+      setSelectedParentId(firstNode.id);
+      setForm((current) => ({
+        ...current,
+        parentId: firstNode.id,
+        level: nextLevel,
+        title: current.title.trim() ? current.title : hierarchyLevelCatalog.find((item) => item.value === nextLevel)?.shortLabel ?? "Colaborador"
+      }));
+      return;
+    }
+    if (selectedParentId !== form.parentId) {
+      setSelectedParentId(form.parentId);
+    }
+  }, [editingNodeId, form.parentId, hierarchy, selectedParentId]);
+
+  function levelName(level: number) {
+    return hierarchyLevelCatalog.find((item) => item.value === level)?.label ?? `Nível ${level}`;
+  }
+
+  function startCreate(parent: HierarchyNode) {
+    const nextLevel = hierarchyLevelCatalog.find((item) => item.value > parent.hierarchyLevel)?.value ?? parent.hierarchyLevel + 1;
+    setSelectedParentId(parent.id);
+    setEditingNodeId(null);
+    setFeedback(null);
+    setForm({
+      parentId: parent.id,
+      level: nextLevel,
+      fullName: "",
+      title: hierarchyLevelCatalog.find((item) => item.value === nextLevel)?.shortLabel ?? "Colaborador",
+      departmentId: departments.find((department) => department.name === parent.department)?.id ?? departments[0]?.id ?? null,
+      workEmail: "",
+      username: "",
+      password: "",
+      phone: "",
+      whatsapp: ""
+    });
+  }
+
+  function startEdit(node: HierarchyNode) {
+    setEditingNodeId(node.id);
+    setSelectedParentId(node.parentId ?? hierarchy[0]?.id ?? null);
+    setFeedback(null);
+    setForm({
+      id: node.id,
+      parentId: node.parentId,
+      level: node.hierarchyLevel,
+      fullName: node.name,
+      title: node.title,
+      departmentId: departments.find((department) => department.name === node.department)?.id ?? departments[0]?.id ?? null,
+      workEmail: node.email,
+      username: node.email ? node.email.split("@")[0] : node.name.toLowerCase().replace(/\s+/g, "."),
+      password: "",
+      phone: node.phone ?? "",
+      whatsapp: node.whatsapp ?? ""
+    });
+  }
+
+  function updateForm<K extends keyof HierarchyMemberFormPayload>(key: K, value: HierarchyMemberFormPayload[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submitForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFeedback(null);
+    if (!form.fullName.trim() || !form.title.trim() || !form.workEmail.trim() || !form.username.trim()) {
+      setFeedback({ tone: "warn", message: "Preencha nome, cargo, e-mail e usuário." });
+      return;
+    }
+    if (!form.id && !form.password.trim()) {
+      setFeedback({ tone: "warn", message: "Defina uma senha inicial para o novo usuário." });
+      return;
+    }
+    if (!form.id && hierarchy.length > 0 && !form.parentId) {
+      setFeedback({ tone: "warn", message: "Escolha um gestor acima deste usuário." });
+      return;
+    }
+    try {
+      setSaving(true);
+      await onHierarchyMemberSave(form);
+      const nextFeedback = { tone: "ok" as const, message: form.id ? "Pessoa atualizada e hierarquia recalculada." : "Pessoa criada com login, contato e hierarquia ativa." };
+      if (!form.id && selectedParent) {
+        startCreate(selectedParent);
+      }
+      setFeedback(nextFeedback);
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível salvar." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteNode(node: HierarchyNode) {
+    if (!window.confirm(`Excluir ${node.name}? Subordinados diretos serão religados ao gestor acima e dispositivos ficarão sem vínculo.`)) {
+      return;
+    }
+    try {
+      setSaving(true);
+      await onHierarchyMemberDelete(node.id);
+      const nextFeedback = { tone: "ok" as const, message: `${node.name} foi removido e a hierarquia foi fechada.` };
+      if (editingNodeId === node.id) {
+        setEditingNodeId(null);
+        const nextParent = hierarchy.find((candidate) => candidate.id === node.parentId) ?? hierarchy.find((candidate) => candidate.id !== node.id) ?? null;
+        if (nextParent) {
+          startCreate(nextParent);
+        } else {
+          setSelectedParentId(null);
+          setForm({
+            parentId: null,
+            level: 1,
+            fullName: "",
+            title: "Gerente",
+            departmentId: departments[0]?.id ?? null,
+            workEmail: "",
+            username: "",
+            password: "",
+            phone: "",
+            whatsapp: ""
+          });
+        }
+      }
+      setFeedback(nextFeedback);
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível excluir." });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <ViewFrame>
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel title="Organograma de autoridade" icon={Network}>
+      <div className="mb-5 grid gap-3 md:grid-cols-4">
+        <ConnectionSummary label="Pessoas visíveis" value={`${hierarchy.length}`} tone={hierarchy.length ? "ok" : "warn"} />
+        <ConnectionSummary label="Gestores de árvore" value={`${subtreeScope}`} tone={subtreeScope ? "ok" : "warn"} />
+        <ConnectionSummary label="Usuários individuais" value={`${Math.max(0, individualScope)}`} tone="ok" />
+        <ConnectionSummary label="Contatos configurados" value={`${membersWithContact}/${hierarchy.length}`} tone={membersWithContact === hierarchy.length ? "ok" : "warn"} />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <Panel title="Organograma vivo e editável" icon={Network}>
           <div className="relative overflow-hidden border border-orange-400/10 bg-black/35 p-5">
             <motion.div
               className="absolute inset-x-0 top-0 h-px bg-orange-300/60"
@@ -1920,8 +2267,8 @@ function HierarchyView({
                 sortedNodes.map((node, index) => (
                   <motion.div
                     key={node.id}
-                    className="relative grid gap-3 border border-zinc-800 bg-zinc-950/80 p-4 md:grid-cols-[auto_1fr_auto]"
-                    style={{ marginLeft: `${Math.min(node.hierarchyLevel, 6) * 22}px` }}
+                    className={`relative grid gap-3 border bg-zinc-950/80 p-4 md:grid-cols-[auto_1fr_auto] ${editingNodeId === node.id ? "border-orange-300/70 shadow-[0_0_28px_rgba(249,115,22,0.10)]" : "border-zinc-800"}`}
+                    style={{ marginLeft: `${Math.min(node.hierarchyLevel, 7) * 18}px` }}
                     initial={{ x: -20, opacity: 0 }}
                     animate={{ x: 0, opacity: 1 }}
                     transition={{ delay: index * 0.08 }}
@@ -1934,20 +2281,28 @@ function HierarchyView({
                       <div className="flex flex-wrap items-center gap-3">
                         <p className="font-semibold text-zinc-100">{node.name}</p>
                         <span className="border border-orange-400/20 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-orange-300">{scopePt(node.visibleScope)}</span>
+                        <span className="border border-zinc-700 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-zinc-400">{levelName(node.hierarchyLevel)}</span>
                       </div>
                       <p className="mt-1 text-sm text-zinc-400">{node.title} | {node.department}</p>
-                      <p className="mt-2 break-all text-xs text-zinc-600">{node.email}</p>
+                      <p className="mt-2 break-all text-xs text-zinc-600">
+                        {node.email || "sem e-mail"} | WhatsApp: {node.whatsapp || "não definido"} | Tel: {node.phone || "não definido"}
+                      </p>
                     </div>
                     <div className="text-left md:text-right">
                       <p className="text-2xl font-semibold text-orange-200">{node.directReports}</p>
                       <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">subordinados</p>
-                      <button
-                        type="button"
-                        onClick={() => setExpandedNode(expandedNode === node.id ? null : node.id)}
-                        className="mt-3 border border-orange-400/25 px-3 py-2 text-xs text-orange-200 transition hover:border-orange-300/60"
-                      >
-                        {(devicesByOwner.get(node.id)?.length ?? 0)} dispositivo{(devicesByOwner.get(node.id)?.length ?? 0) === 1 ? "" : "s"}
-                      </button>
+                      <div className="mt-3 flex flex-wrap justify-start gap-2 md:justify-end">
+                        <button type="button" onClick={() => startCreate(node)} className="border border-emerald-400/25 px-3 py-2 text-xs text-emerald-200 transition hover:border-emerald-300/60">Criar abaixo</button>
+                        <button type="button" onClick={() => startEdit(node)} className="border border-orange-400/25 px-3 py-2 text-xs text-orange-200 transition hover:border-orange-300/60">Editar</button>
+                        <button type="button" onClick={() => void deleteNode(node)} className="border border-rose-400/25 px-3 py-2 text-xs text-rose-200 transition hover:border-rose-300/60">Excluir</button>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedNode(expandedNode === node.id ? null : node.id)}
+                          className="border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition hover:border-orange-400/45"
+                        >
+                          {(devicesByOwner.get(node.id)?.length ?? 0)} disp.
+                        </button>
+                      </div>
                     </div>
                     {expandedNode === node.id ? (
                       <div className="md:col-span-3">
@@ -1988,32 +2343,129 @@ function HierarchyView({
             </div>
           </div>
         </Panel>
-        <Panel title="Envelope de permissões" icon={ShieldCheck}>
+        <Panel title={editingNode ? "Editar pessoa da pirâmide" : "Cadastrar abaixo da hierarquia"} icon={ShieldCheck}>
           <div className="grid gap-4">
-            {[
-              ["Administradores da empresa", tenantScope, "veem todos os registros dentro da empresa"],
-              ["Gestores", subtreeScope, "veem seus próprios dados e subordinados"],
-              ["Usuários individuais", hierarchy.length - tenantScope - subtreeScope, "veem apenas seus próprios dados"],
-              ["Dispositivos vinculados", devices.filter((device) => device.ownerMembershipId).length, "aparecem abaixo do usuário responsável"]
-            ].map(([label, value, description], index) => (
-              <motion.div
-                key={String(label)}
-                className="border border-zinc-800 bg-black/45 p-5"
-                initial={{ scale: 0.96, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: index * 0.08 }}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <p className="font-semibold">{label}</p>
-                  <span className="text-3xl font-semibold text-orange-300">{value}</span>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">{description}</p>
-              </motion.div>
-            ))}
+              <div className="border border-orange-400/20 bg-orange-950/10 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Regra ativa</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                {hierarchy.length
+                  ? "O cadastro sempre nasce abaixo do gestor escolhido. Um gestor só consegue criar níveis inferiores dentro do escopo visível."
+                  : "A primeira pessoa criada abre a pirâmide da empresa. Depois disso, todo novo usuário nasce abaixo de um gestor visível."}
+              </p>
+              <p className="mt-2 text-xs leading-5 text-zinc-500">{primaryRoleLabel}</p>
+            </div>
+
+            {feedback ? <FeedbackBanner tone={feedback.tone} message={feedback.message} /> : null}
+
+            <form onSubmit={(event) => void submitForm(event)} className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-2 text-sm text-zinc-300">
+                  Gestor acima
+                  <select
+                    value={form.parentId ?? ""}
+                    onChange={(event) => {
+                      const parent = hierarchy.find((node) => node.id === event.target.value) ?? null;
+                      const nextLevel = hierarchyLevelCatalog.find((item) => !parent || item.value > parent.hierarchyLevel)?.value ?? form.level;
+                      setSelectedParentId(parent?.id ?? null);
+                      setForm((current) => ({ ...current, parentId: parent?.id ?? null, level: nextLevel }));
+                    }}
+                    className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
+                  >
+                    {hierarchy.length ? <option value="" disabled>Escolha um gestor</option> : <option value="">Sem gestor: primeiro nível</option>}
+                    {hierarchy.map((node) => (
+                      <option key={node.id} value={node.id}>{node.name} - {node.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-sm text-zinc-300">
+                  Nível na pirâmide
+                  <select
+                    value={form.level}
+                    onChange={(event) => {
+                      const level = Number(event.target.value);
+                      updateForm("level", level);
+                      updateForm("title", hierarchyLevelCatalog.find((item) => item.value === level)?.shortLabel ?? form.title);
+                    }}
+                    className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
+                  >
+                    {(levelOptions.length ? levelOptions : hierarchyLevelCatalog).map((level) => (
+                      <option key={level.value} value={level.value}>{level.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <HierarchyInput label="Nome completo" value={form.fullName} onChange={(value) => updateForm("fullName", value)} />
+                <HierarchyInput label="Cargo exibido" value={form.title} onChange={(value) => updateForm("title", value)} />
+              </div>
+
+              <label className="grid gap-2 text-sm text-zinc-300">
+                Departamento
+                <select
+                  value={form.departmentId ?? ""}
+                  onChange={(event) => updateForm("departmentId", event.target.value || null)}
+                  className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
+                >
+                  <option value="">Sem departamento</option>
+                  {departments.map((department) => (
+                    <option key={department.id} value={department.id}>{department.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <HierarchyInput label="E-mail de trabalho/notificação" value={form.workEmail} onChange={(value) => updateForm("workEmail", value)} type="email" />
+                <HierarchyInput label="Usuário de login" value={form.username} onChange={(value) => updateForm("username", value)} />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <HierarchyInput label={form.id ? "Nova senha opcional" : "Senha inicial"} value={form.password} onChange={(value) => updateForm("password", value)} type="password" />
+                <HierarchyInput label="Telefone" value={form.phone} onChange={(value) => updateForm("phone", value)} />
+                <HierarchyInput label="WhatsApp para alertas" value={form.whatsapp} onChange={(value) => updateForm("whatsapp", value)} />
+              </div>
+
+              <div className="grid gap-3 border border-zinc-800 bg-black/35 p-4 md:grid-cols-3">
+                <ConnectionSummary label="Gestor" value={selectedParent?.name ?? (hierarchy.length ? "não definido" : "primeiro nível")} tone={selectedParent || !hierarchy.length ? "ok" : "warn"} />
+                <ConnectionSummary label="Nível" value={levelName(form.level)} tone="ok" />
+                <ConnectionSummary label="Departamento" value={form.departmentId ? departmentNameById.get(form.departmentId) ?? "definido" : "sem setor"} tone={form.departmentId ? "ok" : "warn"} />
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button type="submit" disabled={saving} className="inline-flex h-12 items-center gap-2 bg-orange-500 px-5 font-semibold text-black transition hover:bg-orange-400 disabled:opacity-50">
+                  <Save className="h-4 w-4" />
+                  {saving ? "Salvando..." : form.id ? "Salvar edição" : "Criar usuário"}
+                </button>
+                {editingNode ? (
+                  <button type="button" onClick={() => startCreate(selectedParent ?? hierarchy[0])} className="h-12 border border-zinc-700 px-5 text-sm text-zinc-200 transition hover:border-orange-400/50">
+                    Novo abaixo
+                  </button>
+                ) : null}
+              </div>
+            </form>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <ConnectionSummary label="Dispositivos vinculados" value={`${devices.filter((device) => device.ownerMembershipId).length}/${devices.length}`} tone="ok" />
+              <ConnectionSummary label="Sem vínculo" value={`${unassignedDevices.length}`} tone={unassignedDevices.length ? "warn" : "ok"} />
+            </div>
           </div>
         </Panel>
       </div>
     </ViewFrame>
+  );
+}
+
+function HierarchyInput({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+  return (
+    <label className="grid gap-2 text-sm text-zinc-300">
+      {label}
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none transition focus:border-orange-400 focus:shadow-[0_0_18px_rgba(249,115,22,0.10)]"
+      />
+    </label>
   );
 }
 

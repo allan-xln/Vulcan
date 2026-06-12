@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 from psycopg.rows import dict_row
@@ -395,7 +395,7 @@ class VulcanRepository:
                        m.status, m.full_name as "fullName", m.work_email as "workEmail",
                        m.phone, m.whatsapp, m.title, m.hierarchy_level as "hierarchyLevel"
                 from public.memberships m
-                where {condition}
+                where m.status = 'active' and {condition}
                 order by m.hierarchy_level nulls last, m.full_name
                 """,
                 params,
@@ -406,6 +406,125 @@ class VulcanRepository:
             return
         if access.tenant_id != tenant_id or access.scope not in {"tenant", "global"}:
             raise ValueError("write access requires tenant admin scope")
+
+    def _assert_membership_visible(self, conn: psycopg.Connection, access: AccessScope, membership_id: UUID) -> None:
+        condition, params = self._membership_filter(access)
+        row = conn.execute(
+            f"select id from public.memberships m where m.id = %s and m.status = 'active' and {condition}",
+            (membership_id, *params),
+        ).fetchone()
+        if not row:
+            raise ValueError("membership outside visible hierarchy")
+
+    def _fetch_manager_level(self, conn: psycopg.Connection, tenant_id: UUID, manager_id: UUID | None) -> int | None:
+        if manager_id is None:
+            return None
+        row = conn.execute(
+            "select hierarchy_level from public.memberships where tenant_id = %s and id = %s and status = 'active'",
+            (tenant_id, manager_id),
+        ).fetchone()
+        if not row:
+            raise ValueError("manager membership does not exist in tenant")
+        return int(row["hierarchy_level"] or 0)
+
+    def _ensure_hierarchy_write(
+        self,
+        conn: psycopg.Connection,
+        access: AccessScope,
+        tenant_id: UUID,
+        target_membership_id: UUID | None,
+        manager_id: UUID | None,
+        hierarchy_level: int | None,
+        deleting: bool = False,
+    ) -> None:
+        if not access.is_root and access.tenant_id != tenant_id:
+            raise ValueError("tenant outside current context")
+        if not access.is_root and access.scope == "self":
+            raise ValueError("hierarchy write requires manager scope")
+
+        if target_membership_id is not None:
+            self._assert_membership_visible(conn, access, target_membership_id)
+
+        if manager_id is not None:
+            self._assert_membership_visible(conn, access, manager_id)
+            manager_level = self._fetch_manager_level(conn, tenant_id, manager_id)
+            if hierarchy_level is not None and manager_level is not None and hierarchy_level <= manager_level:
+                raise ValueError("new member level must stay below the selected manager")
+        elif not access.is_root and access.scope not in {"tenant", "global"}:
+            raise ValueError("hierarchy manager is required")
+
+        if deleting and access.membership_id and target_membership_id == access.membership_id:
+            raise ValueError("membership cannot delete itself")
+
+    def _role_scope(self, conn: psycopg.Connection, role_id: UUID | None) -> str:
+        if role_id is None:
+            return "self"
+        row = conn.execute("select coalesce(scope, 'self') as scope from public.roles where id = %s", (role_id,)).fetchone()
+        return str(row["scope"]) if row else "self"
+
+    def _upsert_auth_user(
+        self,
+        conn: psycopg.Connection,
+        *,
+        user_id: UUID | None,
+        email: str | None,
+        full_name: str,
+        username: str | None,
+        password: str | None,
+    ) -> UUID:
+        login = (username or email or full_name).strip().lower()
+        primary_email = (email or f"{login}@vulcan.local").strip().lower()
+        existing = conn.execute(
+            """
+            select id
+            from auth.users
+            where (%s::uuid is not null and id = %s::uuid)
+               or lower(email) = lower(%s)
+               or lower(coalesce(raw_user_meta_data ->> 'login', '')) = lower(%s)
+            order by created_at
+            limit 1
+            """,
+            (user_id, user_id, primary_email, login),
+        ).fetchone()
+        resolved_user_id = UUID(str(existing["id"])) if existing else (user_id or uuid4())
+        password_value = password or uuid4().hex
+        encrypted_update = "excluded.encrypted_password" if password else "auth.users.encrypted_password"
+        conn.execute(
+            f"""
+            insert into auth.users (
+              id, aud, role, email, encrypted_password, email_confirmed_at,
+              raw_app_meta_data, raw_user_meta_data, is_sso_user, is_anonymous,
+              created_at, updated_at
+            )
+            values (%s, 'authenticated', 'authenticated', %s, crypt(%s, gen_salt('bf')), timezone('utc', now()),
+                    %s, %s, false, false, timezone('utc', now()), timezone('utc', now()))
+            on conflict (id) do update
+            set email = excluded.email,
+                encrypted_password = {encrypted_update},
+                raw_user_meta_data = excluded.raw_user_meta_data,
+                updated_at = timezone('utc', now())
+            """,
+            (
+                resolved_user_id,
+                primary_email,
+                password_value,
+                Jsonb({"provider": "vulcan-local"}),
+                Jsonb({"name": full_name, "login": login, "product": "Vulcan", "createdBy": "hierarchy-crud"}),
+            ),
+        )
+        conn.execute(
+            """
+            insert into public.user_profiles (user_id, primary_email, display_name, locale, timezone, metadata)
+            values (%s, %s, %s, 'pt-BR', 'America/Sao_Paulo', %s)
+            on conflict (user_id) do update
+            set primary_email = excluded.primary_email,
+                display_name = excluded.display_name,
+                metadata = public.user_profiles.metadata || excluded.metadata,
+                updated_at = timezone('utc', now())
+            """,
+            (resolved_user_id, primary_email, full_name, Jsonb({"login": login, "source": "hierarchy-crud"})),
+        )
+        return resolved_user_id
 
     def _assert_manager_is_safe(
         self,
@@ -460,8 +579,23 @@ class VulcanRepository:
             raise ValueError("membership writes require Supabase/Postgres")
         with self._connect() as conn:
             access = self._access(conn, context)
-            self._ensure_tenant_write(access, request.tenant_id)
+            self._ensure_hierarchy_write(
+                conn,
+                access,
+                request.tenant_id,
+                None,
+                request.direct_manager_membership_id,
+                request.hierarchy_level,
+            )
             self._assert_manager_is_safe(conn, request.tenant_id, None, request.direct_manager_membership_id)
+            user_id = self._upsert_auth_user(
+                conn,
+                user_id=request.user_id,
+                email=request.work_email,
+                full_name=request.full_name,
+                username=request.username,
+                password=request.password,
+            )
             row = conn.execute(
                 """
                 insert into public.memberships (
@@ -473,7 +607,7 @@ class VulcanRepository:
                 """,
                 (
                     request.tenant_id,
-                    request.user_id,
+                    user_id,
                     request.role_id,
                     request.department_id,
                     request.direct_manager_membership_id,
@@ -483,7 +617,7 @@ class VulcanRepository:
                     request.whatsapp,
                     request.title,
                     request.hierarchy_level,
-                    Jsonb({"source": "api"}),
+                    Jsonb({"source": "api", "username": request.username, "notificationEmail": request.work_email, "notificationWhatsapp": request.whatsapp}),
                 ),
             ).fetchone()
             conn.execute("select public.vulcan_refresh_membership_closure(%s)", (request.tenant_id,))
@@ -500,7 +634,7 @@ class VulcanRepository:
         with self._connect() as conn:
             access = self._access(conn, context)
             existing = conn.execute(
-                "select tenant_id, direct_manager_membership_id from public.memberships where id = %s",
+                "select tenant_id, user_id, direct_manager_membership_id, hierarchy_level, full_name, work_email from public.memberships where id = %s and status = 'active'",
                 (membership_id,),
             ).fetchone()
             if not existing:
@@ -508,8 +642,18 @@ class VulcanRepository:
             tenant_id = existing["tenant_id"]
             manager_was_sent = "direct_manager_membership_id" in request.model_fields_set
             manager_id = request.direct_manager_membership_id if manager_was_sent else existing["direct_manager_membership_id"]
-            self._ensure_tenant_write(access, tenant_id)
+            hierarchy_level = request.hierarchy_level if request.hierarchy_level is not None else existing["hierarchy_level"]
+            self._ensure_hierarchy_write(conn, access, tenant_id, membership_id, manager_id, hierarchy_level)
             self._assert_manager_is_safe(conn, tenant_id, membership_id, manager_id)
+            if request.username or request.password or request.work_email or request.full_name:
+                self._upsert_auth_user(
+                    conn,
+                    user_id=existing["user_id"],
+                    email=request.work_email or existing["work_email"],
+                    full_name=request.full_name or existing["full_name"],
+                    username=request.username,
+                    password=request.password,
+                )
             row = conn.execute(
                 """
                 update public.memberships
@@ -545,10 +689,80 @@ class VulcanRepository:
             if not row:
                 return None
             conn.execute("select public.vulcan_refresh_membership_closure(%s)", (tenant_id,))
-            self.write_audit(conn, context, tenant_id, "membership.updated", "membership", membership_id, {"fields": request.model_dump(exclude_none=True)})
+            audit_fields = request.model_dump(exclude_none=True, mode="json")
+            if "password" in audit_fields:
+                audit_fields["password"] = "***"
+            self.write_audit(conn, context, tenant_id, "membership.updated", "membership", membership_id, {"fields": audit_fields})
             conn.commit()
             membership = self._fetch_membership(conn, membership_id)
             return dict(membership) if membership else None
+
+    def delete_membership(self, context: AuthContext, membership_id: UUID) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            existing = conn.execute(
+                """
+                select id, tenant_id, user_id, direct_manager_membership_id, hierarchy_level, full_name
+                from public.memberships
+                where id = %s and status = 'active'
+                """,
+                (membership_id,),
+            ).fetchone()
+            if not existing:
+                return None
+            tenant_id = existing["tenant_id"]
+            self._ensure_hierarchy_write(
+                conn,
+                access,
+                tenant_id,
+                membership_id,
+                existing["direct_manager_membership_id"],
+                existing["hierarchy_level"],
+                deleting=True,
+            )
+            conn.execute(
+                """
+                update public.memberships
+                set direct_manager_membership_id = %s,
+                    updated_at = timezone('utc', now())
+                where tenant_id = %s
+                  and direct_manager_membership_id = %s
+                  and status = 'active'
+                """,
+                (existing["direct_manager_membership_id"], tenant_id, membership_id),
+            )
+            conn.execute(
+                """
+                update public.devices
+                set owner_membership_id = null,
+                    metadata = metadata || %s,
+                    updated_at = timezone('utc', now())
+                where tenant_id = %s and owner_membership_id = %s
+                """,
+                (Jsonb({"ownerRemovedByHierarchyDelete": str(membership_id)}), tenant_id, membership_id),
+            )
+            row = conn.execute(
+                """
+                update public.memberships
+                set status = 'revoked',
+                    direct_manager_membership_id = null,
+                    metadata = metadata || %s,
+                    updated_at = timezone('utc', now())
+                where id = %s
+                returning id, tenant_id as "tenantId", user_id as "userId",
+                          role_id as "roleId", department_id as "departmentId",
+                          direct_manager_membership_id as "directManagerMembershipId",
+                          status::text, full_name as "fullName", work_email as "workEmail",
+                          phone, whatsapp, title, hierarchy_level as "hierarchyLevel"
+                """,
+                (Jsonb({"deletedAt": datetime.now(timezone.utc).isoformat(), "deletedBy": context.user_id}), membership_id),
+            ).fetchone()
+            conn.execute("select public.vulcan_refresh_membership_closure(%s)", (tenant_id,))
+            self.write_audit(conn, context, tenant_id, "membership.deleted", "membership", membership_id, {"full_name": existing["full_name"]})
+            conn.commit()
+            return dict(row) if row else None
 
     def update_membership_manager(self, context: AuthContext, membership_id: UUID, manager_id: UUID | None) -> dict | None:
         return self.update_membership(
@@ -579,7 +793,7 @@ class VulcanRepository:
                 from public.memberships m
                 left join auth.users au on au.id = m.user_id
                 left join public.roles r on r.id = m.role_id
-                where {condition}
+                where m.status = 'active' and {condition}
                 order by m.hierarchy_level nulls last, m.full_name
                 """,
                 params,
@@ -609,6 +823,7 @@ class VulcanRepository:
                          from public.memberships child
                          where child.tenant_id = m.tenant_id
                            and child.direct_manager_membership_id = m.id
+                           and child.status = 'active'
                        )::int as "directReports",
                        case
                          when coalesce(r.scope, 'self') = 'global' then 'global'
@@ -620,7 +835,7 @@ class VulcanRepository:
                 left join auth.users au on au.id = m.user_id
                 left join public.departments d on d.id = m.department_id
                 left join public.roles r on r.id = m.role_id
-                where {condition}
+                where m.status = 'active' and {condition}
                 order by coalesce(m.hierarchy_level, 0), m.full_name
                 """,
                 params,
