@@ -38,6 +38,8 @@ import {
   Cell,
   ComposedChart,
   Line,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -2669,72 +2671,144 @@ function MetricsView({
   allowDemoFallback: boolean;
 }) {
   const appUsageData = useMemo(() => buildAppUsageData(operationalMetrics, allowDemoFallback), [operationalMetrics, allowDemoFallback]);
-  const departmentData = allowDemoFallback ? departments : [];
   const metricActiveSeconds = operationalMetrics.filter((metric) => metric.metricKey === "active_seconds").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
   const metricIdleSeconds = operationalMetrics.filter((metric) => metric.metricKey === "idle_seconds").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
   const metricContextSwitches = operationalMetrics.filter((metric) => metric.metricKey === "context_switch_count").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
   const activeSeconds = operationalIntelligence.totalActiveSeconds || metricActiveSeconds;
   const idleSecondsTotal = operationalIntelligence.totalIdleSeconds || metricIdleSeconds;
+  const unidentifiedSeconds = operationalIntelligence.unidentifiedSeconds;
   const contextSwitches = operationalIntelligence.contextSwitches || metricContextSwitches;
-  const deepAppUsage = operationalIntelligence.topApps.length
-    ? operationalIntelligence.topApps.filter((item) => item.app !== "Ociosidade").map((item) => ({ app: item.app, minutes: Math.max(1, Math.round(item.activeSeconds / 60)) }))
-    : appUsageData;
-  const timelineData = operationalIntelligence.timeline.map((point) => ({
-    label: point.label,
-    ativo: Math.round(point.activeSeconds / 60),
-    ocioso: Math.round(point.idleSeconds / 60),
-    naoIdentificado: Math.round((point.unidentifiedSeconds ?? 0) / 60),
-    trocas: point.contextSwitches
-  }));
+  const trackedSeconds = Math.max(activeSeconds + idleSecondsTotal + unidentifiedSeconds, 1);
+  const activeRate = Math.round((activeSeconds / trackedSeconds) * 100);
+  const idleRate = Math.round((idleSecondsTotal / trackedSeconds) * 100);
+  const unidentifiedRate = Math.round((unidentifiedSeconds / trackedSeconds) * 100);
+  const contextLossHours = contextSwitches * 0.018;
+  const idleLossHours = idleSecondsTotal / 3600;
+  const estimatedLeak = (idleLossHours + contextLossHours) * 95;
+  const topSystems = operationalIntelligence.topApps.length
+    ? operationalIntelligence.topApps.filter((item) => item.app !== "Ociosidade").slice(0, 4)
+    : appUsageData.slice(0, 4).map((item, index) => ({
+        app: item.app,
+        category: index === 0 ? "sistema dominante" : "aplicativo monitorado",
+        activeSeconds: item.minutes * 60,
+        idleSeconds: 0,
+        events: 0,
+        contextSwitches: 0,
+        percent: Math.min(100, Math.round((item.minutes / Math.max(appUsageData[0]?.minutes ?? 1, 1)) * 100)),
+        focusLabel: index === 0 ? "maior concentração" : "acompanhar"
+      }));
+  const topSystem = topSystems[0] ?? null;
+  const compactTimeline = operationalIntelligence.timeline.slice(-8).map((point) => {
+    const total = Math.max(point.activeSeconds + point.idleSeconds + point.unidentifiedSeconds, 1);
+    return {
+      label: point.label,
+      activeRate: Math.round((point.activeSeconds / total) * 100),
+      idleRate: Math.round((point.idleSeconds / total) * 100),
+      switches: point.contextSwitches
+    };
+  });
+  const timeDistribution = [
+    { name: "Ativo", value: Math.round(activeSeconds / 60), color: "#34d399", detail: "tempo produtivo" },
+    { name: "Ocioso", value: Math.round(idleSecondsTotal / 60), color: "#fb923c", detail: "espera ou pausa" },
+    { name: "Não identificado", value: Math.round(unidentifiedSeconds / 60), color: "#71717a", detail: "coleta limitada" }
+  ].filter((item) => item.value > 0);
+  const actionNow = operationalIntelligence.aiRecommendations[0]
+    ?? (idleRate > 25
+      ? "Revisar ociosidade do turno e validar se existe espera por sistema ou processo."
+      : contextSwitches > 30
+        ? "Reduzir alternância entre sistemas com fila única ou automação de etapas repetidas."
+        : "Manter coleta por mais algumas horas para consolidar tendência operacional.");
+
   return (
     <ViewFrame>
-      <div className="mb-4">
-        <LiveBadge label="Métricas profundas em tempo real" detail={`Última sincronização: ${liveStatusLabel} | ${operationalIntelligence.periodLabel}`} />
-      </div>
-      <div className="mb-5 grid gap-3 md:grid-cols-3 xl:grid-cols-7">
-        <ConnectionSummary label="Tempo ativo" value={formatDuration(activeSeconds)} tone="ok" />
-        <ConnectionSummary label="Tempo ocioso" value={formatDuration(idleSecondsTotal)} tone={idleSecondsTotal > 0 ? "warn" : "ok"} />
-        <ConnectionSummary label="Não identificado" value={formatDuration(operationalIntelligence.unidentifiedSeconds)} tone={operationalIntelligence.unidentifiedSeconds > 0 ? "warn" : "ok"} />
-        <ConnectionSummary label="Ociosidade" value={percentPt(operationalIntelligence.idleRate)} tone={operationalIntelligence.idleRate > 0.2 ? "warn" : "ok"} />
-        <ConnectionSummary label="Trocas de contexto" value={`${Math.round(contextSwitches)}`} tone={contextSwitches > 20 ? "warn" : "ok"} />
-        <ConnectionSummary label="Trocas por hora" value={`${operationalIntelligence.contextSwitchesPerHour.toFixed(1)}/h`} tone={operationalIntelligence.contextSwitchesPerHour > 25 ? "warn" : "ok"} />
-        <ConnectionSummary label="Dispersão estimada" value={`${operationalIntelligence.distractionScore}/100`} tone={operationalIntelligence.distractionScore > 45 ? "warn" : "ok"} />
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <LiveBadge label="Métricas essenciais em tempo real" detail={`Última sincronização: ${liveStatusLabel} | ${operationalIntelligence.periodLabel}`} />
+        <span className="border border-orange-400/25 bg-orange-950/15 px-3 py-2 text-xs uppercase tracking-[0.2em] text-orange-200">
+          leitura executiva
+        </span>
       </div>
 
-      <div className="mb-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-        <Panel title="Agora e diagnóstico de IA" icon={Brain}>
-          <div className="grid gap-4">
-            <div className="border border-orange-400/20 bg-black/45 p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-orange-300">O que está acontecendo</p>
-              <p className="mt-3 text-2xl font-semibold text-zinc-50">{operationalIntelligence.currentActivity}</p>
-              <p className="mt-3 text-sm leading-6 text-zinc-400">{operationalIntelligence.aiSummary}</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <ConnectionSummary label="Score de foco" value={`${operationalIntelligence.focusScore}/100`} tone={operationalIntelligence.focusScore >= 55 ? "ok" : "warn"} />
-              <ConnectionSummary label="Maior bloco de foco" value={formatDuration(operationalIntelligence.longestFocusSeconds)} tone="ok" />
-              <ConnectionSummary label="Tempo fragmentado" value={formatDuration(operationalIntelligence.fragmentedSeconds)} tone={operationalIntelligence.fragmentedSeconds > activeSeconds * 0.35 ? "warn" : "ok"} />
-            </div>
-            <div className="space-y-2">
-              {operationalIntelligence.aiRecommendations.map((recommendation) => (
-                <div key={recommendation} className="flex items-start gap-3 border border-zinc-800 bg-zinc-950/65 p-3 text-sm text-zinc-300">
-                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-orange-300" />
-                  <span>{recommendation}</span>
-                </div>
-              ))}
-            </div>
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <Panel title="Velocímetros da operação" icon={Gauge}>
+          <div className="grid gap-4 md:grid-cols-3">
+            <MetricSpeedometer
+              label="Foco operacional"
+              value={operationalIntelligence.focusScore}
+              detail={`Maior bloco: ${formatDuration(operationalIntelligence.longestFocusSeconds)}`}
+              tone={operationalIntelligence.focusScore >= 65 ? "ok" : operationalIntelligence.focusScore >= 45 ? "warn" : "critical"}
+            />
+            <MetricSpeedometer
+              label="Ociosidade"
+              value={idleRate}
+              detail={`${formatDuration(idleSecondsTotal)} fora de fluxo ativo`}
+              tone={idleRate > 35 ? "critical" : idleRate > 18 ? "warn" : "ok"}
+            />
+            <MetricSpeedometer
+              label="Fragmentação"
+              value={operationalIntelligence.distractionScore}
+              detail={`${Math.round(contextSwitches)} trocas | ${operationalIntelligence.contextSwitchesPerHour.toFixed(1)}/h`}
+              tone={operationalIntelligence.distractionScore > 55 ? "critical" : operationalIntelligence.distractionScore > 35 ? "warn" : "ok"}
+            />
           </div>
         </Panel>
-        <Panel title="Controle por sistema utilizado" icon={Gauge}>
+
+        <Panel title="Pizza do tempo analisado" icon={Activity}>
+          {timeDistribution.length ? (
+            <div className="grid gap-4 md:grid-cols-[1fr_0.9fr] xl:grid-cols-1 2xl:grid-cols-[1fr_0.9fr]">
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Tooltip contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fff" }} />
+                    <Pie data={timeDistribution} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="88%" paddingAngle={4} animationDuration={900}>
+                      {timeDistribution.map((item) => (
+                        <Cell key={item.name} fill={item.color} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="grid content-center gap-3">
+                <MetricLegend color="#34d399" label="Ativo" value={`${activeRate}%`} detail={formatDuration(activeSeconds)} />
+                <MetricLegend color="#fb923c" label="Ocioso" value={`${idleRate}%`} detail={formatDuration(idleSecondsTotal)} />
+                <MetricLegend color="#71717a" label="Não identificado" value={`${unidentifiedRate}%`} detail={formatDuration(unidentifiedSeconds)} />
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="Sem tempo suficiente" description="Quando o agente sincronizar os primeiros eventos, a distribuição aparece aqui." />
+          )}
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-3">
+        <MetricSignalCard
+          icon={Flame}
+          label="Perda estimada"
+          value={formatMoneyBRL(estimatedLeak)}
+          detail={`Ociosidade + troca de contexto no período analisado.`}
+          tone={estimatedLeak > 5000 ? "critical" : estimatedLeak > 1000 ? "warn" : "ok"}
+        />
+        <MetricSignalCard
+          icon={Zap}
+          label="Ação agora"
+          value={actionNow}
+          detail="Uma recomendação clara para o gestor agir sem abrir relatório longo."
+          tone="warn"
+        />
+        <MetricSignalCard
+          icon={Brain}
+          label="Sistema que mais pesa"
+          value={topSystem?.app ?? "Aguardando dados"}
+          detail={topSystem ? `${formatDuration(topSystem.activeSeconds || topSystem.idleSeconds)} | ${topSystem.focusLabel}` : "Instale/reinicie o agente para medir apps reais."}
+          tone={topSystem ? "ok" : "warn"}
+        />
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <Panel title="Top sistemas para olhar" icon={Layers3}>
           <div className="grid gap-3">
-            {operationalIntelligence.topApps.length ? (
-              operationalIntelligence.topApps.map((item, index) => (
-                <motion.div
-                  key={`${item.app}-${item.category}`}
-                  className="border border-zinc-800 bg-black/45 p-4"
-                  initial={{ opacity: 0, x: 18 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.04 }}
-                >
+            {topSystems.length ? (
+              topSystems.map((item, index) => (
+                <motion.div key={`${item.app}-${item.category}`} className="border border-zinc-800 bg-black/45 p-4" initial={{ opacity: 0, x: 18 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.05 }} whileHover={{ x: 4, borderColor: "rgba(251,146,60,.45)" }}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-medium text-zinc-100">{item.app}</p>
@@ -2742,7 +2816,7 @@ function MetricsView({
                     </div>
                     <div className="text-right">
                       <p className="text-lg font-semibold text-orange-200">{formatDuration(item.activeSeconds || item.idleSeconds)}</p>
-                      <p className="text-xs text-zinc-500">{item.percent.toFixed(1)}% do período comparável</p>
+                      <p className="text-xs text-zinc-500">{Math.round(item.percent)}% do comparável</p>
                     </div>
                   </div>
                   <div className="mt-3 h-2 bg-zinc-900">
@@ -2753,119 +2827,183 @@ function MetricsView({
                       transition={{ duration: 0.7, delay: index * 0.04 }}
                     />
                   </div>
-                  <p className="mt-2 text-xs text-zinc-600">{item.events} evento{item.events === 1 ? "" : "s"} | {item.contextSwitches} troca{item.contextSwitches === 1 ? "" : "s"}</p>
+                  <p className="mt-2 text-xs text-zinc-600">{item.events} evento{item.events === 1 ? "" : "s"} | {item.contextSwitches} troca{item.contextSwitches === 1 ? "" : "s"} de contexto</p>
                 </motion.div>
               ))
             ) : (
-              <EmptyState title="Sem uso por sistema ainda" description="Reinicie o agente 0.2.0 e gere alguns minutos de uso real para ver o ranking de sistemas." />
+              <EmptyState title="Sem ranking ainda" description="O ranking aparece quando o agente enviar uso real de aplicativos." />
             )}
           </div>
         </Panel>
+
+        <Panel title="Ritmo do turno" icon={RadioTower}>
+          {compactTimeline.length ? (
+            <div className="grid gap-4">
+              <div className="grid grid-cols-4 gap-2 md:grid-cols-8">
+                {compactTimeline.map((point, index) => (
+                  <motion.div
+                    key={`${point.label}-${index}`}
+                    className="relative min-h-32 overflow-hidden border border-zinc-800 bg-black/45 p-3"
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.04 }}
+                    whileHover={{ y: -4, borderColor: "rgba(251,146,60,.45)" }}
+                  >
+                    <p className="text-xs font-semibold text-zinc-200">{point.label}</p>
+                    <div className="absolute inset-x-3 bottom-3 h-20 bg-zinc-900">
+                      <motion.div
+                        className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-emerald-500 to-orange-300"
+                        initial={{ height: 0 }}
+                        animate={{ height: `${point.activeRate}%` }}
+                        transition={{ duration: 0.65, delay: index * 0.04 }}
+                      />
+                    </div>
+                    <p className="absolute bottom-24 left-3 text-[10px] uppercase tracking-[0.12em] text-orange-200">{point.switches} trocas</p>
+                  </motion.div>
+                ))}
+              </div>
+              <p className="text-sm leading-6 text-zinc-400">
+                Quanto maior a barra, maior o tempo ativo no recorte. Trocas altas com barra baixa indicam interrupção, espera ou retrabalho.
+              </p>
+            </div>
+          ) : (
+            <EmptyState title="Sem ritmo calculado" description="Acompanhe alguns minutos de uso para o Vulcan montar o pulso do turno." />
+          )}
+        </Panel>
       </div>
 
-      {operationalIntelligence.qualitySignals.length ? (
-        <div className="mb-5">
-          <Panel title="Qualidade da coleta" icon={ShieldCheck}>
-            <div className="grid gap-3 md:grid-cols-2">
-              {operationalIntelligence.qualitySignals.map((signal) => (
-                <div key={`${signal.device}-${signal.quality}-${signal.message}`} className="border border-orange-400/20 bg-orange-950/10 p-4">
-                  <p className="font-medium text-orange-100">{signal.device}</p>
-                  <p className="mt-1 text-sm text-orange-200">{signal.message}</p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.14em] text-orange-300/70">Qualidade: {qualityPt(signal.quality)}</p>
-                </div>
+      <div className="mt-5">
+        <Panel title="Resumo que o gestor realmente lê" icon={Brain}>
+          <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+            <div className="border border-orange-400/20 bg-black/45 p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Agora</p>
+              <p className="mt-3 text-2xl font-semibold text-zinc-50">{operationalIntelligence.currentActivity}</p>
+              <p className="mt-3 text-sm leading-6 text-zinc-400">{operationalIntelligence.aiSummary}</p>
+            </div>
+            <div className="grid gap-3">
+              {[actionNow, ...operationalIntelligence.aiRecommendations.filter((item) => item !== actionNow).slice(0, 2)].map((recommendation, index) => (
+                <motion.div
+                  key={`${recommendation}-${index}`}
+                  className="flex items-start gap-3 border border-zinc-800 bg-zinc-950/65 p-4 text-sm text-zinc-300"
+                  initial={{ opacity: 0, x: 14 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.06 }}
+                >
+                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-orange-300" />
+                  <span>{recommendation}</span>
+                </motion.div>
               ))}
             </div>
-          </Panel>
-        </div>
-      ) : null}
-
-      <div className="mb-5 grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <Panel title="Linha do tempo ativa x ociosa" icon={Activity}>
-          <div className="h-72">
-            {timelineData.length ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={timelineData}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="label" stroke="#71717a" />
-                  <YAxis stroke="#71717a" />
-                  <Tooltip contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fff" }} />
-                  <Bar dataKey="ativo" stackId="a" fill="#f97316" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="ocioso" stackId="a" fill="#52525b" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="naoIdentificado" stackId="a" fill="#a16207" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="trocas" stroke="#facc15" strokeWidth={2} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyState title="Sem linha do tempo" description="A linha ativa/ociosa aparece assim que o agente enviar eventos recentes." />
-            )}
-          </div>
-        </Panel>
-        <Panel title="Janelas e detalhes permitidos por política" icon={Layers3}>
-          <div className="space-y-3">
-            {operationalIntelligence.topWindows.map((item) => (
-              <div key={`${item.app}-${item.title}`} className="border border-zinc-800 bg-black/45 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium text-zinc-100">{item.title}</p>
-                    <p className="mt-1 text-sm text-zinc-500">{item.app}</p>
-                  </div>
-                  <p className="text-sm text-orange-200">{item.activeSeconds ? formatDuration(item.activeSeconds) : "protegido"}</p>
-                </div>
-                <p className="mt-2 text-xs leading-5 text-zinc-500">{item.collectionNote}</p>
-              </div>
-            ))}
-          </div>
-        </Panel>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <Panel title="Concentração de tempo por aplicativo" icon={Gauge}>
-          <div className="h-96">
-            {deepAppUsage.length ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={deepAppUsage}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="app" stroke="#71717a" />
-                  <YAxis stroke="#71717a" />
-                  <Tooltip contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fff" }} />
-                  <Bar dataKey="minutes" radius={[10, 10, 0, 0]}>
-                    {deepAppUsage.map((_, index) => (
-                      <Cell key={index} fill={index === 0 ? "#f97316" : "#52525b"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyState title="Sem métricas reais ainda" description="O gráfico será preenchido após o agente sincronizar eventos de uso deste notebook." />
-            )}
-          </div>
-        </Panel>
-        <Panel title="Pulso de eficiência por setor" icon={Building2}>
-          <div className="grid gap-4">
-            {departmentData.length ? (
-              departmentData.map((department, index) => (
-                <div key={department.name}>
-                  <div className="mb-2 flex justify-between text-sm">
-                    <span>{department.name}</span>
-                    <span className="text-orange-300">{department.score}%</span>
-                  </div>
-                  <div className="h-3 bg-zinc-900">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-orange-700 via-orange-400 to-yellow-300"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${department.score}%` }}
-                      transition={{ duration: 0.8, delay: index * 0.1 }}
-                    />
-                  </div>
-                </div>
-              ))
-            ) : (
-              <EmptyState title="Sem comparativo por setor" description="Esta sessão do usuário teste mostra somente dados reais; comparativos aparecem quando existirem mais usuários e agentes." />
-            )}
           </div>
         </Panel>
       </div>
     </ViewFrame>
+  );
+}
+
+function MetricSpeedometer({
+  label,
+  value,
+  detail,
+  tone
+}: {
+  label: string;
+  value: number;
+  detail: string;
+  tone: "ok" | "warn" | "critical";
+}) {
+  const percentage = Math.max(0, Math.min(100, Math.round(value)));
+  const angle = -90 + percentage * 1.8;
+  const color = tone === "ok" ? "#34d399" : tone === "critical" ? "#fb7185" : "#fb923c";
+
+  return (
+    <motion.div
+      className="relative overflow-hidden border border-zinc-800 bg-black/45 p-4"
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -5, borderColor: "rgba(251,146,60,.55)" }}
+    >
+      <div className="h-36">
+        <svg viewBox="0 0 240 150" className="h-full w-full">
+          <path d="M 24 124 A 96 96 0 0 1 216 124" fill="none" stroke="rgba(63,63,70,0.85)" strokeWidth="18" strokeLinecap="round" pathLength={1} />
+          <motion.path
+            d="M 24 124 A 96 96 0 0 1 216 124"
+            fill="none"
+            stroke={color}
+            strokeWidth="18"
+            strokeLinecap="round"
+            pathLength={1}
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: percentage / 100 }}
+            transition={{ duration: 0.9, ease: "easeOut" }}
+          />
+          <motion.g style={{ transformOrigin: "120px 124px" }} initial={{ rotate: -90 }} animate={{ rotate: angle }} transition={{ duration: 0.9, ease: "easeOut" }}>
+            <line x1="120" y1="124" x2="120" y2="52" stroke="#f4f4f5" strokeWidth="4" strokeLinecap="round" />
+            <circle cx="120" cy="124" r="8" fill={color} />
+          </motion.g>
+          <text x="120" y="118" textAnchor="middle" className="fill-zinc-50 text-3xl font-semibold">{percentage}</text>
+          <text x="120" y="140" textAnchor="middle" className="fill-orange-200 text-xs uppercase tracking-[0.2em]">/100</text>
+        </svg>
+      </div>
+      <p className="mt-2 text-sm font-semibold text-zinc-100">{label}</p>
+      <p className="mt-1 text-xs leading-5 text-zinc-500">{detail}</p>
+    </motion.div>
+  );
+}
+
+function MetricLegend({ color, label, value, detail }: { color: string; label: string; value: string; detail: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border border-zinc-800 bg-black/35 p-3">
+      <div className="flex items-center gap-3">
+        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
+        <div>
+          <p className="text-sm font-medium text-zinc-100">{label}</p>
+          <p className="text-xs text-zinc-500">{detail}</p>
+        </div>
+      </div>
+      <p className="text-lg font-semibold text-zinc-50">{value}</p>
+    </div>
+  );
+}
+
+function MetricSignalCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone
+}: {
+  icon: typeof Gauge;
+  label: string;
+  value: string;
+  detail: string;
+  tone: "ok" | "warn" | "critical";
+}) {
+  const colorClass = tone === "ok" ? "text-emerald-300" : tone === "critical" ? "text-rose-300" : "text-orange-300";
+
+  return (
+    <motion.div
+      className="relative overflow-hidden border border-orange-400/18 bg-zinc-950/78 p-5 shadow-[0_0_30px_rgba(249,115,22,0.06)]"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -5, borderColor: "rgba(251,146,60,.50)" }}
+    >
+      <motion.div
+        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
+        animate={{ x: ["-100%", "100%"], opacity: [0, 0.9, 0] }}
+        transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <div className="relative z-10 flex items-start gap-4">
+        <div className="grid h-11 w-11 shrink-0 place-items-center bg-orange-500 text-black">
+          <Icon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">{label}</p>
+          <p className={`mt-3 text-2xl font-semibold leading-tight ${colorClass}`}>{value}</p>
+          <p className="mt-3 text-sm leading-6 text-zinc-500">{detail}</p>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
