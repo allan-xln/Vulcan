@@ -47,6 +47,34 @@ A tela de Hierarquia mostra notebooks/agentes abaixo de cada pessoa:
 
 Toda alteração de dono do dispositivo passa pelo backend e respeita `tenant_id`.
 
+## CRUD Comercial
+
+A tela permite:
+
+- criar usuário abaixo de um gestor visível;
+- editar nome, cargo, e-mail, usuário, senha opcional, telefone e WhatsApp;
+- excluir usuário, fechando a árvore ao religar subordinados ao gestor acima;
+- mover dispositivo para uma pessoa;
+- desvincular dispositivo;
+- adotar dispositivo pendente e vincular a pessoa/equipe.
+
+O cadastro respeita a pirâmide. Um diretor cria níveis abaixo dele, supervisor cria líder/monitor/usuário e operador não recebe permissão de gestão.
+
+## Equipes
+
+Equipe é agrupamento operacional e não substitui hierarquia.
+
+Exemplos:
+
+- Financeiro;
+- Operação;
+- Administrativo;
+- Suporte;
+- Comercial;
+- Logística.
+
+A equipe aparece na adoção do dispositivo, nos filtros de Comando/Métricas e no detalhamento exportável.
+
 ## Regras De Visibilidade Da Demo
 
 - `teste`: toda a empresa.
@@ -56,4 +84,3 @@ Toda alteração de dono do dispositivo passa pelo backend e respeita `tenant_id
 - `supervisor`: supervisor e árvore abaixo.
 - `lider`: líder e operadores.
 - `operador1`, `operador2`, `operador3`: apenas seus próprios dados.
-

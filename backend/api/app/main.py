@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg import Error as PsycopgError
@@ -36,6 +36,9 @@ from app.schemas import (
     ConnectionTestResponse,
     Department,
     Device,
+    DeviceAdoptionRequest,
+    DeviceAdoptionResponse,
+    DeviceMoveRequest,
     DeviceOwnerUpdate,
     EmailProviderStatusResponse,
     HealthResponse,
@@ -49,6 +52,7 @@ from app.schemas import (
     MembershipManagerUpdate,
     MembershipUpdate,
     Metric,
+    MetricsDetailedRow,
     Notification,
     NotificationPreference,
     NotificationPreferenceUpdate,
@@ -61,6 +65,11 @@ from app.schemas import (
     Role,
     SupabaseStatus,
     Tenant,
+    Team,
+    TeamCreate,
+    TeamMember,
+    TeamMemberCreate,
+    TeamUpdate,
     User,
     WhatsAppStatus,
 )
@@ -190,6 +199,92 @@ def list_roles(context: AuthContext = Authenticated, repo: VulcanRepository = De
     return [Role.model_validate(item) for item in repo.list_roles(context)]
 
 
+@app.get("/teams", response_model=list[Team])
+def list_teams(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[Team]:
+    return [Team.model_validate(item) for item in repo.list_teams(context)]
+
+
+@app.post("/teams", response_model=Team)
+def create_team(
+    request: TeamCreate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Team:
+    try:
+        return Team.model_validate(repo.create_team(context, request))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.put("/teams/{team_id}", response_model=Team)
+def update_team(
+    team_id: UUID,
+    request: TeamUpdate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Team:
+    try:
+        updated = repo.update_team(context, team_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="team not found")
+    return Team.model_validate(updated)
+
+
+@app.delete("/teams/{team_id}", response_model=Team)
+def delete_team(
+    team_id: UUID,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Team:
+    try:
+        deleted = repo.delete_team(context, team_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="team not found")
+    return Team.model_validate(deleted)
+
+
+@app.get("/teams/{team_id}/members", response_model=list[TeamMember])
+def list_team_members(
+    team_id: UUID,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> list[TeamMember]:
+    return [TeamMember.model_validate(item) for item in repo.list_team_members(context, team_id)]
+
+
+@app.post("/teams/{team_id}/members", response_model=TeamMember)
+def add_team_member(
+    team_id: UUID,
+    request: TeamMemberCreate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> TeamMember:
+    try:
+        return TeamMember.model_validate(repo.add_team_member(context, team_id, request))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.delete("/teams/{team_id}/members/{membership_id}", response_model=Team)
+def remove_team_member(
+    team_id: UUID,
+    membership_id: UUID,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Team:
+    try:
+        updated = repo.remove_team_member(context, team_id, membership_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="team member not found")
+    return Team.model_validate(updated)
+
+
 @app.get("/memberships", response_model=list[Membership])
 def list_memberships(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[Membership]:
     return [Membership.model_validate(item) for item in repo.list_memberships(context)]
@@ -269,6 +364,72 @@ def list_devices(context: AuthContext = Authenticated, repo: VulcanRepository = 
     return [Device.model_validate(item) for item in repo.list_devices(context)]
 
 
+@app.get("/devices/pending-adoption", response_model=list[Device])
+def list_pending_devices(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[Device]:
+    return [Device.model_validate(item) for item in repo.list_pending_adoption_devices(context)]
+
+
+@app.post("/devices/{device_id}/adopt", response_model=DeviceAdoptionResponse)
+def adopt_device(
+    device_id: UUID,
+    request: DeviceAdoptionRequest,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> DeviceAdoptionResponse:
+    try:
+        return DeviceAdoptionResponse.model_validate(repo.adopt_device(context, device_id, request))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/link-user", response_model=Device)
+def link_device_user(
+    device_id: UUID,
+    request: DeviceOwnerUpdate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Device:
+    try:
+        updated = repo.update_device_owner(context, device_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    return Device.model_validate(updated)
+
+
+@app.post("/devices/{device_id}/unlink-user", response_model=Device)
+def unlink_device_user(
+    device_id: UUID,
+    request: DeviceOwnerUpdate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Device:
+    try:
+        updated = repo.update_device_owner(context, device_id, DeviceOwnerUpdate(tenantId=request.tenant_id, ownerMembershipId=None))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    return Device.model_validate(updated)
+
+
+@app.post("/devices/{device_id}/move", response_model=Device)
+def move_device(
+    device_id: UUID,
+    request: DeviceMoveRequest,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Device:
+    try:
+        moved = repo.move_device(context, device_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not moved:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    return Device.model_validate(moved)
+
+
 @app.put("/devices/{device_id}/owner", response_model=Device)
 def update_device_owner(
     device_id: UUID,
@@ -310,6 +471,42 @@ def list_metrics(context: AuthContext = Authenticated, repo: VulcanRepository = 
 @app.get("/operational-metrics", response_model=list[OperationalMetric])
 def list_operational_metrics(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[OperationalMetric]:
     return [OperationalMetric.model_validate(item) for item in repo.list_operational_metrics(context)]
+
+
+@app.get("/metrics/detailed", response_model=list[MetricsDetailedRow])
+def detailed_metrics(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+    period: str = Query(default="24h"),
+    team_id: UUID | None = Query(default=None, alias="teamId"),
+    membership_id: UUID | None = Query(default=None, alias="membershipId"),
+    device_id: UUID | None = Query(default=None, alias="deviceId"),
+    app: str | None = Query(default=None),
+) -> list[MetricsDetailedRow]:
+    rows = repo.list_detailed_metrics(context, period=period, team_id=team_id, membership_id=membership_id, device_id=device_id, app=app)
+    return [MetricsDetailedRow.model_validate(row) for row in rows]
+
+
+@app.get("/metrics/export")
+def export_metrics(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+    format: str = Query(default="csv"),
+    period: str = Query(default="24h"),
+    team_id: UUID | None = Query(default=None, alias="teamId"),
+    membership_id: UUID | None = Query(default=None, alias="membershipId"),
+    device_id: UUID | None = Query(default=None, alias="deviceId"),
+    app: str | None = Query(default=None),
+) -> Response:
+    if format not in {"csv", "excel"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="format must be csv or excel")
+    content = repo.export_metrics_csv(context, period=period, team_id=team_id, membership_id=membership_id, device_id=device_id, app=app)
+    filename = "vulcan-metricas.csv" if format == "csv" else "vulcan-metricas-excel.csv"
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/operational-intelligence", response_model=OperationalIntelligence)

@@ -6,14 +6,14 @@ Esta página resume a operação dos agentes Vulcan. A documentação detalhada 
 
 - Linux: agente Python com instalador amigável e serviço `systemd --user`.
 - Windows: pacote enterprise com serviço, coletor de sessão, instalador e scripts para GPO/Intune/RMM.
-- macOS: estrutura reservada para versão futura.
+- macOS: skeleton funcional com Python 3, LaunchAgent, heartbeat, fila offline e sync. Falta pacote `.pkg` assinado/notarizado para produção.
 
 ## Linux Local
 
 Instalar o agente no notebook atual vinculado ao usuário `teste`:
 
 ```bash
-cd /home/allan/Dev/Vulcan/agentes/installers/linux
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/agentes/installers/linux
 bash ./instalar-vulcan-teste.sh \
   --backend-url "http://localhost:3001" \
   --install-deps \
@@ -44,7 +44,7 @@ systemctl --user restart vulcan-agent.service
 Desinstalar:
 
 ```bash
-cd /home/allan/Dev/Vulcan/agentes/installers/linux
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/agentes/installers/linux
 bash ./uninstall.sh
 ```
 
@@ -61,6 +61,27 @@ Pacote esperado:
 ```text
 agentes/installers/windows/VulcanAgent-Windows-x64.zip
 ```
+
+## macOS
+
+Instalar skeleton local:
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/agentes/macos
+bash ./install.sh \
+  --backend-url "http://localhost:3001" \
+  --tenant-id "00000000-0000-0000-0000-000000000301" \
+  --enrollment-token "vulcan-local-enrollment-token"
+```
+
+Status:
+
+```bash
+./status.sh
+tail -f "$HOME/Library/Logs/VulcanAgent/agent.log"
+```
+
+Sem `membership-id`, o macOS aparece no painel como dispositivo aguardando adoção.
 
 Instalação local em PowerShell Admin:
 

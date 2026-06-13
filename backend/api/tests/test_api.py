@@ -111,6 +111,46 @@ def test_hierarchy_returns_dynamic_tree_nodes() -> None:
     assert nodes[0]["visibleScope"] in {"self", "subtree", "tenant", "global"}
 
 
+def test_teams_and_pending_adoption_contracts_are_available() -> None:
+    token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    teams_response = client.get("/teams", headers=headers)
+    pending_response = client.get("/devices/pending-adoption", headers=headers)
+
+    assert teams_response.status_code == 200
+    assert any(item["name"] == "Financeiro" for item in teams_response.json())
+    assert pending_response.status_code == 200
+    pending_devices = pending_response.json()
+    assert len(pending_devices) >= 1
+    assert pending_devices[0]["adoptionStatus"] == "pending"
+
+
+def test_mock_device_adoption_and_metrics_export_contracts() -> None:
+    token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+    device_id = "00000000-0000-0000-0000-000000000901"
+
+    adoption_response = client.post(
+        f"/devices/{device_id}/adopt",
+        headers=headers,
+        json={
+            "tenantId": "00000000-0000-0000-0000-000000000301",
+            "mode": "dry",
+            "policy": "standard",
+        },
+    )
+    detailed_response = client.get("/metrics/detailed?period=24h", headers=headers)
+    export_response = client.get("/metrics/export?format=csv&period=24h", headers=headers)
+
+    assert adoption_response.status_code == 200
+    assert adoption_response.json()["adopted"] is True
+    assert adoption_response.json()["device"]["adoptionStatus"] == "adopted"
+    assert detailed_response.status_code == 200
+    assert export_response.status_code == 200
+    assert "data_hora,usuario,equipe" in export_response.text
+
+
 def test_supabase_status_is_available() -> None:
     token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
     response = client.get("/supabase/status", headers={"Authorization": f"Bearer {token}"})

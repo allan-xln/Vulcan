@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+from io import StringIO
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,11 +23,16 @@ from app.schemas import (
     AgentHeartbeatRequest,
     AgentHeartbeatResponse,
     AgentLogsRequest,
+    DeviceAdoptionRequest,
+    DeviceMoveRequest,
     DeviceOwnerUpdate,
     MembershipCreate,
     MembershipUpdate,
     NotificationSendRequest,
     NotificationSendResponse,
+    TeamCreate,
+    TeamMemberCreate,
+    TeamUpdate,
 )
 from app.security import AuthContext
 
@@ -380,6 +387,218 @@ class VulcanRepository:
                 """,
                 params,
             ).fetchall())
+
+    def _ensure_team_tables(self, conn: psycopg.Connection) -> None:
+        conn.execute(
+            """
+            create table if not exists public.teams (
+              id uuid primary key default gen_random_uuid(),
+              tenant_id uuid not null references public.tenants (id) on delete cascade,
+              name text not null,
+              description text,
+              color text not null default '#f97316',
+              status text not null default 'active' check (status in ('active', 'archived')),
+              metadata jsonb not null default '{}'::jsonb,
+              created_at timestamptz not null default timezone('utc', now()),
+              updated_at timestamptz not null default timezone('utc', now()),
+              unique (tenant_id, name)
+            )
+            """
+        )
+        conn.execute(
+            """
+            create table if not exists public.team_members (
+              id uuid primary key default gen_random_uuid(),
+              tenant_id uuid not null references public.tenants (id) on delete cascade,
+              team_id uuid not null references public.teams (id) on delete cascade,
+              membership_id uuid not null references public.memberships (id) on delete cascade,
+              role_in_team text not null default 'membro',
+              created_at timestamptz not null default timezone('utc', now()),
+              updated_at timestamptz not null default timezone('utc', now()),
+              unique (tenant_id, team_id, membership_id)
+            )
+            """
+        )
+        conn.execute("create index if not exists idx_teams_tenant_status on public.teams (tenant_id, status)")
+        conn.execute("create index if not exists idx_team_members_membership on public.team_members (tenant_id, membership_id)")
+
+    def _ensure_team_write(self, access: AccessScope, tenant_id: UUID) -> None:
+        if not access.is_root and access.tenant_id != tenant_id:
+            raise ValueError("team tenant outside current context")
+        if not access.is_root and access.scope == "self":
+            raise ValueError("team writes require manager scope")
+
+    def _team_row(self, conn: psycopg.Connection, access: AccessScope, team_id: UUID) -> dict | None:
+        self._ensure_team_tables(conn)
+        row = conn.execute(
+            """
+            select t.id, t.tenant_id as "tenantId", t.name, t.description, t.color,
+                   count(distinct tm.membership_id)::int as "membersCount",
+                   count(distinct d.id)::int as "devicesCount",
+                   coalesce(sum(case when om.metric_key = 'active_seconds' then om.value_numeric else 0 end), 0)::float as "activeSeconds",
+                   coalesce(sum(case when om.metric_key = 'idle_seconds' then om.value_numeric else 0 end), 0)::float as "idleSeconds"
+            from public.teams t
+            left join public.team_members tm on tm.team_id = t.id and tm.tenant_id = t.tenant_id
+            left join public.devices d on d.tenant_id = t.tenant_id and d.metadata ->> 'teamId' = t.id::text
+            left join public.operational_metrics om on om.tenant_id = t.tenant_id and om.membership_id = tm.membership_id
+            where t.tenant_id = %s and t.id = %s and t.status = 'active'
+            group by t.id
+            """,
+            (access.tenant_id, team_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_teams(self, context: AuthContext) -> list[dict]:
+        if not self.enabled:
+            return [
+                {"id": UUID("00000000-0000-0000-0000-000000700001"), "tenantId": DEMO_TENANT_ID, "name": "Financeiro", "description": "Contas, faturamento e conciliação", "color": "#fb923c", "membersCount": 2, "devicesCount": 2, "activeSeconds": 7200, "idleSeconds": 1800},
+                {"id": UUID("00000000-0000-0000-0000-000000700002"), "tenantId": DEMO_TENANT_ID, "name": "Operação", "description": "Execução operacional e atendimento", "color": "#34d399", "membersCount": 4, "devicesCount": 4, "activeSeconds": 12800, "idleSeconds": 2600},
+            ]
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_tables(conn)
+            membership_condition, membership_params = self._membership_filter(access, "m")
+            if access.scope in {"tenant", "global"} or access.is_root:
+                visibility = "true"
+                params: tuple[object, ...] = (access.tenant_id,)
+            else:
+                visibility = f"exists (select 1 from public.team_members vtm join public.memberships m on m.id = vtm.membership_id where vtm.team_id = t.id and {membership_condition})"
+                params = (access.tenant_id, *membership_params)
+            return list(conn.execute(
+                f"""
+                select t.id, t.tenant_id as "tenantId", t.name, t.description, t.color,
+                       count(distinct tm.membership_id)::int as "membersCount",
+                       count(distinct d.id)::int as "devicesCount",
+                       coalesce(sum(case when om.metric_key = 'active_seconds' then om.value_numeric else 0 end), 0)::float as "activeSeconds",
+                       coalesce(sum(case when om.metric_key = 'idle_seconds' then om.value_numeric else 0 end), 0)::float as "idleSeconds"
+                from public.teams t
+                left join public.team_members tm on tm.team_id = t.id and tm.tenant_id = t.tenant_id
+                left join public.devices d on d.tenant_id = t.tenant_id and d.metadata ->> 'teamId' = t.id::text
+                left join public.operational_metrics om on om.tenant_id = t.tenant_id and om.membership_id = tm.membership_id
+                where t.tenant_id = %s and t.status = 'active' and {visibility}
+                group by t.id
+                order by t.name
+                """,
+                params,
+            ).fetchall())
+
+    def create_team(self, context: AuthContext, request: TeamCreate) -> dict:
+        if not self.enabled:
+            return {**request.model_dump(by_alias=True), "id": uuid4(), "membersCount": 0, "devicesCount": 0, "activeSeconds": 0, "idleSeconds": 0}
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_write(access, request.tenant_id)
+            self._ensure_team_tables(conn)
+            row = conn.execute(
+                """
+                insert into public.teams (tenant_id, name, description, color)
+                values (%s, %s, %s, %s)
+                on conflict (tenant_id, name) do update
+                set description = excluded.description,
+                    color = excluded.color,
+                    status = 'active',
+                    updated_at = timezone('utc', now())
+                returning id
+                """,
+                (request.tenant_id, request.name.strip(), request.description, request.color),
+            ).fetchone()
+            self.write_audit(conn, context, request.tenant_id, "team.created", "team", row["id"], {"name": request.name})
+            conn.commit()
+            return self._team_row(conn, access, row["id"]) or {}
+
+    def update_team(self, context: AuthContext, team_id: UUID, request: TeamUpdate) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_write(access, access.tenant_id)
+            self._ensure_team_tables(conn)
+            existing = conn.execute("select id from public.teams where tenant_id = %s and id = %s", (access.tenant_id, team_id)).fetchone()
+            if not existing:
+                return None
+            row = conn.execute(
+                """
+                update public.teams
+                set name = coalesce(%s, name),
+                    description = coalesce(%s, description),
+                    color = coalesce(%s, color),
+                    status = coalesce(%s, status),
+                    updated_at = timezone('utc', now())
+                where tenant_id = %s and id = %s
+                returning id
+                """,
+                (request.name, request.description, request.color, request.status, access.tenant_id, team_id),
+            ).fetchone()
+            self.write_audit(conn, context, access.tenant_id, "team.updated", "team", team_id, request.model_dump(exclude_none=True))
+            conn.commit()
+            return self._team_row(conn, access, row["id"]) if row else None
+
+    def delete_team(self, context: AuthContext, team_id: UUID) -> dict | None:
+        return self.update_team(context, team_id, TeamUpdate(status="archived"))
+
+    def list_team_members(self, context: AuthContext, team_id: UUID) -> list[dict]:
+        if not self.enabled:
+            return []
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_tables(conn)
+            condition, params = self._membership_filter(access, "m")
+            return list(conn.execute(
+                f"""
+                select tm.id, tm.tenant_id as "tenantId", tm.team_id as "teamId",
+                       tm.membership_id as "membershipId", tm.role_in_team as "roleInTeam",
+                       m.full_name as "memberName", m.title as "memberTitle"
+                from public.team_members tm
+                join public.memberships m on m.id = tm.membership_id and m.status = 'active'
+                where tm.tenant_id = %s and tm.team_id = %s and {condition}
+                order by m.hierarchy_level nulls last, m.full_name
+                """,
+                (access.tenant_id, team_id, *params),
+            ).fetchall())
+
+    def add_team_member(self, context: AuthContext, team_id: UUID, request: TeamMemberCreate) -> dict:
+        if not self.enabled:
+            return {}
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_write(access, request.tenant_id)
+            self._ensure_team_tables(conn)
+            self._assert_membership_visible(conn, access, request.membership_id)
+            team = conn.execute("select id from public.teams where tenant_id = %s and id = %s and status = 'active'", (request.tenant_id, team_id)).fetchone()
+            if not team:
+                raise ValueError("team not found")
+            row = conn.execute(
+                """
+                insert into public.team_members (tenant_id, team_id, membership_id, role_in_team)
+                values (%s, %s, %s, %s)
+                on conflict (tenant_id, team_id, membership_id) do update
+                set role_in_team = excluded.role_in_team,
+                    updated_at = timezone('utc', now())
+                returning id
+                """,
+                (request.tenant_id, team_id, request.membership_id, request.role_in_team),
+            ).fetchone()
+            self.write_audit(conn, context, request.tenant_id, "team.member.upserted", "team", team_id, {"membership_id": str(request.membership_id)})
+            conn.commit()
+            members = self.list_team_members(context, team_id)
+            return next((member for member in members if member["id"] == row["id"]), members[-1] if members else {})
+
+    def remove_team_member(self, context: AuthContext, team_id: UUID, membership_id: UUID) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_write(access, access.tenant_id)
+            self._ensure_team_tables(conn)
+            result = conn.execute(
+                "delete from public.team_members where tenant_id = %s and team_id = %s and membership_id = %s returning team_id",
+                (access.tenant_id, team_id, membership_id),
+            ).fetchone()
+            if not result:
+                return None
+            self.write_audit(conn, context, access.tenant_id, "team.member.removed", "team", team_id, {"membership_id": str(membership_id)})
+            conn.commit()
+            return self._team_row(conn, access, team_id)
 
     def list_memberships(self, context: AuthContext) -> list[dict]:
         if not self.enabled:
@@ -846,6 +1065,7 @@ class VulcanRepository:
             return DEVICES
         with self._connect() as conn:
             access = self._access(conn, context)
+            self._ensure_team_tables(conn)
             self._repair_local_test_agent_scope(conn, access)
             condition, params = self._owner_filter(access, "d.owner_membership_id", "d.tenant_id")
             real_data_condition = self._real_agent_data_filter(access, "d")
@@ -861,14 +1081,63 @@ class VulcanRepository:
                        coalesce((d.metadata ->> 'queueDepth')::int, 0) as "queueDepth",
                        nullif(d.metadata ->> 'lastError', '') as "lastError",
                        d.metadata ->> 'localIp' as "localIp",
-                       d.metadata ->> 'agentVersion' as "agentVersion"
+                       d.metadata ->> 'agentVersion' as "agentVersion",
+                       d.metadata ->> 'osUser' as "osUser",
+                       coalesce(d.metadata ->> 'adoptionStatus', case when d.owner_membership_id is null then 'pending' else 'adopted' end) as "adoptionStatus",
+                       d.metadata ->> 'adoptionCode' as "adoptionCode",
+                       nullif(d.metadata ->> 'teamId', '')::uuid as "teamId",
+                       t.name as "teamName"
                 from public.devices d
                 left join public.memberships m on m.id = d.owner_membership_id
+                left join public.teams t on t.id = nullif(d.metadata ->> 'teamId', '')::uuid and t.tenant_id = d.tenant_id and t.status = 'active'
                 where {condition}
                   and {real_data_condition}
                   {agent_only_condition}
                 order by d.last_seen_at desc nulls last, d.hostname
                 limit 100
+                """,
+                params,
+            ).fetchall())
+
+    def list_pending_adoption_devices(self, context: AuthContext) -> list[dict]:
+        if not self.enabled:
+            return [
+                {**device, "ownerMembershipId": None, "owner": "Aguardando adoção", "adoptionStatus": "pending", "adoptionCode": "VLC-DEMO"}
+                for device in DEVICES
+                if not device.get("ownerMembershipId")
+            ]
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            if access.scope == "self" and not access.is_root:
+                return []
+            self._ensure_team_tables(conn)
+            condition = "d.tenant_id = %s" if not access.is_root else "true"
+            params: tuple[object, ...] = (access.tenant_id,) if not access.is_root else ()
+            return list(conn.execute(
+                f"""
+                select d.id, d.tenant_id as "tenantId",
+                       d.owner_membership_id as "ownerMembershipId",
+                       'Aguardando adoção' as owner,
+                       d.hostname, d.os, d.status,
+                       coalesce(d.last_seen_at, d.created_at)::text as "lastSeenAt",
+                       d.metadata ->> 'collectionQuality' as "collectionQuality",
+                       coalesce((d.metadata ->> 'queueDepth')::int, 0) as "queueDepth",
+                       nullif(d.metadata ->> 'lastError', '') as "lastError",
+                       d.metadata ->> 'localIp' as "localIp",
+                       d.metadata ->> 'agentVersion' as "agentVersion",
+                       d.metadata ->> 'osUser' as "osUser",
+                       coalesce(d.metadata ->> 'adoptionStatus', 'pending') as "adoptionStatus",
+                       d.metadata ->> 'adoptionCode' as "adoptionCode",
+                       nullif(d.metadata ->> 'teamId', '')::uuid as "teamId",
+                       t.name as "teamName"
+                from public.devices d
+                left join public.teams t on t.id = nullif(d.metadata ->> 'teamId', '')::uuid and t.tenant_id = d.tenant_id and t.status = 'active'
+                where {condition}
+                  and d.owner_membership_id is null
+                  and coalesce(d.metadata ->> 'source', '') = 'vulcan-agent'
+                  and coalesce(d.metadata ->> 'adoptionIgnored', 'false') <> 'true'
+                order by d.last_seen_at desc nulls last, d.created_at desc
+                limit 50
                 """,
                 params,
             ).fetchall())
@@ -953,6 +1222,188 @@ class VulcanRepository:
                 return item
         return None
 
+    def move_device(self, context: AuthContext, device_id: UUID, request: DeviceMoveRequest) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            if not access.is_root and request.tenant_id != access.tenant_id:
+                raise ValueError("device tenant outside current context")
+            if request.owner_membership_id:
+                self._assert_membership_visible(conn, access, request.owner_membership_id)
+            if request.team_id:
+                self._ensure_team_tables(conn)
+                team = conn.execute(
+                    "select id from public.teams where tenant_id = %s and id = %s and status = 'active'",
+                    (request.tenant_id, request.team_id),
+                ).fetchone()
+                if not team:
+                    raise ValueError("team not found")
+            row = conn.execute(
+                """
+                update public.devices
+                set owner_membership_id = coalesce(%s, owner_membership_id),
+                    metadata = metadata || %s,
+                    updated_at = timezone('utc', now())
+                where tenant_id = %s and id = %s
+                returning id
+                """,
+                (
+                    request.owner_membership_id,
+                    Jsonb(
+                        {
+                            "teamId": str(request.team_id) if request.team_id else None,
+                            "movedAt": datetime.now(timezone.utc).isoformat(),
+                            "movedBy": context.user_id,
+                        }
+                    ),
+                    request.tenant_id,
+                    device_id,
+                ),
+            ).fetchone()
+            if not row:
+                return None
+            self.write_audit(conn, context, request.tenant_id, "device.moved", "device", device_id, request.model_dump(mode="json", exclude_none=True))
+            conn.commit()
+        return next((item for item in self.list_devices(context) if item["id"] == device_id), None)
+
+    def adopt_device(self, context: AuthContext, device_id: UUID, request: DeviceAdoptionRequest) -> dict:
+        if not self.enabled:
+            device = next((item for item in DEVICES if item["id"] == device_id), None)
+            if not device:
+                raise ValueError("device not found")
+            return {"device": {**device, "adoptionStatus": "adopted"}, "membership": None, "team": None, "adopted": True}
+        membership_id: UUID | None = request.membership_id
+        membership: dict | None = None
+        if request.mode == "new_user":
+            if request.user is None:
+                raise ValueError("new_user adoption requires user payload")
+            membership = self.create_membership(context, request.user)
+            membership_id = membership["id"]
+        elif request.mode == "existing_user" and membership_id is None:
+            raise ValueError("existing_user adoption requires membershipId")
+        elif request.mode == "dry":
+            membership_id = None
+
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_write(access, request.tenant_id)
+            self._ensure_team_tables(conn)
+            device = conn.execute(
+                """
+                select id, tenant_id, owner_membership_id, metadata
+                from public.devices
+                where tenant_id = %s and id = %s
+                """,
+                (request.tenant_id, device_id),
+            ).fetchone()
+            if not device:
+                raise ValueError("device not found")
+
+            if request.mode == "existing_user":
+                self._assert_membership_visible(conn, access, membership_id)
+
+            if membership_id and request.team_id:
+                team = conn.execute(
+                    "select id from public.teams where tenant_id = %s and id = %s and status = 'active'",
+                    (request.tenant_id, request.team_id),
+                ).fetchone()
+                if not team:
+                    raise ValueError("team not found")
+                conn.execute(
+                    """
+                    insert into public.team_members (tenant_id, team_id, membership_id, role_in_team)
+                    values (%s, %s, %s, 'membro')
+                    on conflict (tenant_id, team_id, membership_id) do update
+                    set role_in_team = excluded.role_in_team,
+                        updated_at = timezone('utc', now())
+                    """,
+                    (request.tenant_id, request.team_id, membership_id),
+                )
+
+            row = conn.execute(
+                """
+                update public.devices
+                set owner_membership_id = %s,
+                    status = case when %s::uuid is null then 'pending' else 'online' end,
+                    metadata = metadata || %s,
+                    updated_at = timezone('utc', now())
+                where tenant_id = %s and id = %s
+                returning id
+                """,
+                (
+                    membership_id,
+                    membership_id,
+                    Jsonb(
+                        {
+                            "adoptionStatus": "pending_details" if request.mode == "dry" else "adopted",
+                            "adoptedAt": datetime.now(timezone.utc).isoformat(),
+                            "adoptedBy": context.user_id,
+                            "teamId": str(request.team_id) if request.team_id else None,
+                            "collectionPolicy": request.policy,
+                        }
+                    ),
+                    request.tenant_id,
+                    device_id,
+                ),
+            ).fetchone()
+            if not row:
+                raise ValueError("device not found")
+            self.write_audit(
+                conn,
+                context,
+                request.tenant_id,
+                "device.adopted",
+                "device",
+                device_id,
+                {
+                    "previous_owner_membership_id": str(device["owner_membership_id"]) if device["owner_membership_id"] else None,
+                    "owner_membership_id": str(membership_id) if membership_id else None,
+                    "team_id": str(request.team_id) if request.team_id else None,
+                    "mode": request.mode,
+                    "policy": request.policy,
+                },
+            )
+            conn.commit()
+            refreshed_device = conn.execute(
+                """
+                select d.id, d.tenant_id as "tenantId",
+                       d.owner_membership_id as "ownerMembershipId",
+                       coalesce(m.full_name, 'Aguardando adoção') as owner,
+                       d.hostname, d.os, d.status,
+                       coalesce(d.last_seen_at, d.created_at)::text as "lastSeenAt",
+                       d.metadata ->> 'collectionQuality' as "collectionQuality",
+                       coalesce((d.metadata ->> 'queueDepth')::int, 0) as "queueDepth",
+                       nullif(d.metadata ->> 'lastError', '') as "lastError",
+                       d.metadata ->> 'localIp' as "localIp",
+                       d.metadata ->> 'agentVersion' as "agentVersion",
+                       d.metadata ->> 'osUser' as "osUser",
+                       coalesce(d.metadata ->> 'adoptionStatus', case when d.owner_membership_id is null then 'pending' else 'adopted' end) as "adoptionStatus",
+                       d.metadata ->> 'adoptionCode' as "adoptionCode",
+                       nullif(d.metadata ->> 'teamId', '')::uuid as "teamId",
+                       t.name as "teamName"
+                from public.devices d
+                left join public.memberships m on m.id = d.owner_membership_id
+                left join public.teams t on t.id = nullif(d.metadata ->> 'teamId', '')::uuid and t.tenant_id = d.tenant_id and t.status = 'active'
+                where d.tenant_id = %s and d.id = %s
+                limit 1
+                """,
+                (request.tenant_id, device_id),
+            ).fetchone()
+            team = None
+            if request.team_id:
+                team_row = conn.execute(
+                    """
+                    select id, tenant_id as "tenantId", name, description, color
+                    from public.teams
+                    where tenant_id = %s and id = %s
+                    limit 1
+                    """,
+                    (request.tenant_id, request.team_id),
+                ).fetchone()
+                team = dict(team_row) if team_row else None
+            return {"device": dict(refreshed_device) if refreshed_device else None, "membership": membership, "team": team, "adopted": True}
+
     def list_activity_events(self, context: AuthContext) -> list[dict]:
         if not self.enabled:
             return ACTIVITY_EVENTS
@@ -1036,6 +1487,7 @@ class VulcanRepository:
                 linked_user=request.linked_user,
                 os_user=request.os_user,
             )
+            adoption_code = f"VLC-{str(request.machine_fingerprint).upper()[:6]}"
             row = conn.execute(
                 """
                 insert into public.devices (
@@ -1044,13 +1496,13 @@ class VulcanRepository:
                 )
                 values (
                   coalesce(%s, gen_random_uuid()), %s, %s, %s, %s,
-                  %s, 'online', timezone('utc', now()), %s
+                  %s, %s, timezone('utc', now()), %s
                 )
                 on conflict (tenant_id, device_fingerprint) do update
                 set owner_membership_id = coalesce(excluded.owner_membership_id, public.devices.owner_membership_id),
                     hostname = excluded.hostname,
                     os = excluded.os,
-                    status = 'online',
+                    status = case when coalesce(excluded.owner_membership_id, public.devices.owner_membership_id) is null then 'pending' else 'online' end,
                     last_seen_at = timezone('utc', now()),
                     metadata = public.devices.metadata || excluded.metadata,
                     updated_at = timezone('utc', now())
@@ -1063,12 +1515,16 @@ class VulcanRepository:
                     request.hostname,
                     request.os_version or "Windows",
                     request.machine_fingerprint,
+                    "online" if membership_id else "pending",
                     Jsonb(
                         {
                             "source": "vulcan-agent",
                             "agentVersion": request.agent_version,
                             "linkedUser": request.linked_user,
                             "osUser": request.os_user,
+                            "osVersion": request.os_version,
+                            "adoptionStatus": "adopted" if membership_id else "pending",
+                            "adoptionCode": adoption_code,
                             "roleLevel": request.role_level,
                             "department": request.department,
                             "managerMembershipId": str(request.manager_membership_id) if request.manager_membership_id else None,
@@ -1100,7 +1556,7 @@ class VulcanRepository:
                 row = conn.execute(
                     """
                     update public.devices
-                    set status = %s,
+                    set status = case when owner_membership_id is null then 'pending' else %s end,
                         hostname = %s,
                         last_seen_at = timezone('utc', now()),
                         metadata = metadata || %s,
@@ -1149,7 +1605,7 @@ class VulcanRepository:
                             """,
                             (
                                 membership_id,
-                                Jsonb({"autoLinkedMembershipId": str(membership_id)}),
+                                Jsonb({"autoLinkedMembershipId": str(membership_id), "adoptionStatus": "adopted"}),
                                 request.tenant_id,
                                 row["id"],
                             ),
@@ -1369,6 +1825,116 @@ class VulcanRepository:
                 """,
                 params,
             ).fetchall())
+
+    def _period_interval(self, period: str) -> str:
+        return {
+            "24h": "24 hours",
+            "7d": "7 days",
+            "30d": "30 days",
+            "90d": "90 days",
+        }.get(period, "24 hours")
+
+    def list_detailed_metrics(
+        self,
+        context: AuthContext,
+        *,
+        period: str = "24h",
+        team_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        device_id: UUID | None = None,
+        app: str | None = None,
+    ) -> list[dict]:
+        if not self.enabled:
+            return []
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_team_tables(conn)
+            condition, params = self._owner_filter(access, "e.membership_id", "e.tenant_id")
+            filters = [condition, "e.occurred_at >= timezone('utc', now()) - (%s::interval)"]
+            query_params: list[object] = [*params, self._period_interval(period)]
+            if team_id:
+                filters.append("tm.team_id = %s")
+                query_params.append(team_id)
+            if membership_id:
+                self._assert_membership_visible(conn, access, membership_id)
+                filters.append("e.membership_id = %s")
+                query_params.append(membership_id)
+            if device_id:
+                filters.append("e.device_id = %s")
+                query_params.append(device_id)
+            if app:
+                filters.append("lower(coalesce(e.app_name, '')) like lower(%s)")
+                query_params.append(f"%{app}%")
+            real_data_condition = self._real_agent_data_filter(access, "e")
+            filters.append(real_data_condition)
+            return list(conn.execute(
+                f"""
+                select e.id::text,
+                       e.tenant_id as "tenantId",
+                       e.membership_id as "membershipId",
+                       coalesce(m.full_name, 'Sem usuário') as "userName",
+                       tm.team_id as "teamId",
+                       t.name as "teamName",
+                       coalesce(dpt.name, 'Sem departamento') as department,
+                       e.device_id as "deviceId",
+                       coalesce(d.hostname, 'Sem dispositivo') as device,
+                       coalesce(d.os, 'desconhecido') as os,
+                       coalesce(e.app_name, 'Desconhecido') as app,
+                       coalesce(e.category, 'operacional') as category,
+                       e.event_type as "eventType",
+                       coalesce(e.duration_seconds, 0)::int as "durationSeconds",
+                       e.occurred_at::text as "occurredAt",
+                       d.metadata ->> 'collectionQuality' as "collectionQuality"
+                from public.activity_events e
+                left join public.memberships m on m.id = e.membership_id
+                left join public.departments dpt on dpt.id = m.department_id
+                left join public.devices d on d.id = e.device_id
+                left join public.team_members tm on tm.tenant_id = e.tenant_id and tm.membership_id = e.membership_id
+                left join public.teams t on t.id = tm.team_id and t.status = 'active'
+                where {' and '.join(filters)}
+                order by e.occurred_at desc
+                limit 1000
+                """,
+                tuple(query_params),
+            ).fetchall())
+
+    def export_metrics_csv(
+        self,
+        context: AuthContext,
+        *,
+        period: str = "24h",
+        team_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        device_id: UUID | None = None,
+        app: str | None = None,
+    ) -> str:
+        rows = self.list_detailed_metrics(context, period=period, team_id=team_id, membership_id=membership_id, device_id=device_id, app=app)
+        output = StringIO()
+        output.write("\ufeff")
+        writer = csv.writer(output)
+        writer.writerow(["gerado_em", datetime.now(timezone.utc).isoformat()])
+        writer.writerow(["periodo", period])
+        writer.writerow(["filtro_team_id", str(team_id or "")])
+        writer.writerow(["filtro_membership_id", str(membership_id or "")])
+        writer.writerow(["filtro_device_id", str(device_id or "")])
+        writer.writerow(["filtro_app", app or ""])
+        writer.writerow([])
+        writer.writerow(["data_hora", "usuario", "equipe", "departamento", "dispositivo", "so", "app", "categoria", "evento", "duracao_segundos", "qualidade_coleta"])
+        for row in rows:
+            writer.writerow([
+                row["occurredAt"],
+                row["userName"],
+                row["teamName"] or "",
+                row["department"],
+                row["device"],
+                row["os"],
+                row["app"],
+                row["category"],
+                row["eventType"],
+                row["durationSeconds"],
+                row["collectionQuality"] or "",
+            ])
+        return output.getvalue()
 
     def operational_intelligence(self, context: AuthContext) -> dict:
         now = datetime.now(timezone.utc)

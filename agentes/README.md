@@ -22,7 +22,16 @@ Artefato gerado:
 
 ## macOS
 
-Status: estrutura reservada. O agente macOS deve usar LaunchDaemon/LaunchAgent, Accessibility permission para app ativo, fila offline e o mesmo contrato HTTP em `agentes/shared`.
+Status: skeleton funcional com Python 3, LaunchAgent por usuario, heartbeat, sync, fila offline e contrato HTTP compartilhado. A coleta de aplicativo ativo usa `osascript`/System Events quando o macOS permitir; sem permissao de Acessibilidade, o agente marca `collectionQuality=blocked_by_os`.
+
+Scripts:
+
+- `agentes/macos/install.sh`
+- `agentes/macos/status.sh`
+- `agentes/macos/uninstall.sh`
+- `agentes/macos/vulcan_macos_agent.py`
+
+Ainda faltam para producao macOS: pacote `.pkg`, assinatura, notarizacao, app de status/tray e fluxo guiado de permissao Accessibility.
 
 ## Contrato com backend
 

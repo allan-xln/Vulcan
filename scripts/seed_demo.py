@@ -46,6 +46,23 @@ DEPARTMENTS = {
     "executive": UUID("00000000-0000-0000-0000-000000200005"),
 }
 
+TEAMS = {
+    "finance": UUID("00000000-0000-0000-0000-000000700001"),
+    "operations": UUID("00000000-0000-0000-0000-000000700002"),
+    "administrative": UUID("00000000-0000-0000-0000-000000700003"),
+    "support": UUID("00000000-0000-0000-0000-000000700004"),
+    "commercial": UUID("00000000-0000-0000-0000-000000700005"),
+    "logistics": UUID("00000000-0000-0000-0000-000000700006"),
+}
+
+TEAM_BY_DEPARTMENT = {
+    "executive": "administrative",
+    "operations": "operations",
+    "finance": "finance",
+    "support": "support",
+    "logistics": "logistics",
+}
+
 PEOPLE = [
     {
         "login": "teste",
@@ -188,6 +205,12 @@ DEVICES = [
     ("LINUX-LOG-002", "Ubuntu 22.04 LTS", "online", "medium", 2, "operador2"),
 ]
 
+PENDING_DEVICES = [
+    ("WIN-NOVO-001", "Windows 11 Enterprise", "pending", "medium", 0, "joao.silva", "10.30.9.21"),
+    ("WIN-NOVO-002", "Windows 11 Pro", "pending", "high", 0, "maria.ops", "10.30.9.22"),
+    ("LINUX-NOVO-001", "Ubuntu 24.04 LTS", "pending", "blocked_by_os", 4, "carlos.linux", "10.30.9.23"),
+]
+
 APP_PROFILES = {
     "finance": [
         ("ERP Billing", "erp/crm", "Faturamento - conferência de notas", 28),
@@ -302,6 +325,37 @@ def seed() -> None:
             (DEMO_TENANT_ID, Jsonb({"seed": SEED_TAG, "mode": "commercial-demo", "demoMode": True})),
         )
 
+        conn.execute(
+            """
+            create table if not exists public.teams (
+              id uuid primary key default gen_random_uuid(),
+              tenant_id uuid not null references public.tenants (id) on delete cascade,
+              name text not null,
+              description text,
+              color text not null default '#f97316',
+              status text not null default 'active' check (status in ('active', 'archived')),
+              metadata jsonb not null default '{}'::jsonb,
+              created_at timestamptz not null default timezone('utc', now()),
+              updated_at timestamptz not null default timezone('utc', now()),
+              unique (tenant_id, name)
+            )
+            """
+        )
+        conn.execute(
+            """
+            create table if not exists public.team_members (
+              id uuid primary key default gen_random_uuid(),
+              tenant_id uuid not null references public.tenants (id) on delete cascade,
+              team_id uuid not null references public.teams (id) on delete cascade,
+              membership_id uuid not null references public.memberships (id) on delete cascade,
+              role_in_team text not null default 'membro',
+              created_at timestamptz not null default timezone('utc', now()),
+              updated_at timestamptz not null default timezone('utc', now()),
+              unique (tenant_id, team_id, membership_id)
+            )
+            """
+        )
+
         role_rows = {
             "admin": ("tenant-admin", "Administrador do tenant", "tenant"),
             "hierarchy": ("gestor-hierarquico", "Gestor hierárquico", "hierarchy"),
@@ -412,9 +466,57 @@ def seed() -> None:
         conn.execute("delete from public.operational_metrics where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))
         conn.execute("delete from public.activity_events where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))
         conn.execute("delete from public.devices where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))
+        conn.execute(
+            "delete from public.team_members where tenant_id = %s and team_id in (select id from public.teams where tenant_id = %s and metadata ->> 'seed' = %s)",
+            (DEMO_TENANT_ID, DEMO_TENANT_ID, SEED_TAG),
+        )
+        conn.execute("delete from public.teams where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))
+
+        team_rows = {
+            "finance": ("Financeiro", "Contas, faturamento, conciliação e aprovação de pagamentos.", "#fb923c"),
+            "operations": ("Operação", "Execução operacional, fila diária e processos repetitivos.", "#34d399"),
+            "administrative": ("Administrativo", "Diretoria, backoffice e rotinas de governança.", "#facc15"),
+            "support": ("Suporte", "Atendimento, chamados e suporte técnico interno.", "#60a5fa"),
+            "commercial": ("Comercial", "Relacionamento, vendas e acompanhamento de oportunidades.", "#f472b6"),
+            "logistics": ("Logística", "Expedição, roteirização e rastreio operacional.", "#a78bfa"),
+        }
+        for key, (name, description, color) in team_rows.items():
+            conn.execute(
+                """
+                insert into public.teams (id, tenant_id, name, description, color, status, metadata)
+                values (%s, %s, %s, %s, %s, 'active', %s)
+                on conflict (id) do update
+                set name = excluded.name,
+                    description = excluded.description,
+                    color = excluded.color,
+                    status = 'active',
+                    metadata = excluded.metadata,
+                    updated_at = timezone('utc', now())
+                """,
+                (TEAMS[key], DEMO_TENANT_ID, name, description, color, Jsonb({"seed": SEED_TAG})),
+            )
+
+        for person in PEOPLE:
+            team_key = TEAM_BY_DEPARTMENT.get(person["department"], "operations")
+            conn.execute(
+                """
+                insert into public.team_members (tenant_id, team_id, membership_id, role_in_team)
+                values (%s, %s, %s, %s)
+                on conflict (tenant_id, team_id, membership_id) do update
+                set role_in_team = excluded.role_in_team,
+                    updated_at = timezone('utc', now())
+                """,
+                (
+                    DEMO_TENANT_ID,
+                    TEAMS[team_key],
+                    person["membership_id"],
+                    "gestor" if person["role"] in {"admin", "hierarchy"} else "membro",
+                ),
+            )
 
         for index, (hostname, os_name, status, quality, queue_depth, owner_login) in enumerate(DEVICES, start=1):
             owner = people_by_login[owner_login]
+            team_id = TEAMS[TEAM_BY_DEPARTMENT.get(owner["department"], "operations")]
             device_id = UUID(f"00000000-0000-0000-0000-00000050{index:04d}")
             conn.execute(
                 """
@@ -450,6 +552,51 @@ def seed() -> None:
                             "localIp": f"10.30.0.{20 + index}",
                             "department": owner["department"],
                             "linkedUser": owner_login,
+                            "teamId": str(team_id),
+                            "adoptionStatus": "adopted",
+                        }
+                    ),
+                ),
+            )
+
+        for index, (hostname, os_name, status, quality, queue_depth, os_user, local_ip) in enumerate(PENDING_DEVICES, start=1):
+            device_id = UUID(f"00000000-0000-0000-0000-00000059{index:04d}")
+            conn.execute(
+                """
+                insert into public.devices (id, tenant_id, owner_membership_id, hostname, os, device_fingerprint, status, last_seen_at, metadata)
+                values (%s, %s, null, %s, %s, %s, %s, %s, %s)
+                on conflict (id) do update
+                set owner_membership_id = null,
+                    tenant_id = excluded.tenant_id,
+                    hostname = excluded.hostname,
+                    os = excluded.os,
+                    device_fingerprint = excluded.device_fingerprint,
+                    status = excluded.status,
+                    last_seen_at = excluded.last_seen_at,
+                    metadata = excluded.metadata,
+                    updated_at = timezone('utc', now())
+                """,
+                (
+                    device_id,
+                    DEMO_TENANT_ID,
+                    hostname,
+                    os_name,
+                    f"vulcan-pending-demo-{hostname.lower()}",
+                    status,
+                    now - timedelta(minutes=2 + index * 5),
+                    Jsonb(
+                        {
+                            "seed": SEED_TAG,
+                            "source": "vulcan-agent",
+                            "agentVersion": "0.2.0",
+                            "collectionQuality": quality,
+                            "queueDepth": queue_depth,
+                            "localIp": local_ip,
+                            "osUser": os_user,
+                            "linkedUser": os_user,
+                            "adoptionStatus": "pending",
+                            "adoptionCode": f"VLC-DEMO-{index}",
+                            "privacyNotice": "O Vulcan mede fluxo operacional, não conteúdo pessoal.",
                         }
                     ),
                 ),
@@ -646,7 +793,7 @@ def seed() -> None:
             )
             values (%s, %s, 'seed.demo.completed', 'seed', %s, 'seed', %s)
             """,
-            (DEMO_TENANT_ID, people_by_login["teste"]["user_id"], Jsonb({"seed": SEED_TAG, "people": len(PEOPLE), "devices": len(DEVICES), "events": event_counter - 1}), Jsonb({"seed": SEED_TAG})),
+            (DEMO_TENANT_ID, people_by_login["teste"]["user_id"], Jsonb({"seed": SEED_TAG, "people": len(PEOPLE), "devices": len(DEVICES) + len(PENDING_DEVICES), "teams": len(TEAMS), "events": event_counter - 1}), Jsonb({"seed": SEED_TAG})),
         )
 
         conn.commit()

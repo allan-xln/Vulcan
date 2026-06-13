@@ -136,6 +136,11 @@ class Device(ApiModel):
     last_error: str | None = Field(default=None, alias="lastError")
     local_ip: str | None = Field(default=None, alias="localIp")
     agent_version: str | None = Field(default=None, alias="agentVersion")
+    os_user: str | None = Field(default=None, alias="osUser")
+    adoption_status: str | None = Field(default=None, alias="adoptionStatus")
+    adoption_code: str | None = Field(default=None, alias="adoptionCode")
+    team_id: UUID | None = Field(default=None, alias="teamId")
+    team_name: str | None = Field(default=None, alias="teamName")
 
 
 class DeviceOwnerUpdate(BaseModel):
@@ -143,6 +148,99 @@ class DeviceOwnerUpdate(BaseModel):
 
     tenant_id: UUID = Field(alias="tenantId")
     owner_membership_id: UUID | None = Field(default=None, alias="ownerMembershipId")
+
+
+class Team(ApiModel):
+    id: UUID
+    tenant_id: UUID = Field(alias="tenantId")
+    name: str
+    description: str | None = None
+    color: str
+    members_count: int = Field(default=0, alias="membersCount")
+    devices_count: int = Field(default=0, alias="devicesCount")
+    active_seconds: float = Field(default=0, alias="activeSeconds")
+    idle_seconds: float = Field(default=0, alias="idleSeconds")
+
+
+class TeamCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    name: str = Field(min_length=2)
+    description: str | None = None
+    color: str = "#f97316"
+
+
+class TeamUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str | None = Field(default=None, min_length=2)
+    description: str | None = None
+    color: str | None = None
+    status: str | None = None
+
+
+class TeamMember(ApiModel):
+    id: UUID
+    tenant_id: UUID = Field(alias="tenantId")
+    team_id: UUID = Field(alias="teamId")
+    membership_id: UUID = Field(alias="membershipId")
+    role_in_team: str = Field(alias="roleInTeam")
+    member_name: str = Field(alias="memberName")
+    member_title: str | None = Field(default=None, alias="memberTitle")
+
+
+class TeamMemberCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    membership_id: UUID = Field(alias="membershipId")
+    role_in_team: str = Field(default="membro", alias="roleInTeam")
+
+
+class DeviceAdoptionRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    mode: Literal["existing_user", "new_user", "dry"] = "existing_user"
+    membership_id: UUID | None = Field(default=None, alias="membershipId")
+    team_id: UUID | None = Field(default=None, alias="teamId")
+    policy: str = "standard"
+    user: MembershipCreate | None = None
+
+
+class DeviceAdoptionResponse(ApiModel):
+    device: Device
+    membership: Membership | None = None
+    team: Team | None = None
+    adopted: bool
+
+
+class DeviceMoveRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    owner_membership_id: UUID | None = Field(default=None, alias="ownerMembershipId")
+    team_id: UUID | None = Field(default=None, alias="teamId")
+
+
+class MetricsDetailedRow(ApiModel):
+    id: str
+    tenant_id: UUID = Field(alias="tenantId")
+    membership_id: UUID | None = Field(default=None, alias="membershipId")
+    user_name: str = Field(alias="userName")
+    team_id: UUID | None = Field(default=None, alias="teamId")
+    team_name: str | None = Field(default=None, alias="teamName")
+    department: str
+    device_id: UUID | None = Field(default=None, alias="deviceId")
+    device: str
+    os: str
+    app: str
+    category: str
+    event_type: str = Field(alias="eventType")
+    duration_seconds: int = Field(alias="durationSeconds")
+    occurred_at: str = Field(alias="occurredAt")
+    collection_quality: str | None = Field(default=None, alias="collectionQuality")
 
 
 class ActivityEvent(ApiModel):

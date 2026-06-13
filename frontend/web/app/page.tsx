@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Command,
   DatabaseZap,
+  Download,
   Flame,
   Gauge,
   Layers3,
@@ -102,6 +103,40 @@ type Device = {
   lastError?: string | null;
   localIp?: string | null;
   agentVersion?: string | null;
+  osUser?: string | null;
+  adoptionStatus?: string | null;
+  adoptionCode?: string | null;
+  teamId?: string | null;
+  teamName?: string | null;
+};
+
+type Team = {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string | null;
+  color: string;
+  membersCount: number;
+  devicesCount: number;
+  activeSeconds: number;
+  idleSeconds: number;
+};
+
+type MetricsDetailedRow = {
+  id: string;
+  userName: string;
+  teamId?: string | null;
+  teamName?: string | null;
+  department: string;
+  deviceId?: string | null;
+  device: string;
+  os: string;
+  app: string;
+  category: string;
+  eventType: string;
+  durationSeconds: number;
+  occurredAt: string;
+  collectionQuality?: string | null;
 };
 
 type OperationalMetric = {
@@ -951,6 +986,19 @@ function formatDuration(seconds: number) {
   return `${minutes}min`;
 }
 
+function formatEventDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
 function percentPt(value: number) {
   return `${Math.round((value || 0) * 100)}%`;
 }
@@ -1037,6 +1085,8 @@ export default function HomePage() {
   const [hierarchy, setHierarchy] = useState<HierarchyNode[]>(fallbackHierarchy);
   const [departments, setDepartments] = useState<DepartmentOption[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [pendingDevices, setPendingDevices] = useState<Device[]>([]);
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus>(fallbackSupabaseStatus);
   const [whatsAppStatus, setWhatsAppStatus] = useState<WhatsAppStatus>(fallbackWhatsAppStatus);
   const [emailStatuses, setEmailStatuses] = useState<EmailProviderStatus[]>(fallbackEmailStatuses);
@@ -1131,6 +1181,8 @@ export default function HomePage() {
       setHierarchy([]);
       setDepartments([]);
       setRoles([]);
+      setTeams([]);
+      setPendingDevices([]);
     }
 
     let cancelled = false;
@@ -1173,6 +1225,8 @@ export default function HomePage() {
         setHierarchy(hierarchyFallback);
         setDepartments([]);
         setRoles([]);
+        setTeams([]);
+        setPendingDevices([]);
         setLastRefreshAt(new Date());
         return;
       }
@@ -1186,7 +1240,9 @@ export default function HomePage() {
         nextOperationalIntelligence,
         nextHierarchy,
         nextDepartments,
-        nextRoles
+        nextRoles,
+        nextTeams,
+        nextPendingDevices
       ] = await Promise.all([
         fetchProtected<Metric[]>("/metrics", token!, metricFallback),
         fetchProtected<Insight[]>("/insights", token!, insightFallback),
@@ -1196,7 +1252,9 @@ export default function HomePage() {
         fetchProtected<OperationalIntelligence>("/operational-intelligence", token!, emptyOperationalIntelligence),
         fetchProtected<HierarchyNode[]>("/hierarchy", token!, hierarchyFallback),
         fetchProtected<DepartmentOption[]>("/departments", token!, []),
-        fetchProtected<RoleOption[]>("/roles", token!, [])
+        fetchProtected<RoleOption[]>("/roles", token!, []),
+        fetchProtected<Team[]>("/teams", token!, []),
+        fetchProtected<Device[]>("/devices/pending-adoption", token!, [])
       ]);
 
       if (cancelled) {
@@ -1212,6 +1270,8 @@ export default function HomePage() {
       setHierarchy(nextHierarchy);
       setDepartments(nextDepartments);
       setRoles(nextRoles);
+      setTeams(nextTeams);
+      setPendingDevices(nextPendingDevices);
       setLastRefreshAt(new Date());
     }
 
@@ -1272,6 +1332,10 @@ export default function HomePage() {
         setOperationalMetrics([]);
         setOperationalIntelligence(emptyOperationalIntelligence);
         setHierarchy([]);
+        setDepartments([]);
+        setRoles([]);
+        setTeams([]);
+        setPendingDevices([]);
       }
     } catch {
       if ((username === "admin" && password === "admin") || (username === "teste" && password === "teste")) {
@@ -1286,6 +1350,10 @@ export default function HomePage() {
           setOperationalMetrics([]);
           setOperationalIntelligence(emptyOperationalIntelligence);
           setHierarchy([]);
+          setDepartments([]);
+          setRoles([]);
+          setTeams([]);
+          setPendingDevices([]);
         }
         return;
       }
@@ -1340,16 +1408,20 @@ export default function HomePage() {
     if (!token) {
       return;
     }
-    const [nextHierarchy, nextDevices, nextDepartments, nextRoles] = await Promise.all([
+    const [nextHierarchy, nextDevices, nextDepartments, nextRoles, nextTeams, nextPendingDevices] = await Promise.all([
       fetchProtected<HierarchyNode[]>("/hierarchy", token, liveTestMode ? [] : fallbackHierarchy),
       fetchProtected<Device[]>("/devices", token, liveTestMode ? [] : fallbackDevices),
       fetchProtected<DepartmentOption[]>("/departments", token, []),
-      fetchProtected<RoleOption[]>("/roles", token, [])
+      fetchProtected<RoleOption[]>("/roles", token, []),
+      fetchProtected<Team[]>("/teams", token, []),
+      fetchProtected<Device[]>("/devices/pending-adoption", token, [])
     ]);
     setHierarchy(nextHierarchy);
     setDevices(nextDevices);
     setDepartments(nextDepartments);
     setRoles(nextRoles);
+    setTeams(nextTeams);
+    setPendingDevices(nextPendingDevices);
     setLastRefreshAt(new Date());
   }
 
@@ -1411,6 +1483,32 @@ export default function HomePage() {
     await refreshHierarchyData();
   }
 
+  async function handleDeviceAdoption(deviceId: string, membershipId: string | null, teamId: string | null, mode: "existing_user" | "dry" = "existing_user") {
+    if (!token) {
+      throw new Error("Sessão expirada.");
+    }
+    const response = await fetch(`${API_URL}/devices/${deviceId}/adopt`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Tenant-Id": DEMO_TENANT_ID
+      },
+      body: JSON.stringify({
+        tenantId: DEMO_TENANT_ID,
+        mode,
+        membershipId,
+        teamId,
+        policy: "standard"
+      })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Não foi possível adotar o dispositivo." }));
+      throw new Error(String(error.detail ?? "Não foi possível adotar o dispositivo."));
+    }
+    await refreshHierarchyData();
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#070707] text-zinc-100">
       <AnimatedAtmosphere />
@@ -1442,6 +1540,8 @@ export default function HomePage() {
             hierarchy={hierarchy}
             departments={departments}
             roles={roles}
+            teams={teams}
+            pendingDevices={pendingDevices}
             supabaseStatus={supabaseStatus}
             whatsAppStatus={whatsAppStatus}
             emailStatuses={emailStatuses}
@@ -1456,6 +1556,7 @@ export default function HomePage() {
             onDeviceOwnerChange={handleDeviceOwnerChange}
             onHierarchyMemberSave={handleHierarchyMemberSave}
             onHierarchyMemberDelete={handleHierarchyMemberDelete}
+            onDeviceAdoption={handleDeviceAdoption}
           />
         )}
       </AnimatePresence>
@@ -1708,6 +1809,8 @@ function DashboardShell({
   insights,
   notifications,
   devices,
+  teams,
+  pendingDevices,
   operationalMetrics,
   operationalIntelligence,
   hierarchy,
@@ -1726,7 +1829,8 @@ function DashboardShell({
   token,
   onDeviceOwnerChange,
   onHierarchyMemberSave,
-  onHierarchyMemberDelete
+  onHierarchyMemberDelete,
+  onDeviceAdoption
 }: {
   activeView: ViewKey;
   setView: (view: ViewKey) => void;
@@ -1737,6 +1841,8 @@ function DashboardShell({
   insights: Insight[];
   notifications: NotificationItem[];
   devices: Device[];
+  teams: Team[];
+  pendingDevices: Device[];
   operationalMetrics: OperationalMetric[];
   operationalIntelligence: OperationalIntelligence;
   hierarchy: HierarchyNode[];
@@ -1756,6 +1862,7 @@ function DashboardShell({
   onDeviceOwnerChange: (deviceId: string, ownerMembershipId: string | null) => void;
   onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
+  onDeviceAdoption: (deviceId: string, membershipId: string | null, teamId: string | null, mode?: "existing_user" | "dry") => Promise<void>;
 }) {
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -1791,6 +1898,8 @@ function DashboardShell({
               insights={insights}
               notifications={notifications}
               devices={devices}
+              teams={teams}
+              pendingDevices={pendingDevices}
               operationalMetrics={operationalMetrics}
               operationalIntelligence={operationalIntelligence}
               hierarchy={hierarchy}
@@ -1811,9 +1920,12 @@ function DashboardShell({
               devices={devices}
               departments={departments}
               roles={roles}
+              teams={teams}
+              pendingDevices={pendingDevices}
               onDeviceOwnerChange={onDeviceOwnerChange}
               onHierarchyMemberSave={onHierarchyMemberSave}
               onHierarchyMemberDelete={onHierarchyMemberDelete}
+              onDeviceAdoption={onDeviceAdoption}
             />
           )}
           {activeView === "metrics" && (
@@ -1821,6 +1933,10 @@ function DashboardShell({
               key="metrics"
               operationalMetrics={operationalMetrics}
               operationalIntelligence={operationalIntelligence}
+              teams={teams}
+              devices={devices}
+              hierarchy={hierarchy}
+              token={token}
               liveStatusLabel={liveStatusLabel}
               allowDemoFallback={allowDemoFallback}
             />
@@ -2051,23 +2167,32 @@ function HierarchyView({
   devices,
   departments,
   roles,
+  teams,
+  pendingDevices,
   onDeviceOwnerChange,
   onHierarchyMemberSave,
-  onHierarchyMemberDelete
+  onHierarchyMemberDelete,
+  onDeviceAdoption
 }: {
   hierarchy: HierarchyNode[];
   devices: Device[];
   departments: DepartmentOption[];
   roles: RoleOption[];
+  teams: Team[];
+  pendingDevices: Device[];
   onDeviceOwnerChange: (deviceId: string, ownerMembershipId: string | null) => void;
   onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
+  onDeviceAdoption: (deviceId: string, membershipId: string | null, teamId: string | null, mode?: "existing_user" | "dry") => Promise<void>;
 }) {
   const [expandedNode, setExpandedNode] = useState<string | null>(null);
   const [selectedParentId, setSelectedParentId] = useState<string | null>(hierarchy[0]?.id ?? null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
+  const [adoptionFeedback, setAdoptionFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [adoptingDeviceId, setAdoptingDeviceId] = useState<string | null>(null);
+  const [adoptionAssignments, setAdoptionAssignments] = useState<Record<string, { membershipId: string; teamId: string }>>({});
   const [form, setForm] = useState<HierarchyMemberFormPayload>({
     parentId: hierarchy[0]?.id ?? null,
     level: 1,
@@ -2242,6 +2367,43 @@ function HierarchyView({
       setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível excluir." });
     } finally {
       setSaving(false);
+    }
+  }
+
+  function adoptionValue(device: Device, key: "membershipId" | "teamId") {
+    const current = adoptionAssignments[device.id];
+    if (key === "membershipId") {
+      return current?.membershipId ?? selectedParentId ?? hierarchy[0]?.id ?? "";
+    }
+    return current?.teamId ?? device.teamId ?? teams[0]?.id ?? "";
+  }
+
+  function updateAdoptionAssignment(deviceId: string, key: "membershipId" | "teamId", value: string) {
+    setAdoptionAssignments((current) => ({
+      ...current,
+      [deviceId]: {
+        membershipId: key === "membershipId" ? value : current[deviceId]?.membershipId ?? selectedParentId ?? hierarchy[0]?.id ?? "",
+        teamId: key === "teamId" ? value : current[deviceId]?.teamId ?? teams[0]?.id ?? ""
+      }
+    }));
+  }
+
+  async function adoptPendingDevice(device: Device) {
+    const membershipId = adoptionValue(device, "membershipId") || null;
+    const teamId = adoptionValue(device, "teamId") || null;
+    if (!membershipId) {
+      setAdoptionFeedback({ tone: "warn", message: "Escolha uma pessoa para receber este dispositivo." });
+      return;
+    }
+    try {
+      setAdoptingDeviceId(device.id);
+      setAdoptionFeedback(null);
+      await onDeviceAdoption(device.id, membershipId, teamId, "existing_user");
+      setAdoptionFeedback({ tone: "ok", message: `${device.hostname} adotado e vinculado à hierarquia.` });
+    } catch (error) {
+      setAdoptionFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível adotar o dispositivo." });
+    } finally {
+      setAdoptingDeviceId(null);
     }
   }
 
@@ -2448,6 +2610,82 @@ function HierarchyView({
               <ConnectionSummary label="Dispositivos vinculados" value={`${devices.filter((device) => device.ownerMembershipId).length}/${devices.length}`} tone="ok" />
               <ConnectionSummary label="Sem vínculo" value={`${unassignedDevices.length}`} tone={unassignedDevices.length ? "warn" : "ok"} />
             </div>
+
+            <div className="border border-orange-400/15 bg-black/35 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Dispositivos aguardando adoção</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-400">
+                    O agente aparece pendente, o gestor escolhe pessoa/equipe e ele passa a alimentar as métricas certas.
+                  </p>
+                </div>
+                <span className="text-2xl font-semibold text-orange-200">{pendingDevices.length}</span>
+              </div>
+              {adoptionFeedback ? <div className="mt-3"><FeedbackBanner tone={adoptionFeedback.tone} message={adoptionFeedback.message} /></div> : null}
+              <div className="mt-4 grid gap-3">
+                {pendingDevices.length ? (
+                  pendingDevices.map((device) => (
+                    <motion.div
+                      key={device.id}
+                      className="grid gap-3 border border-zinc-800 bg-zinc-950/70 p-4"
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      whileHover={{ y: -3, borderColor: "rgba(251,146,60,.45)" }}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-zinc-100">{device.hostname}</p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {device.os} | usuário SO: {device.osUser ?? "não informado"} | código {device.adoptionCode ?? "pendente"}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-600">Último contato: {device.lastSeenAt} | qualidade {qualityPt(device.collectionQuality)}</p>
+                        </div>
+                        <span className="border border-orange-400/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-orange-200">
+                          aguardando
+                        </span>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                        <label className="grid gap-2 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                          Pessoa
+                          <select
+                            value={adoptionValue(device, "membershipId")}
+                            onChange={(event) => updateAdoptionAssignment(device.id, "membershipId", event.target.value)}
+                            className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
+                          >
+                            {hierarchy.map((node) => (
+                              <option key={node.id} value={node.id}>{node.name} - {node.title}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="grid gap-2 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                          Equipe
+                          <select
+                            value={adoptionValue(device, "teamId")}
+                            onChange={(event) => updateAdoptionAssignment(device.id, "teamId", event.target.value)}
+                            className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
+                          >
+                            <option value="">Sem equipe</option>
+                            {teams.map((team) => (
+                              <option key={team.id} value={team.id}>{team.name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void adoptPendingDevice(device)}
+                          disabled={adoptingDeviceId === device.id || !hierarchy.length}
+                          className="h-11 self-end bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {adoptingDeviceId === device.id ? "Adotando..." : "Adotar"}
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))
+                ) : (
+                  <EmptyState title="Nenhum dispositivo pendente" description="Instale um agente sem vínculo ou rode o seed demo para ver WIN-NOVO e LINUX-NOVO nesta fila." />
+                )}
+              </div>
+            </div>
           </div>
         </Panel>
       </div>
@@ -2489,7 +2727,7 @@ function DeviceHierarchyRow({
         </div>
         <p className="mt-2 text-sm text-zinc-500">{device.os}</p>
         <p className="mt-1 text-xs text-zinc-600">
-          Última sincronização: {device.lastSeenAt} | Fila: {device.queueDepth ?? 0} | Agente: {device.agentVersion ?? "não informado"}
+          Última sincronização: {device.lastSeenAt} | Equipe: {device.teamName ?? "sem equipe"} | Fila: {device.queueDepth ?? 0} | Agente: {device.agentVersion ?? "não informado"}
         </p>
         {device.lastError ? <p className="mt-2 text-xs text-orange-300">Erro recente: {device.lastError}</p> : null}
         {device.collectionQuality === "blocked_by_os" ? (
@@ -2551,11 +2789,99 @@ function LiveBadge({ label, detail }: { label: string; detail: string }) {
   );
 }
 
+function TeamFilter({ teams, selectedTeamId, onChange }: { teams: Team[]; selectedTeamId: string; onChange: (teamId: string) => void }) {
+  return (
+    <label className="flex h-10 items-center gap-3 border border-zinc-800 bg-black/55 px-3 text-xs uppercase tracking-[0.16em] text-zinc-500">
+      Equipe
+      <select
+        value={selectedTeamId}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-full min-w-44 bg-transparent text-sm normal-case tracking-normal text-zinc-100 outline-none"
+      >
+        <option value="all">Toda empresa</option>
+        {teams.map((team) => (
+          <option key={team.id} value={team.id}>{team.name}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function OperationalHealthGauge({
+  onlineAgents,
+  totalAgents,
+  focusScore,
+  idleRate,
+  contextSwitchesPerHour,
+  criticalSignals
+}: {
+  onlineAgents: number;
+  totalAgents: number;
+  focusScore: number;
+  idleRate: number;
+  contextSwitchesPerHour: number;
+  criticalSignals: number;
+}) {
+  const onlineScore = totalAgents ? (onlineAgents / totalAgents) * 100 : 0;
+  const idleScore = Math.max(0, 100 - idleRate * 100);
+  const switchScore = Math.max(0, 100 - contextSwitchesPerHour * 2.2);
+  const signalScore = Math.max(0, 100 - criticalSignals * 9);
+  const score = Math.round((onlineScore * 0.28) + (focusScore * 0.30) + (idleScore * 0.18) + (switchScore * 0.14) + (signalScore * 0.10));
+  const angle = -92 + Math.max(0, Math.min(100, score)) * 1.84;
+  const tone = score >= 76 ? "Operação saudável" : score >= 58 ? "Atenção controlada" : "Ação necessária";
+  const color = score >= 76 ? "#34d399" : score >= 58 ? "#fb923c" : "#fb7185";
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+      <div className="relative min-h-72 overflow-hidden border border-orange-400/15 bg-black/45 p-4">
+        <motion.div
+          className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
+          animate={{ x: ["-100%", "100%"], opacity: [0, 0.95, 0] }}
+          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <svg viewBox="0 0 300 210" className="h-full min-h-56 w-full">
+          <path d="M 35 160 A 115 115 0 0 1 265 160" fill="none" stroke="rgba(63,63,70,0.8)" strokeWidth="22" strokeLinecap="round" />
+          <motion.path
+            d="M 35 160 A 115 115 0 0 1 265 160"
+            fill="none"
+            stroke={color}
+            strokeWidth="22"
+            strokeLinecap="round"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: Math.max(0.02, score / 100) }}
+            transition={{ duration: 1.05, ease: [0.16, 1, 0.3, 1] }}
+          />
+          <motion.g style={{ transformOrigin: "150px 160px" }} initial={{ rotate: -92 }} animate={{ rotate: angle }} transition={{ duration: 1.05, ease: [0.16, 1, 0.3, 1] }}>
+            <line x1="150" y1="160" x2="150" y2="68" stroke="#fafafa" strokeWidth="5" strokeLinecap="round" />
+            <circle cx="150" cy="160" r="11" fill={color} />
+          </motion.g>
+          <text x="150" y="148" textAnchor="middle" className="fill-zinc-50 text-5xl font-semibold">{score}</text>
+          <text x="150" y="176" textAnchor="middle" className="fill-orange-200 text-xs uppercase tracking-[0.22em]">saúde operacional</text>
+        </svg>
+      </div>
+      <div className="grid content-center gap-3">
+        <p className="text-2xl font-semibold text-zinc-50">{tone}</p>
+        <p className="text-sm leading-6 text-zinc-400">
+          Índice composto por agentes online, foco, ociosidade, troca de contexto e sinais críticos. É leitura de supervisão, não relatório longo.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ConnectionSummary label="Agentes" value={`${onlineAgents}/${totalAgents}`} tone={onlineAgents ? "ok" : "warn"} />
+          <ConnectionSummary label="Foco" value={`${Math.round(focusScore)}/100`} tone={focusScore >= 55 ? "ok" : "warn"} />
+          <ConnectionSummary label="Ociosidade" value={`${Math.round(idleRate * 100)}%`} tone={idleRate > 0.32 ? "warn" : "ok"} />
+          <ConnectionSummary label="Sinais críticos" value={`${criticalSignals}`} tone={criticalSignals ? "warn" : "ok"} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardView({
   metrics,
   insights,
   notifications,
   devices,
+  teams,
+  pendingDevices,
   operationalMetrics,
   operationalIntelligence,
   hierarchy,
@@ -2572,6 +2898,8 @@ function DashboardView({
   insights: Insight[];
   notifications: NotificationItem[];
   devices: Device[];
+  teams: Team[];
+  pendingDevices: Device[];
   operationalMetrics: OperationalMetric[];
   operationalIntelligence: OperationalIntelligence;
   hierarchy: HierarchyNode[];
@@ -2602,6 +2930,10 @@ function DashboardView({
   const contextSwitches = operationalIntelligence.contextSwitches || sumMetric(operationalMetrics, "context_switch_count");
   const trackedSeconds = operationalIntelligence.trackedSeconds || activeSeconds + idleSeconds;
   const offlineDevices = devices.filter((device) => device.status === "offline").length;
+  const [selectedTeamId, setSelectedTeamId] = useState("all");
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
+  const visibleDevices = selectedTeam ? devices.filter((device) => device.teamId === selectedTeam.id) : devices;
+  const visibleOnlineAgents = visibleDevices.filter((device) => ["online", "syncing"].includes(device.status)).length;
   const pendingQueue = devices.reduce((total, device) => total + Number(device.queueDepth ?? 0), 0);
   const qualityIssues = devices.filter((device) => ["low", "blocked_by_os"].includes(device.collectionQuality ?? "")).length;
   const pendingNotifications = notifications.filter((item) => ["queued", "missing_credentials", "failed"].includes(item.status)).length;
@@ -2679,6 +3011,7 @@ function DashboardView({
     <ViewFrame>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <LiveBadge label="Tempo real ativo" detail={`${onlineAgents} agente${onlineAgents === 1 ? "" : "s"} sincronizando | última atualização ${liveStatusLabel}`} />
+        <TeamFilter teams={teams} selectedTeamId={selectedTeamId} onChange={setSelectedTeamId} />
         <span className="border border-orange-400/25 bg-orange-950/15 px-3 py-2 text-xs uppercase tracking-[0.2em] text-orange-200">
           {!dataPlaneReady ? "Modo degradado: banco indisponível" : allowDemoFallback ? "Ambiente demonstrativo" : "Somente dados reais"}
         </span>
@@ -2689,8 +3022,42 @@ function DashboardView({
         <ConnectionSummary label="IA híbrida" value={aiReady ? "configurada" : "mock explícito"} tone={aiReady ? "ok" : "warn"} />
         <ConnectionSummary label="WhatsApp" value={whatsAppStatus.connected ? "conectado" : statusPt(whatsAppStatus.status)} tone={whatsAppStatus.connected ? "ok" : "warn"} />
         <ConnectionSummary label="E-mail" value={emailReady ? "envio pronto" : "pendente"} tone={emailReady ? "ok" : "warn"} />
-        <ConnectionSummary label="Agentes online" value={`${onlineAgents}/${devices.length}`} tone={onlineAgents ? "ok" : "warn"} />
+        <ConnectionSummary label="Agentes online" value={`${visibleOnlineAgents}/${visibleDevices.length || devices.length}`} tone={visibleOnlineAgents ? "ok" : "warn"} />
         <ConnectionSummary label="Eventos hoje" value={`${operationalIntelligence.totalEvents || metrics.find((metric) => metric.id === "events")?.value || 0}`} tone={operationalIntelligence.totalEvents ? "ok" : "warn"} />
+      </div>
+
+      <div className="mb-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+        <Panel title="Saúde operacional em tempo real" icon={Gauge}>
+          <OperationalHealthGauge
+            onlineAgents={visibleOnlineAgents}
+            totalAgents={visibleDevices.length || devices.length}
+            focusScore={operationalIntelligence.focusScore}
+            idleRate={operationalIntelligence.idleRate}
+            contextSwitchesPerHour={operationalIntelligence.contextSwitchesPerHour}
+            criticalSignals={offlineDevices + qualityIssues + pendingDevices.length}
+          />
+        </Panel>
+        <Panel title="Dispositivos aguardando adoção" icon={RadioTower}>
+          <div className="grid gap-3 md:grid-cols-3">
+            <ConnectionSummary label="Pendentes" value={`${pendingDevices.length}`} tone={pendingDevices.length ? "warn" : "ok"} />
+            <ConnectionSummary label="Equipe filtrada" value={selectedTeam?.name ?? "Toda empresa"} tone="ok" />
+            <ConnectionSummary label="Privacidade" value="fluxo, não conteúdo" tone="ok" />
+          </div>
+          <div className="mt-4 grid gap-3">
+            {pendingDevices.slice(0, 3).map((device) => (
+              <div key={device.id} className="border border-orange-400/15 bg-black/35 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-zinc-100">{device.hostname}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{device.os} | usuário SO: {device.osUser ?? "não informado"} | código {device.adoptionCode ?? "pendente"}</p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.16em] text-orange-200">adotar</span>
+                </div>
+              </div>
+            ))}
+            {!pendingDevices.length ? <p className="text-sm text-zinc-500">Nenhum agente aguardando adoção agora.</p> : null}
+          </div>
+        </Panel>
       </div>
 
       <div className="mb-5 grid gap-3 xl:grid-cols-[0.9fr_1.2fr_0.9fr]">
@@ -3114,14 +3481,30 @@ function DashboardView({
 function MetricsView({
   operationalMetrics,
   operationalIntelligence,
+  teams,
+  devices,
+  hierarchy,
+  token,
   liveStatusLabel,
   allowDemoFallback
 }: {
   operationalMetrics: OperationalMetric[];
   operationalIntelligence: OperationalIntelligence;
+  teams: Team[];
+  devices: Device[];
+  hierarchy: HierarchyNode[];
+  token: string;
   liveStatusLabel: string;
   allowDemoFallback: boolean;
 }) {
+  const [period, setPeriod] = useState("24h");
+  const [selectedTeamId, setSelectedTeamId] = useState("all");
+  const [selectedMembershipId, setSelectedMembershipId] = useState("all");
+  const [selectedDeviceId, setSelectedDeviceId] = useState("all");
+  const [appFilter, setAppFilter] = useState("");
+  const [detailedRows, setDetailedRows] = useState<MetricsDetailedRow[]>([]);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const appUsageData = useMemo(() => buildAppUsageData(operationalMetrics, allowDemoFallback), [operationalMetrics, allowDemoFallback]);
   const metricActiveSeconds = operationalMetrics.filter((metric) => metric.metricKey === "active_seconds").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
   const metricIdleSeconds = operationalMetrics.filter((metric) => metric.metricKey === "idle_seconds").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
@@ -3170,6 +3553,86 @@ function MetricsView({
       : contextSwitches > 30
         ? "Reduzir alternância entre sistemas com fila única ou automação de etapas repetidas."
         : "Manter coleta por mais algumas horas para consolidar tendência operacional.");
+  const metricsQuery = useMemo(() => {
+    const params = new URLSearchParams({ period });
+    if (selectedTeamId !== "all") {
+      params.set("teamId", selectedTeamId);
+    }
+    if (selectedMembershipId !== "all") {
+      params.set("membershipId", selectedMembershipId);
+    }
+    if (selectedDeviceId !== "all") {
+      params.set("deviceId", selectedDeviceId);
+    }
+    if (appFilter.trim()) {
+      params.set("app", appFilter.trim());
+    }
+    return params.toString();
+  }, [period, selectedTeamId, selectedMembershipId, selectedDeviceId, appFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDetailedMetrics() {
+      setMetricsLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/metrics/detailed?${metricsQuery}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-Tenant-Id": DEMO_TENANT_ID
+          }
+        });
+        if (!response.ok) {
+          if (!cancelled) {
+            setDetailedRows([]);
+          }
+          return;
+        }
+        const rows = (await response.json()) as MetricsDetailedRow[];
+        if (!cancelled) {
+          setDetailedRows(rows);
+        }
+      } catch {
+        if (!cancelled) {
+          setDetailedRows([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setMetricsLoading(false);
+        }
+      }
+    }
+    void loadDetailedMetrics();
+    return () => {
+      cancelled = true;
+    };
+  }, [metricsQuery, token]);
+
+  async function downloadMetrics(format: "csv" | "excel") {
+    setExportFeedback(null);
+    try {
+      const response = await fetch(`${API_URL}/metrics/export?format=${format}&${metricsQuery}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-Id": DEMO_TENANT_ID
+        }
+      });
+      if (!response.ok) {
+        throw new Error("Exportação recusada pelo backend.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = format === "csv" ? "vulcan-metricas.csv" : "vulcan-metricas-excel.csv";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setExportFeedback({ tone: "ok", message: format === "csv" ? "CSV gerado com os filtros atuais." : "Arquivo compatível com Excel gerado." });
+    } catch (error) {
+      setExportFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível exportar." });
+    }
+  }
 
   return (
     <ViewFrame>
@@ -3180,7 +3643,54 @@ function MetricsView({
         </span>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+      <Panel title="Filtros e exportação" icon={Download}>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[0.7fr_1fr_1fr_1fr_1fr_auto]">
+          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+            Período
+            <select value={period} onChange={(event) => setPeriod(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
+              <option value="24h">Últimas 24h</option>
+              <option value="7d">Últimos 7 dias</option>
+              <option value="30d">Últimos 30 dias</option>
+            </select>
+          </label>
+          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+            Equipe
+            <select value={selectedTeamId} onChange={(event) => setSelectedTeamId(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
+              <option value="all">Todas</option>
+              {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+            Pessoa
+            <select value={selectedMembershipId} onChange={(event) => setSelectedMembershipId(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
+              <option value="all">Todas</option>
+              {hierarchy.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+            Dispositivo
+            <select value={selectedDeviceId} onChange={(event) => setSelectedDeviceId(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
+              <option value="all">Todos</option>
+              {devices.map((device) => <option key={device.id} value={device.id}>{device.hostname}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+            App
+            <input value={appFilter} onChange={(event) => setAppFilter(event.target.value)} placeholder="ERP, Chrome..." className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none transition placeholder:text-zinc-700 focus:border-orange-400" />
+          </label>
+          <div className="flex gap-2 self-end">
+            <button type="button" onClick={() => void downloadMetrics("csv")} className="h-11 border border-orange-400/25 px-3 text-xs text-orange-200 transition hover:border-orange-300/60">
+              CSV
+            </button>
+            <button type="button" onClick={() => void downloadMetrics("excel")} className="h-11 bg-orange-500 px-3 text-xs font-semibold text-black transition hover:bg-orange-400">
+              Excel
+            </button>
+          </div>
+        </div>
+        {exportFeedback ? <div className="mt-3"><FeedbackBanner tone={exportFeedback.tone} message={exportFeedback.message} /></div> : null}
+      </Panel>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
         <Panel title="Velocímetros da operação" icon={Gauge}>
           <div className="grid gap-4 md:grid-cols-3">
             <MetricSpeedometer
@@ -3325,6 +3835,12 @@ function MetricsView({
       </div>
 
       <div className="mt-5">
+        <Panel title="Tabela detalhada filtrável" icon={Layers3}>
+          <AdvancedMetricsTable rows={detailedRows} loading={metricsLoading} />
+        </Panel>
+      </div>
+
+      <div className="mt-5">
         <Panel title="Resumo que o gestor realmente lê" icon={Brain}>
           <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
             <div className="border border-orange-400/20 bg-black/45 p-5">
@@ -3350,6 +3866,76 @@ function MetricsView({
         </Panel>
       </div>
     </ViewFrame>
+  );
+}
+
+function AdvancedMetricsTable({ rows, loading }: { rows: MetricsDetailedRow[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="grid min-h-48 place-items-center border border-zinc-800 bg-black/35">
+        <div className="flex items-center gap-3 text-sm text-orange-200">
+          <motion.span
+            className="h-2.5 w-2.5 rounded-full bg-orange-400"
+            animate={{ opacity: [0.35, 1, 0.35], scale: [0.8, 1.15, 0.8] }}
+            transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+          />
+          Carregando recorte operacional...
+        </div>
+      </div>
+    );
+  }
+
+  if (!rows.length) {
+    return (
+      <EmptyState
+        title="Sem eventos para os filtros atuais"
+        description="Altere período, pessoa, equipe ou dispositivo. A tabela só mostra eventos reais respeitando tenant e escopo de hierarquia."
+      />
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto border border-zinc-800">
+      <table className="min-w-full divide-y divide-zinc-800 text-left text-sm">
+        <thead className="bg-zinc-950/90 text-xs uppercase tracking-[0.14em] text-zinc-500">
+          <tr>
+            <th className="px-4 py-3 font-medium">Hora</th>
+            <th className="px-4 py-3 font-medium">Pessoa</th>
+            <th className="px-4 py-3 font-medium">Equipe</th>
+            <th className="px-4 py-3 font-medium">Dispositivo</th>
+            <th className="px-4 py-3 font-medium">App</th>
+            <th className="px-4 py-3 font-medium">Categoria</th>
+            <th className="px-4 py-3 font-medium">Duração</th>
+            <th className="px-4 py-3 font-medium">Coleta</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-900 bg-black/35">
+          {rows.slice(0, 80).map((row, index) => (
+            <motion.tr
+              key={row.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(index * 0.012, 0.32) }}
+              className="transition hover:bg-orange-950/10"
+            >
+              <td className="whitespace-nowrap px-4 py-3 text-zinc-400">{formatEventDate(row.occurredAt)}</td>
+              <td className="px-4 py-3 font-medium text-zinc-100">{row.userName}</td>
+              <td className="px-4 py-3 text-zinc-400">{row.teamName ?? "sem equipe"}</td>
+              <td className="px-4 py-3 text-zinc-400">{row.device}</td>
+              <td className="px-4 py-3 text-orange-100">{row.app}</td>
+              <td className="px-4 py-3 text-zinc-400">{row.category}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-zinc-100">{formatDuration(row.durationSeconds)}</td>
+              <td className="px-4 py-3 text-zinc-400">{qualityPt(row.collectionQuality)}</td>
+            </motion.tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > 80 ? (
+        <p className="border-t border-zinc-800 bg-black/45 px-4 py-3 text-xs text-zinc-500">
+          Mostrando 80 de {rows.length} registros. Use CSV/Excel para baixar o recorte completo.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

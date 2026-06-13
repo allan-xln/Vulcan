@@ -47,6 +47,29 @@ Eventos aceitos no MVP:
 - economia estimada de horas;
 - economia financeira estimada.
 
+## Tela De Métricas
+
+A tela `Métricas` é a área de investigação. Ela mostra leitura executiva no topo e permite filtrar detalhes por:
+
+- período: últimas 24h, 7 dias ou 30 dias;
+- equipe;
+- pessoa;
+- dispositivo;
+- app/sistema.
+
+Os filtros consultam `GET /metrics/detailed` e respeitam tenant, escopo de hierarquia e permissões do usuário logado.
+
+## Exportação
+
+A exportação usa `GET /metrics/export` com os mesmos filtros aplicados na tela.
+
+Formatos atuais:
+
+- CSV;
+- CSV compatível com Excel.
+
+O download é feito pelo frontend com `Authorization: Bearer`, não por link aberto sem token. Isso preserva isolamento por tenant.
+
 ## Coleta Limitada
 
 Em GNOME/Wayland, o sistema operacional pode bloquear detalhes finos da janela ativa. Quando isso ocorre, o Vulcan marca a qualidade como `low` ou `blocked_by_os` e mostra o alerta em português. O agente não tenta burlar controles de privacidade.
@@ -67,4 +90,3 @@ O agente não coleta:
 - documentos pessoais.
 
 Coletas sensíveis como título de janela, URL de navegador e lista de processos dependem de flags explícitas na política do agente.
-
