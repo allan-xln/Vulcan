@@ -4,8 +4,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
+import * as Tremor from "@tremor/react";
+import CountUp from "react-countup";
 import {
   Activity,
+  BarChart3,
   BellRing,
   Brain,
   Building2,
@@ -34,13 +37,9 @@ import {
   Area,
   AreaChart,
   Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Line,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -2228,6 +2227,26 @@ function HierarchyView({
     : "Perfis serão carregados do backend";
   const membersWithContact = hierarchy.filter((node) => node.email || node.whatsapp || node.phone).length;
   const departmentNameById = new Map(departments.map((department) => [department.id, department.name]));
+  const hierarchyLevelData = hierarchyLevelCatalog
+    .map((level) => ({
+      name: level.shortLabel,
+      value: hierarchy.filter((node) => node.hierarchyLevel === level.value).length
+    }))
+    .filter((item) => item.value > 0);
+  const deviceStatusData = [
+    { name: "Online", value: devices.filter((device) => ["online", "syncing"].includes(device.status)).length },
+    { name: "Offline", value: devices.filter((device) => device.status === "offline").length },
+    { name: "Pendente", value: pendingDevices.length },
+    { name: "Sem vínculo", value: unassignedDevices.length }
+  ].filter((item) => item.value > 0);
+  const teamStructureData = teams.map((team) => ({
+    name: team.name,
+    value: Math.max(
+      1,
+      hierarchy.filter((node) => node.department === team.name).length
+      + devices.filter((device) => device.teamId === team.id).length
+    )
+  })).slice(0, 8);
 
   useEffect(() => {
     if (editingNodeId) {
@@ -2414,6 +2433,56 @@ function HierarchyView({
         <ConnectionSummary label="Gestores de árvore" value={`${subtreeScope}`} tone={subtreeScope ? "ok" : "warn"} />
         <ConnectionSummary label="Usuários individuais" value={`${Math.max(0, individualScope)}`} tone="ok" />
         <ConnectionSummary label="Contatos configurados" value={`${membersWithContact}/${hierarchy.length}`} tone={membersWithContact === hierarchy.length ? "ok" : "warn"} />
+      </div>
+
+      <div className="mb-5 grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Arquitetura da empresa</Tremor.Text>
+              <Tremor.Title className="mt-2 text-zinc-50">Quem vê, quem responde e quais dispositivos alimentam cada pessoa.</Tremor.Title>
+            </div>
+            <Tremor.Badge color={pendingDevices.length ? "orange" : "emerald"}>{pendingDevices.length ? "adoção aberta" : "fechado"}</Tremor.Badge>
+          </div>
+          <div className="grid gap-4 md:grid-cols-[0.9fr_1.1fr]">
+            <div className="grid place-items-center rounded-lg border border-orange-400/15 bg-black/35 p-4">
+              <Tremor.DonutChart
+                className="h-56"
+                data={deviceStatusData.length ? deviceStatusData : [{ name: "Sem dados", value: 1 }]}
+                category="value"
+                index="name"
+                colors={["emerald", "rose", "orange", "zinc"]}
+                variant="donut"
+                valueFormatter={(value) => `${value}`}
+                showAnimation
+              />
+            </div>
+            <div className="grid content-center gap-3">
+              <ConnectionSummary label="Escopo empresa" value={`${tenantScope}`} tone={tenantScope ? "ok" : "warn"} />
+              <ConnectionSummary label="Escopo subárvore" value={`${subtreeScope}`} tone={subtreeScope ? "ok" : "warn"} />
+              <ConnectionSummary label="Dispositivos vinculados" value={`${devices.filter((device) => device.ownerMembershipId).length}/${devices.length}`} tone={devices.length ? "ok" : "warn"} />
+            </div>
+          </div>
+        </Tremor.Card>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+            <Tremor.Title className="mb-4 text-zinc-50">Níveis da pirâmide</Tremor.Title>
+            {hierarchyLevelData.length ? (
+              <Tremor.BarList data={hierarchyLevelData} color="orange" valueFormatter={(value: number) => `${value}`} />
+            ) : (
+              <EmptyState title="Sem níveis" description="Cadastre a primeira pessoa para abrir a pirâmide." />
+            )}
+          </Tremor.Card>
+          <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+            <Tremor.Title className="mb-4 text-zinc-50">Equipes operacionais</Tremor.Title>
+            {teamStructureData.length ? (
+              <Tremor.BarList data={teamStructureData} color="orange" valueFormatter={(value: number) => `${value}`} />
+            ) : (
+              <EmptyState title="Sem equipes" description="Crie equipes para separar operação, financeiro, suporte e administrativo." />
+            )}
+          </Tremor.Card>
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
@@ -2827,43 +2896,38 @@ function OperationalHealthGauge({
   const switchScore = Math.max(0, 100 - contextSwitchesPerHour * 2.2);
   const signalScore = Math.max(0, 100 - criticalSignals * 9);
   const score = Math.round((onlineScore * 0.28) + (focusScore * 0.30) + (idleScore * 0.18) + (switchScore * 0.14) + (signalScore * 0.10));
-  const angle = -92 + Math.max(0, Math.min(100, score)) * 1.84;
   const tone = score >= 76 ? "Operação saudável" : score >= 58 ? "Atenção controlada" : "Ação necessária";
-  const color = score >= 76 ? "#34d399" : score >= 58 ? "#fb923c" : "#fb7185";
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-      <div className="relative min-h-72 overflow-hidden border border-orange-400/15 bg-black/45 p-4">
+    <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+      <div className="relative grid min-h-72 place-items-center overflow-hidden rounded-lg border border-orange-400/10 bg-[radial-gradient(circle_at_50%_42%,rgba(249,115,22,0.16),rgba(9,9,11,0)_58%)] p-4">
         <motion.div
           className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
           animate={{ x: ["-100%", "100%"], opacity: [0, 0.95, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
         />
-        <svg viewBox="0 0 300 210" className="h-full min-h-56 w-full">
-          <path d="M 35 160 A 115 115 0 0 1 265 160" fill="none" stroke="rgba(63,63,70,0.8)" strokeWidth="22" strokeLinecap="round" />
-          <motion.path
-            d="M 35 160 A 115 115 0 0 1 265 160"
-            fill="none"
-            stroke={color}
-            strokeWidth="22"
-            strokeLinecap="round"
-            initial={{ pathLength: 0 }}
-            animate={{ pathLength: Math.max(0.02, score / 100) }}
-            transition={{ duration: 1.05, ease: [0.16, 1, 0.3, 1] }}
-          />
-          <motion.g style={{ transformOrigin: "150px 160px" }} initial={{ rotate: -92 }} animate={{ rotate: angle }} transition={{ duration: 1.05, ease: [0.16, 1, 0.3, 1] }}>
-            <line x1="150" y1="160" x2="150" y2="68" stroke="#fafafa" strokeWidth="5" strokeLinecap="round" />
-            <circle cx="150" cy="160" r="11" fill={color} />
-          </motion.g>
-          <text x="150" y="148" textAnchor="middle" className="fill-zinc-50 text-5xl font-semibold">{score}</text>
-          <text x="150" y="176" textAnchor="middle" className="fill-orange-200 text-xs uppercase tracking-[0.22em]">saúde operacional</text>
-        </svg>
+        <Tremor.ProgressCircle value={score} size="xl" color={score >= 76 ? "emerald" : score >= 58 ? "orange" : "rose"} strokeWidth={12}>
+          <div className="text-center">
+            <p className="text-5xl font-semibold text-zinc-50">{score}</p>
+            <p className="mt-1 text-[10px] uppercase tracking-[0.22em] text-orange-200">/100</p>
+          </div>
+        </Tremor.ProgressCircle>
       </div>
       <div className="grid content-center gap-3">
         <p className="text-2xl font-semibold text-zinc-50">{tone}</p>
         <p className="text-sm leading-6 text-zinc-400">
           Índice composto por agentes online, foco, ociosidade, troca de contexto e sinais críticos. É leitura de supervisão, não relatório longo.
         </p>
+        <Tremor.BarList
+          className="mt-1"
+          data={[
+            { name: "Agentes online", value: Math.round(onlineScore) },
+            { name: "Foco operacional", value: Math.round(focusScore) },
+            { name: "Baixa ociosidade", value: Math.round(idleScore) },
+            { name: "Baixa fragmentação", value: Math.round(switchScore) }
+          ]}
+          color={score >= 76 ? "emerald" : score >= 58 ? "orange" : "rose"}
+        />
         <div className="grid gap-2 sm:grid-cols-2">
           <ConnectionSummary label="Agentes" value={`${onlineAgents}/${totalAgents}`} tone={onlineAgents ? "ok" : "warn"} />
           <ConnectionSummary label="Foco" value={`${Math.round(focusScore)}/100`} tone={focusScore >= 55 ? "ok" : "warn"} />
@@ -3006,6 +3070,26 @@ function DashboardView({
       tone: insight.impact === "high" ? "warn" : "ok"
     }))
   ].slice(0, 8);
+  const executiveLossData = lossBreakdown.slice(0, 5).map((item) => ({
+    name: item.label,
+    value: Math.max(1, Math.round(item.money))
+  }));
+  const executiveSystemData = appUsageData.slice(0, 5).map((item) => ({
+    name: item.app,
+    value: Math.max(1, item.minutes)
+  }));
+  const executiveDepartmentData = departmentPerformance.slice(0, 6).map((department) => ({
+    setor: department.name,
+    foco: department.score,
+    ativo: Math.round(department.active / 60),
+    ocioso: Math.round(department.idle / 60)
+  }));
+  const executivePulseData = flowData.map((point) => ({
+    horario: point.name,
+    eventos: point.events,
+    automacao: point.automation
+  }));
+  const pilotReadinessScore = Math.round((onboardingReady / Math.max(onboardingChecklist.length, 1)) * 100);
 
   return (
     <ViewFrame>
@@ -3025,6 +3109,17 @@ function DashboardView({
         <ConnectionSummary label="Agentes online" value={`${visibleOnlineAgents}/${visibleDevices.length || devices.length}`} tone={visibleOnlineAgents ? "ok" : "warn"} />
         <ConnectionSummary label="Eventos hoje" value={`${operationalIntelligence.totalEvents || metrics.find((metric) => metric.id === "events")?.value || 0}`} tone={operationalIntelligence.totalEvents ? "ok" : "warn"} />
       </div>
+
+      <ExecutiveAnalyticsDeck
+        lossData={executiveLossData}
+        systemData={executiveSystemData}
+        departmentData={executiveDepartmentData}
+        pulseData={executivePulseData}
+        pilotReadinessScore={pilotReadinessScore}
+        financialSavings={financialSavings}
+        pendingDevices={pendingDevices.length}
+        primaryAction={primaryAction?.title ?? "Conectar mais agentes e consolidar o primeiro ciclo operacional."}
+      />
 
       <div className="mb-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
         <Panel title="Saúde operacional em tempo real" icon={Gauge}>
@@ -3478,6 +3573,99 @@ function DashboardView({
   );
 }
 
+function ExecutiveAnalyticsDeck({
+  lossData,
+  systemData,
+  departmentData,
+  pulseData,
+  pilotReadinessScore,
+  financialSavings,
+  pendingDevices,
+  primaryAction
+}: {
+  lossData: { name: string; value: number }[];
+  systemData: { name: string; value: number }[];
+  departmentData: { setor: string; foco: number; ativo: number; ocioso: number }[];
+  pulseData: { horario: string; eventos: number; automacao: number }[];
+  pilotReadinessScore: number;
+  financialSavings: number;
+  pendingDevices: number;
+  primaryAction: string;
+}) {
+  return (
+    <div className="mb-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+      <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Cockpit executivo</Tremor.Text>
+            <Tremor.Title className="mt-2 text-zinc-50">A empresa em uma tela que dá vontade de abrir todo dia.</Tremor.Title>
+          </div>
+          <Tremor.Badge color={pendingDevices ? "orange" : "emerald"}>{pendingDevices ? `${pendingDevices} adoções pendentes` : "agentes fechados"}</Tremor.Badge>
+        </div>
+        <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="grid gap-4">
+            <div className="rounded-lg border border-orange-400/15 bg-black/35 p-4">
+              <Tremor.Text className="text-zinc-500">Economia potencial rastreada</Tremor.Text>
+              <Tremor.Metric className="mt-2 text-zinc-50">{formatMoneyBRL(financialSavings)}</Tremor.Metric>
+              <Tremor.ProgressBar className="mt-4" value={Math.min(100, Math.max(18, financialSavings / 220))} color="orange" />
+              <p className="mt-3 text-sm leading-6 text-zinc-400">{primaryAction}</p>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-black/35 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <Tremor.Text className="text-zinc-500">Prontidão de piloto pago</Tremor.Text>
+                <span className="text-sm font-semibold text-orange-200">{pilotReadinessScore}%</span>
+              </div>
+              <Tremor.ProgressBar value={pilotReadinessScore} color={pilotReadinessScore >= 75 ? "emerald" : "orange"} />
+            </div>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-black/25 p-4">
+            <Tremor.Text className="mb-3 text-zinc-500">Pulso operacional</Tremor.Text>
+            <Tremor.AreaChart
+              className="h-52"
+              data={pulseData}
+              index="horario"
+              categories={["eventos", "automacao"]}
+              colors={["orange", "yellow"]}
+              showLegend={false}
+              showAnimation
+            />
+          </div>
+        </div>
+      </Tremor.Card>
+
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-1">
+        <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <Tremor.Title className="text-zinc-50">Perdas por causa</Tremor.Title>
+            <Tremor.Badge color="orange">R$</Tremor.Badge>
+          </div>
+          <Tremor.BarList data={lossData} color="orange" valueFormatter={(value: number) => formatMoneyBRL(value)} />
+        </Tremor.Card>
+        <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <Tremor.Title className="text-zinc-50">Setores e sistemas</Tremor.Title>
+            <Tremor.Badge color="zinc">tempo</Tremor.Badge>
+          </div>
+          {departmentData.length ? (
+            <Tremor.BarChart
+              className="h-48"
+              data={departmentData}
+              index="setor"
+              categories={["foco", "ativo", "ocioso"]}
+              colors={["emerald", "orange", "rose"]}
+              valueFormatter={(value: number) => `${value}`}
+              showLegend
+              showAnimation
+            />
+          ) : (
+            <Tremor.BarList data={systemData} color="orange" valueFormatter={(value: number) => `${value}min`} />
+          )}
+        </Tremor.Card>
+      </div>
+    </div>
+  );
+}
+
 function MetricsView({
   operationalMetrics,
   operationalIntelligence,
@@ -3542,11 +3730,29 @@ function MetricsView({
       switches: point.contextSwitches
     };
   });
+  const metricsTimelineChart = compactTimeline.map((point) => ({
+    periodo: point.label,
+    ativo: point.activeRate,
+    ocioso: point.idleRate,
+    trocas: point.switches
+  }));
   const timeDistribution = [
     { name: "Ativo", value: Math.round(activeSeconds / 60), color: "#34d399", detail: "tempo produtivo" },
     { name: "Ocioso", value: Math.round(idleSecondsTotal / 60), color: "#fb923c", detail: "espera ou pausa" },
     { name: "Não identificado", value: Math.round(unidentifiedSeconds / 60), color: "#71717a", detail: "coleta limitada" }
   ].filter((item) => item.value > 0);
+  const topSystemsChart = topSystems.map((item) => ({
+    sistema: item.app,
+    minutos: Math.round((item.activeSeconds || item.idleSeconds) / 60),
+    trocas: item.contextSwitches,
+    eventos: item.events
+  }));
+  const operationalRiskData = [
+    { name: "Ociosidade", value: Math.max(0, idleRate) },
+    { name: "Fragmentação", value: Math.max(0, Math.round(operationalIntelligence.distractionScore)) },
+    { name: "Coleta limitada", value: Math.max(0, Math.round(unidentifiedRate)) },
+    { name: "Trocas por hora", value: Math.max(0, Math.round(operationalIntelligence.contextSwitchesPerHour)) }
+  ];
   const actionNow = operationalIntelligence.aiRecommendations[0]
     ?? (idleRate > 25
       ? "Revisar ociosidade do turno e validar se existe espera por sistema ou processo."
@@ -3717,18 +3923,16 @@ function MetricsView({
         <Panel title="Pizza do tempo analisado" icon={Activity}>
           {timeDistribution.length ? (
             <div className="grid gap-4 md:grid-cols-[1fr_0.9fr] xl:grid-cols-1 2xl:grid-cols-[1fr_0.9fr]">
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Tooltip contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fff" }} />
-                    <Pie data={timeDistribution} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="88%" paddingAngle={4} animationDuration={900}>
-                      {timeDistribution.map((item) => (
-                        <Cell key={item.name} fill={item.color} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+              <Tremor.DonutChart
+                className="h-64"
+                data={timeDistribution}
+                category="value"
+                index="name"
+                colors={["emerald", "orange", "zinc"]}
+                variant="donut"
+                valueFormatter={(value) => `${value}min`}
+                showAnimation
+              />
               <div className="grid content-center gap-3">
                 <MetricLegend color="#34d399" label="Ativo" value={`${activeRate}%`} detail={formatDuration(activeSeconds)} />
                 <MetricLegend color="#fb923c" label="Ocioso" value={`${idleRate}%`} detail={formatDuration(idleSecondsTotal)} />
@@ -3763,6 +3967,55 @@ function MetricsView({
           detail={topSystem ? `${formatDuration(topSystem.activeSeconds || topSystem.idleSeconds)} | ${topSystem.focusLabel}` : "Instale/reinicie o agente para medir apps reais."}
           tone={topSystem ? "ok" : "warn"}
         />
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <Panel title="Mapa analítico visual" icon={BarChart3}>
+          <div className="grid gap-5">
+            {topSystemsChart.length ? (
+              <Tremor.BarChart
+                className="h-72"
+                data={topSystemsChart}
+                index="sistema"
+                categories={["minutos", "trocas", "eventos"]}
+                colors={["orange", "rose", "zinc"]}
+                valueFormatter={(value: number) => `${value}`}
+                showLegend
+                showAnimation
+              />
+            ) : (
+              <EmptyState title="Sem apps suficientes" description="O gráfico aparece quando houver aplicativos reais no recorte filtrado." />
+            )}
+            <div className="grid gap-3 md:grid-cols-3">
+              <ConnectionSummary label="Ativo" value={`${activeRate}%`} tone="ok" />
+              <ConnectionSummary label="Ocioso" value={`${idleRate}%`} tone={idleRate > 30 ? "warn" : "ok"} />
+              <ConnectionSummary label="Coleta limitada" value={`${unidentifiedRate}%`} tone={unidentifiedRate > 15 ? "warn" : "ok"} />
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title="Tendência e risco" icon={Activity}>
+          <div className="grid gap-5">
+            {metricsTimelineChart.length ? (
+              <Tremor.AreaChart
+                className="h-52"
+                data={metricsTimelineChart}
+                index="periodo"
+                categories={["ativo", "ocioso"]}
+                colors={["emerald", "orange"]}
+                valueFormatter={(value: number) => `${value}%`}
+                showLegend
+                showAnimation
+              />
+            ) : (
+              <EmptyState title="Sem linha temporal" description="A tendência aparece após os primeiros blocos de eventos por horário." />
+            )}
+            <div className="rounded-lg border border-zinc-800 bg-black/35 p-4">
+              <Tremor.Text className="mb-3 text-zinc-500">Riscos que o gestor precisa atacar</Tremor.Text>
+              <Tremor.BarList data={operationalRiskData} color="orange" valueFormatter={(value: number) => `${value}`} />
+            </div>
+          </div>
+        </Panel>
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
@@ -3895,41 +4148,41 @@ function AdvancedMetricsTable({ rows, loading }: { rows: MetricsDetailedRow[]; l
   }
 
   return (
-    <div className="overflow-x-auto border border-zinc-800">
-      <table className="min-w-full divide-y divide-zinc-800 text-left text-sm">
-        <thead className="bg-zinc-950/90 text-xs uppercase tracking-[0.14em] text-zinc-500">
-          <tr>
-            <th className="px-4 py-3 font-medium">Hora</th>
-            <th className="px-4 py-3 font-medium">Pessoa</th>
-            <th className="px-4 py-3 font-medium">Equipe</th>
-            <th className="px-4 py-3 font-medium">Dispositivo</th>
-            <th className="px-4 py-3 font-medium">App</th>
-            <th className="px-4 py-3 font-medium">Categoria</th>
-            <th className="px-4 py-3 font-medium">Duração</th>
-            <th className="px-4 py-3 font-medium">Coleta</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-900 bg-black/35">
-          {rows.slice(0, 80).map((row, index) => (
-            <motion.tr
-              key={row.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: Math.min(index * 0.012, 0.32) }}
-              className="transition hover:bg-orange-950/10"
-            >
-              <td className="whitespace-nowrap px-4 py-3 text-zinc-400">{formatEventDate(row.occurredAt)}</td>
-              <td className="px-4 py-3 font-medium text-zinc-100">{row.userName}</td>
-              <td className="px-4 py-3 text-zinc-400">{row.teamName ?? "sem equipe"}</td>
-              <td className="px-4 py-3 text-zinc-400">{row.device}</td>
-              <td className="px-4 py-3 text-orange-100">{row.app}</td>
-              <td className="px-4 py-3 text-zinc-400">{row.category}</td>
-              <td className="whitespace-nowrap px-4 py-3 text-zinc-100">{formatDuration(row.durationSeconds)}</td>
-              <td className="px-4 py-3 text-zinc-400">{qualityPt(row.collectionQuality)}</td>
-            </motion.tr>
+    <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60">
+      <Tremor.Table>
+        <Tremor.TableHead>
+          <Tremor.TableRow>
+            <Tremor.TableHeaderCell>Hora</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Pessoa</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Equipe</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Dispositivo</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>App</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Categoria</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Duração</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Coleta</Tremor.TableHeaderCell>
+          </Tremor.TableRow>
+        </Tremor.TableHead>
+        <Tremor.TableBody>
+          {rows.slice(0, 80).map((row) => (
+            <Tremor.TableRow key={row.id} className="transition hover:bg-orange-950/10">
+              <Tremor.TableCell className="whitespace-nowrap text-zinc-400">{formatEventDate(row.occurredAt)}</Tremor.TableCell>
+              <Tremor.TableCell className="font-medium text-zinc-100">{row.userName}</Tremor.TableCell>
+              <Tremor.TableCell>{row.teamName ?? "sem equipe"}</Tremor.TableCell>
+              <Tremor.TableCell>{row.device}</Tremor.TableCell>
+              <Tremor.TableCell className="text-orange-100">{row.app}</Tremor.TableCell>
+              <Tremor.TableCell>
+                <Tremor.Badge color="zinc" size="xs">{row.category}</Tremor.Badge>
+              </Tremor.TableCell>
+              <Tremor.TableCell className="whitespace-nowrap text-zinc-100">{formatDuration(row.durationSeconds)}</Tremor.TableCell>
+              <Tremor.TableCell>
+                <Tremor.Badge color={row.collectionQuality === "high" ? "emerald" : row.collectionQuality === "blocked_by_os" ? "rose" : "orange"} size="xs">
+                  {qualityPt(row.collectionQuality)}
+                </Tremor.Badge>
+              </Tremor.TableCell>
+            </Tremor.TableRow>
           ))}
-        </tbody>
-      </table>
+        </Tremor.TableBody>
+      </Tremor.Table>
       {rows.length > 80 ? (
         <p className="border-t border-zinc-800 bg-black/45 px-4 py-3 text-xs text-zinc-500">
           Mostrando 80 de {rows.length} registros. Use CSV/Excel para baixar o recorte completo.
@@ -3951,47 +4204,34 @@ function MetricSpeedometer({
   tone: "ok" | "warn" | "critical";
 }) {
   const percentage = Math.max(0, Math.min(100, Math.round(value)));
-  const angle = -90 + percentage * 1.8;
-  const color = tone === "ok" ? "#34d399" : tone === "critical" ? "#fb7185" : "#fb923c";
+  const color = tone === "ok" ? "emerald" : tone === "critical" ? "rose" : "orange";
 
   return (
     <motion.div
-      className="relative overflow-hidden border border-zinc-800 bg-black/45 p-4"
+      className="relative"
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -5, borderColor: "rgba(251,146,60,.55)" }}
+      whileHover={{ y: -5 }}
     >
-      <div className="h-36">
-        <svg viewBox="0 0 240 150" className="h-full w-full">
-          <path d="M 24 124 A 96 96 0 0 1 216 124" fill="none" stroke="rgba(63,63,70,0.85)" strokeWidth="18" strokeLinecap="round" pathLength={1} />
-          <motion.path
-            d="M 24 124 A 96 96 0 0 1 216 124"
-            fill="none"
-            stroke={color}
-            strokeWidth="18"
-            strokeLinecap="round"
-            pathLength={1}
-            initial={{ pathLength: 0 }}
-            animate={{ pathLength: percentage / 100 }}
-            transition={{ duration: 0.9, ease: "easeOut" }}
-          />
-          <motion.g style={{ transformOrigin: "120px 124px" }} initial={{ rotate: -90 }} animate={{ rotate: angle }} transition={{ duration: 0.9, ease: "easeOut" }}>
-            <line x1="120" y1="124" x2="120" y2="52" stroke="#f4f4f5" strokeWidth="4" strokeLinecap="round" />
-            <circle cx="120" cy="124" r="8" fill={color} />
-          </motion.g>
-          <text x="120" y="118" textAnchor="middle" className="fill-zinc-50 text-3xl font-semibold">{percentage}</text>
-          <text x="120" y="140" textAnchor="middle" className="fill-orange-200 text-xs uppercase tracking-[0.2em]">/100</text>
-        </svg>
-      </div>
-      <p className="mt-2 text-sm font-semibold text-zinc-100">{label}</p>
-      <p className="mt-1 text-xs leading-5 text-zinc-500">{detail}</p>
+      <Tremor.Card className="h-full rounded-lg border border-zinc-800 bg-zinc-950/78 p-4 shadow-tremor-card">
+        <div className="grid place-items-center">
+          <Tremor.ProgressCircle value={percentage} color={color} size="lg">
+            <div className="text-center">
+              <p className="text-2xl font-semibold text-zinc-50">{percentage}</p>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-orange-200">/100</p>
+            </div>
+          </Tremor.ProgressCircle>
+        </div>
+        <p className="mt-4 text-sm font-semibold text-zinc-100">{label}</p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500">{detail}</p>
+      </Tremor.Card>
     </motion.div>
   );
 }
 
 function MetricLegend({ color, label, value, detail }: { color: string; label: string; value: string; detail: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 border border-zinc-800 bg-black/35 p-3">
+    <Tremor.Card className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/65 p-3">
       <div className="flex items-center gap-3">
         <span className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
         <div>
@@ -4000,7 +4240,7 @@ function MetricLegend({ color, label, value, detail }: { color: string; label: s
         </div>
       </div>
       <p className="text-lg font-semibold text-zinc-50">{value}</p>
-    </div>
+    </Tremor.Card>
   );
 }
 
@@ -4435,13 +4675,13 @@ function SettingsView({
 
 function ConnectionSummary({ label, value, tone }: { label: string; value: string; tone: "ok" | "warn" }) {
   return (
-    <div className="border border-zinc-800 bg-black/35 p-4">
-      <p className="text-xs uppercase tracking-[0.16em] text-zinc-500">{label}</p>
-      <div className="mt-2 flex items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${tone === "ok" ? "bg-emerald-400" : "bg-orange-400"}`} />
-        <p className={tone === "ok" ? "truncate text-sm text-emerald-200" : "truncate text-sm text-orange-200"}>{value}</p>
+    <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/55 p-4 shadow-none">
+      <Tremor.Text className="text-xs uppercase tracking-[0.16em] text-zinc-500">{label}</Tremor.Text>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <p className="truncate text-sm font-medium text-zinc-100">{value}</p>
+        <Tremor.Badge color={tone === "ok" ? "emerald" : "orange"} size="xs">{tone === "ok" ? "ok" : "atenção"}</Tremor.Badge>
       </div>
-    </div>
+    </Tremor.Card>
   );
 }
 
@@ -4525,40 +4765,29 @@ function ActionRow({
 }
 
 function MetricTile({ metric, index }: { metric: Metric; index: number }) {
+  const numeric = metric.value.match(/^\d+$/) ? Number(metric.value) : null;
+  const progressValue = metric.tone === "positive" ? 82 : metric.tone === "warning" ? 58 : metric.tone === "critical" ? 36 : 68;
+  const badgeColor = metric.tone === "positive" ? "emerald" : metric.tone === "warning" ? "orange" : metric.tone === "critical" ? "rose" : "zinc";
   return (
     <motion.div
-      className="relative overflow-hidden border border-orange-400/15 bg-zinc-950/70 p-5 shadow-[0_0_26px_rgba(249,115,22,0.05)]"
       initial={{ y: 28, opacity: 0 }}
-      animate={{ y: [0, -2, 0], opacity: 1 }}
+      animate={{ y: 0, opacity: 1 }}
       transition={{ delay: index * 0.07 }}
-      whileHover={{ y: -6, borderColor: "rgba(251,146,60,.65)" }}
+      whileHover={{ y: -5 }}
     >
-      <motion.div
-        className="absolute inset-x-0 top-0 h-px bg-orange-300/50"
-        animate={{ opacity: [0.12, 0.55, 0.12] }}
-        transition={{ duration: 2.5, repeat: Infinity, delay: index * 0.2 }}
-      />
-      <motion.div
-        className="absolute inset-y-0 -left-1/2 w-1/2 bg-[linear-gradient(90deg,transparent,rgba(249,115,22,0.08),transparent)]"
-        animate={{ x: ["0%", "320%"] }}
-        transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut", delay: index * 0.18 }}
-      />
-      <motion.div
-        className="absolute right-4 top-4 h-2 w-2 border border-orange-300/60 bg-orange-400/20"
-        animate={{ opacity: [0.20, 0.68, 0.20], scale: [0.88, 1.18, 0.88], rotate: [0, 180, 360] }}
-        transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut", delay: index * 0.12 }}
-      />
-      <div className="relative z-10">
-        <p className="text-sm text-zinc-500">{metric.label}</p>
-        <motion.p
-          className="mt-3 text-4xl font-semibold text-zinc-50"
-          animate={{ textShadow: ["0 0 0 rgba(249,115,22,0)", "0 0 8px rgba(249,115,22,0.10)", "0 0 0 rgba(249,115,22,0)"] }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: index * 0.18 }}
-        >
-          {metric.value}
-        </motion.p>
-        <p className="mt-3 text-sm text-orange-300">{metric.trend}</p>
-      </div>
+      <Tremor.Card className="h-full rounded-lg border border-zinc-800 bg-zinc-950/80 p-5 shadow-tremor-card transition hover:border-orange-400/40">
+        <Tremor.Flex alignItems="start">
+          <div>
+            <Tremor.Text className="text-zinc-500">{metric.label}</Tremor.Text>
+            <Tremor.Metric className="mt-2 text-zinc-50">
+              {numeric === null ? metric.value : <CountUp end={numeric} duration={0.8} separator="." />}
+            </Tremor.Metric>
+          </div>
+          <Tremor.Badge color={badgeColor} size="xs">{metric.tone === "positive" ? "bom" : metric.tone === "warning" ? "atenção" : metric.tone === "critical" ? "crítico" : "neutro"}</Tremor.Badge>
+        </Tremor.Flex>
+        <Tremor.ProgressBar className="mt-5" value={progressValue} color={badgeColor} />
+        <Tremor.Text className="mt-3 text-orange-200">{metric.trend}</Tremor.Text>
+      </Tremor.Card>
     </motion.div>
   );
 }
@@ -4566,19 +4795,15 @@ function MetricTile({ metric, index }: { metric: Metric; index: number }) {
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
     <motion.div
-      className="grid min-h-44 place-items-center border border-dashed border-orange-400/20 bg-black/35 p-6 text-center"
+      className="grid min-h-44 place-items-center rounded-lg border border-dashed border-zinc-800 bg-zinc-950/55 p-6 text-center"
       initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: [1, 1.01, 1], borderColor: ["rgba(251,146,60,0.18)", "rgba(251,146,60,0.46)", "rgba(251,146,60,0.18)"] }}
-      transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.28 }}
     >
       <div>
-        <motion.div
-          className="mx-auto mb-4 grid h-12 w-12 place-items-center border border-orange-400/25 bg-orange-500/10 text-orange-300"
-          animate={{ rotate: [0, 180, 360], boxShadow: ["0 0 0 rgba(249,115,22,0)", "0 0 16px rgba(249,115,22,0.18)", "0 0 0 rgba(249,115,22,0)"] }}
-          transition={{ duration: 5, repeat: Infinity, ease: "linear" }}
-        >
+        <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-lg border border-orange-400/20 bg-orange-500/10 text-orange-300">
           <RadioTower className="h-5 w-5" />
-        </motion.div>
+        </div>
         <p className="font-semibold text-zinc-100">{title}</p>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-zinc-500">{description}</p>
       </div>
@@ -4589,38 +4814,24 @@ function EmptyState({ title, description }: { title: string; description: string
 function Panel({ title, icon: Icon, children }: { title: string; icon: typeof Gauge; children: ReactNode }) {
   return (
     <motion.section
-      className="relative overflow-hidden border border-zinc-800 bg-zinc-950/78 p-5 shadow-[0_0_36px_rgba(0,0,0,0.22)] backdrop-blur-md"
+      className="relative"
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45 }}
-      whileHover={{ borderColor: "rgba(251,146,60,0.34)", boxShadow: "0 0 34px rgba(249,115,22,0.07)" }}
+      whileHover={{ y: -2 }}
     >
-      <motion.div
-        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
-        animate={{ x: ["-100%", "100%"], opacity: [0, 0.95, 0] }}
-        transition={{ duration: 3.6, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute -right-24 -top-24 h-56 w-56 border border-orange-400/10"
-        animate={{ rotate: [0, 180, 360], scale: [1, 1.12, 1], opacity: [0.22, 0.55, 0.22] }}
-        transition={{ duration: 9, repeat: Infinity, ease: "linear" }}
-      />
-      <motion.div
-        className="absolute inset-0 bg-[linear-gradient(135deg,transparent,rgba(249,115,22,0.04),transparent)]"
-        animate={{ x: ["-20%", "20%", "-20%"], opacity: [0.18, 0.55, 0.18] }}
-        transition={{ duration: 6.5, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <div className="relative z-10 mb-5 flex items-center gap-3">
-        <motion.div
-          className="grid h-10 w-10 place-items-center bg-orange-500 text-black"
-          animate={{ boxShadow: ["0 0 0 rgba(249,115,22,0)", "0 0 16px rgba(249,115,22,0.22)", "0 0 0 rgba(249,115,22,0)"] }}
-          transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
-        >
-          <Icon className="h-5 w-5" />
-        </motion.div>
-        <h3 className="text-lg font-semibold">{title}</h3>
-      </div>
-      <div className="relative z-10">{children}</div>
+      <Tremor.Card className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card backdrop-blur-md">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300/70 to-transparent" />
+        <div className="relative z-10 mb-5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-orange-500 text-black shadow-[0_10px_30px_rgba(249,115,22,0.16)]">
+              <Icon className="h-5 w-5" />
+            </div>
+            <Tremor.Title className="text-zinc-50">{title}</Tremor.Title>
+          </div>
+        </div>
+        <div className="relative z-10">{children}</div>
+      </Tremor.Card>
     </motion.section>
   );
 }
