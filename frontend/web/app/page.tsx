@@ -37,9 +37,12 @@ import {
   Area,
   AreaChart,
   Bar,
+  BarChart,
   CartesianGrid,
-  ComposedChart,
+  Cell,
   Line,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -59,6 +62,22 @@ const LOCAL_AUTH_READY = MOCK_AUTH || LOCAL_TEST_AUTH_READY;
 
 type ViewKey = "dashboard" | "hierarchy" | "metrics" | "insights" | "notifications" | "settings";
 
+type MetricsIntent = {
+  nonce: number;
+  period?: string;
+  teamId?: string;
+  membershipId?: string;
+  deviceId?: string;
+  supervisorId?: string;
+  department?: string;
+  title?: string;
+  os?: string;
+  category?: string;
+  agentStatus?: string;
+  metricType?: string;
+  app?: string;
+};
+
 type Metric = {
   id: string;
   label: string;
@@ -69,11 +88,53 @@ type Metric = {
 
 type Insight = {
   id: string;
+  tenantId?: string | null;
+  membershipId?: string | null;
+  departmentId?: string | null;
+  scopeType?: string;
+  scopeId?: string | null;
+  targetUserId?: string | null;
+  targetTeamId?: string | null;
+  targetDepartmentId?: string | null;
+  roleVisibility?: string[];
+  insightType?: string;
   title: string;
   impact: "high" | "medium" | "low";
   summary: string;
+  diagnosis?: string;
   recommendation: string;
+  evidence?: string[];
+  metricsUsed?: string[];
+  affectedUsers?: string[];
+  affectedTeams?: string[];
+  severity?: string;
+  confidence?: number | null;
+  estimatedTimeLoss?: number;
+  estimatedCostLoss?: number;
+  estimatedSavings?: number;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  status?: string;
+  sourceRoute?: string | null;
+  sentToWhatsapp?: boolean;
+  sentToEmail?: boolean;
+  whatsappStatus?: string;
+  emailStatus?: string;
+  lastSentAt?: string | null;
+  recipients?: string[];
+  suggestedQuestions?: string[];
+  actionStatus?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
   automationSavingsHours: number;
+};
+
+type InsightAskResponse = {
+  insightId: string;
+  question: string;
+  answer: string;
+  aiMode: string;
+  suggestedActions: string[];
 };
 
 type NotificationItem = {
@@ -124,12 +185,16 @@ type Team = {
 type MetricsDetailedRow = {
   id: string;
   userName: string;
+  userTitle?: string | null;
+  supervisorId?: string | null;
+  supervisorName?: string | null;
   teamId?: string | null;
   teamName?: string | null;
   department: string;
   deviceId?: string | null;
   device: string;
   os: string;
+  agentStatus?: string | null;
   app: string;
   category: string;
   eventType: string;
@@ -1067,6 +1132,507 @@ function qualityPt(quality?: string | null) {
   return dictionary[quality ?? ""] ?? "não informada";
 }
 
+type TimeDistributionSlice = {
+  key: "productive" | "idle" | "communication" | "internal" | "navigation" | "other";
+  name: string;
+  value: number;
+  seconds: number;
+  percent: number;
+  color: string;
+};
+
+type RankingChartItem = {
+  name: string;
+  value: number;
+  detail?: string;
+};
+
+type ProductivityTimelinePoint = {
+  label: string;
+  produtivo: number;
+  ocioso: number;
+  trocas: number;
+};
+
+type HourlyHeatmapPoint = {
+  day: string;
+  hour: string;
+  minutes: number;
+  intensity: number;
+  switches: number;
+};
+
+type MetricsAnalytics = {
+  activeSeconds: number;
+  idleSeconds: number;
+  trackedSeconds: number;
+  contextSwitches: number;
+  contextSwitchesPerHour: number;
+  focusScore: number;
+  fragmentationScore: number;
+  longestFocusSeconds: number;
+  timeDistribution: TimeDistributionSlice[];
+  appRanking: RankingChartItem[];
+  teamRanking: RankingChartItem[];
+  userRanking: RankingChartItem[];
+  timeline: ProductivityTimelinePoint[];
+  contextTimeline: Array<{ label: string; trocas: number }>;
+  heatmap: HourlyHeatmapPoint[];
+  currentActivity: string;
+  sourceLabel: string;
+};
+
+type AgentOsGroup = {
+  os: string;
+  online: number;
+  syncing: number;
+  offline: number;
+  pending: number;
+  total: number;
+};
+
+type QualityOsGroup = {
+  os: string;
+  high: number;
+  medium: number;
+  low: number;
+  blocked: number;
+  total: number;
+};
+
+const timeSliceMeta: Record<TimeDistributionSlice["key"], { name: string; color: string }> = {
+  productive: { name: "Produtivo", color: "#34d399" },
+  idle: { name: "Ocioso", color: "#fb923c" },
+  communication: { name: "Comunicação", color: "#38bdf8" },
+  internal: { name: "Sistemas internos", color: "#f97316" },
+  navigation: { name: "Navegação", color: "#a78bfa" },
+  other: { name: "Outros", color: "#71717a" }
+};
+
+function clamp(value: number, min = 0, max = 100) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeMetricText(value?: string | null) {
+  return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function osFamily(os?: string | null) {
+  const normalized = normalizeMetricText(os);
+  if (normalized.includes("win")) {
+    return "Windows";
+  }
+  if (normalized.includes("mac") || normalized.includes("darwin")) {
+    return "macOS";
+  }
+  if (normalized.includes("linux") || normalized.includes("ubuntu") || normalized.includes("debian") || normalized.includes("fedora")) {
+    return "Linux";
+  }
+  return os?.trim() || "Outro";
+}
+
+function categoryPt(category: string) {
+  const normalized = normalizeMetricText(category);
+  const dictionary: Array<[string, string]> = [
+    ["productive", "Produtivo"],
+    ["produtiv", "Produtivo"],
+    ["business", "Sistemas internos"],
+    ["gestao", "Sistemas internos"],
+    ["erp", "Sistemas internos"],
+    ["communication", "Comunicação"],
+    ["comunic", "Comunicação"],
+    ["idle", "Ocioso"],
+    ["ocios", "Ocioso"],
+    ["browser", "Navegação"],
+    ["naveg", "Navegação"],
+    ["development", "Desenvolvimento"],
+    ["dev", "Desenvolvimento"],
+    ["distraction", "Improdutivo"],
+    ["improductive", "Improdutivo"],
+    ["agent", "Agente"],
+    ["sync", "Sincronização"]
+  ];
+  return dictionary.find(([key]) => normalized.includes(key))?.[1] ?? category;
+}
+
+function isIdleMetricRow(row: MetricsDetailedRow) {
+  const signal = normalizeMetricText(`${row.eventType} ${row.category}`);
+  return signal.includes("idle") || signal.includes("ocios");
+}
+
+function isContextSwitchMetricRow(row: MetricsDetailedRow) {
+  return normalizeMetricText(row.eventType).includes("context_switch") || normalizeMetricText(row.category).includes("context");
+}
+
+function isAgentMetricRow(row: MetricsDetailedRow) {
+  const signal = normalizeMetricText(`${row.eventType} ${row.category}`);
+  return ["heartbeat", "sync", "agent", "collection_quality", "coleta"].some((token) => signal.includes(token));
+}
+
+function classifyTimeSlice(row: MetricsDetailedRow): TimeDistributionSlice["key"] | null {
+  if (isIdleMetricRow(row)) {
+    return "idle";
+  }
+  if (isContextSwitchMetricRow(row) || isAgentMetricRow(row)) {
+    return null;
+  }
+  const signal = normalizeMetricText(`${row.app} ${row.category} ${row.eventType}`);
+  if (["email", "mail", "teams", "slack", "whatsapp", "chat", "comunic"].some((token) => signal.includes(token))) {
+    return "communication";
+  }
+  if (["erp", "crm", "sap", "protheus", "totvs", "business", "gestao", "interno", "portal", "sistema"].some((token) => signal.includes(token))) {
+    return "internal";
+  }
+  if (["browser", "chrome", "edge", "firefox", "safari", "naveg"].some((token) => signal.includes(token))) {
+    return "navigation";
+  }
+  if (["produtiv", "productive", "development", "dev", "planilha", "spreadsheet", "excel"].some((token) => signal.includes(token))) {
+    return "productive";
+  }
+  return "other";
+}
+
+function buildTimeDistribution(bucketSeconds: Record<TimeDistributionSlice["key"], number>) {
+  const total = Object.values(bucketSeconds).reduce((sum, value) => sum + value, 0);
+  if (!total) {
+    return [];
+  }
+  return (Object.keys(timeSliceMeta) as TimeDistributionSlice["key"][])
+    .map((key) => {
+      const seconds = Math.max(0, bucketSeconds[key] ?? 0);
+      const meta = timeSliceMeta[key];
+      return {
+        key,
+        name: meta.name,
+        color: meta.color,
+        seconds,
+        value: seconds > 0 ? Math.max(1, Math.round(seconds / 60)) : 0,
+        percent: Math.round((seconds / total) * 100)
+      };
+    })
+    .filter((item) => item.seconds > 0);
+}
+
+function topRanking(map: Map<string, { seconds: number; detail?: string }>, limit = 8): RankingChartItem[] {
+  return [...map.entries()]
+    .map(([name, item]) => ({
+      name,
+      value: Math.max(1, Math.round(item.seconds / 60)),
+      detail: item.detail ?? formatDuration(item.seconds)
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+}
+
+function hourBucket(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { key: "sem-data", label: "sem hora", day: "Sem data", hour: "--", sort: 0 };
+  }
+  const day = weekdayMap[date.getDay()];
+  const hour = date.getHours().toString().padStart(2, "0");
+  return {
+    key: `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${hour}`,
+    label: `${day} ${hour}h`,
+    day,
+    hour,
+    sort: new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours()).getTime()
+  };
+}
+
+function buildMetricsAnalytics(
+  rows: MetricsDetailedRow[],
+  operationalMetrics: OperationalMetric[],
+  operationalIntelligence: OperationalIntelligence,
+  hierarchy: HierarchyNode[],
+  allowFallbackSummary: boolean
+): MetricsAnalytics {
+  if (!rows.length) {
+    const summaryActiveSeconds = operationalIntelligence.totalActiveSeconds || sumMetric(operationalMetrics, "active_seconds");
+    const summaryIdleSeconds = operationalIntelligence.totalIdleSeconds || sumMetric(operationalMetrics, "idle_seconds");
+    const summaryContextSwitches = operationalIntelligence.contextSwitches || sumMetric(operationalMetrics, "context_switch_count");
+    const hasSummaryData = Boolean(summaryActiveSeconds || summaryIdleSeconds || summaryContextSwitches || operationalIntelligence.timeline.length || operationalIntelligence.topApps.length);
+    if (!hasSummaryData && !allowFallbackSummary) {
+      return emptyMetricsAnalytics("Filtro sem resultado real");
+    }
+
+    const demoMode = !hasSummaryData && allowFallbackSummary;
+    const activeSeconds = demoMode ? 7.2 * 3600 : summaryActiveSeconds;
+    const idleSeconds = demoMode ? 1.4 * 3600 : summaryIdleSeconds;
+    const trackedSeconds = activeSeconds + idleSeconds;
+    const contextSwitches = demoMode ? 42 : summaryContextSwitches;
+    const hours = Math.max(trackedSeconds / 3600, 1);
+    const contextSwitchesPerHour = demoMode ? 5.8 : (operationalIntelligence.contextSwitchesPerHour || contextSwitches / hours);
+    const focusScore = demoMode ? 78 : (operationalIntelligence.focusScore || clamp((activeSeconds / Math.max(trackedSeconds, 1)) * 100 - contextSwitchesPerHour * 0.9));
+    const fragmentationScore = demoMode ? 38 : (operationalIntelligence.distractionScore || clamp(contextSwitchesPerHour * 3.1));
+    const bucketSeconds = {
+      productive: activeSeconds * 0.46,
+      idle: idleSeconds,
+      communication: activeSeconds * 0.16,
+      internal: activeSeconds * 0.25,
+      navigation: activeSeconds * 0.07,
+      other: activeSeconds * 0.06
+    };
+    const appRanking = operationalIntelligence.topApps.length
+      ? operationalIntelligence.topApps
+          .filter((item) => item.app !== "Ociosidade")
+          .map((item) => ({ name: item.app, value: Math.max(1, Math.round((item.activeSeconds || item.idleSeconds) / 60)), detail: `${item.focusLabel} | ${item.events} eventos` }))
+          .slice(0, 8)
+      : demoMode
+        ? appUsage.map((item) => ({ name: item.app, value: item.minutes, detail: "dados demo" }))
+        : [];
+    const timeline = operationalIntelligence.timeline.length
+      ? operationalIntelligence.timeline.map((point) => ({
+          label: point.label,
+          produtivo: Math.round(point.activeSeconds / 60),
+          ocioso: Math.round(point.idleSeconds / 60),
+          trocas: point.contextSwitches
+        }))
+      : demoMode
+        ? weekdayOrder.slice(0, 5).map((day, index) => ({ label: day, produtivo: 210 + index * 18, ocioso: 32 + index * 4, trocas: 5 + index * 2 }))
+        : [];
+    const departmentPerformance = buildDepartmentPerformance(operationalMetrics, hierarchy.length ? hierarchy : fallbackHierarchy, demoMode);
+    const userPerformance = buildTopUsers(operationalMetrics, hierarchy.length ? hierarchy : fallbackHierarchy);
+    return {
+      activeSeconds,
+      idleSeconds,
+      trackedSeconds,
+      contextSwitches,
+      contextSwitchesPerHour,
+      focusScore,
+      fragmentationScore,
+      longestFocusSeconds: operationalIntelligence.longestFocusSeconds || (demoMode ? 54 * 60 : 0),
+      timeDistribution: buildTimeDistribution(bucketSeconds),
+      appRanking,
+      teamRanking: departmentPerformance.map((item) => ({ name: item.name, value: Math.max(1, Math.round((item.active ?? 0) / 60)), detail: `${item.score}% foco` })),
+      userRanking: userPerformance.length
+        ? userPerformance.map((item) => ({ name: item.name, value: Math.max(1, Math.round(item.active / 60)), detail: item.title }))
+        : demoMode
+          ? fallbackHierarchy.slice(1).map((item, index) => ({ name: item.name, value: 260 - index * 38, detail: item.title }))
+          : [],
+      timeline,
+      contextTimeline: timeline.filter((point) => point.trocas > 0).map((point) => ({ label: point.label, trocas: point.trocas })),
+      heatmap: operationalIntelligence.timeline.length
+        ? buildTimelineHeatmap(operationalIntelligence.timeline)
+        : demoMode
+          ? buildDemoHeatmap()
+          : [],
+      currentActivity: operationalIntelligence.currentActivity,
+      sourceLabel: demoMode ? "dados demo sinalizados" : operationalIntelligence.periodLabel
+    };
+  }
+
+  const bucketSeconds: Record<TimeDistributionSlice["key"], number> = {
+    productive: 0,
+    idle: 0,
+    communication: 0,
+    internal: 0,
+    navigation: 0,
+    other: 0
+  };
+  const appTotals = new Map<string, { seconds: number; detail?: string }>();
+  const teamTotals = new Map<string, { seconds: number; detail?: string }>();
+  const userTotals = new Map<string, { seconds: number; detail?: string }>();
+  const timelineTotals = new Map<string, ProductivityTimelinePoint & { sort: number }>();
+  const heatmapTotals = new Map<string, HourlyHeatmapPoint>();
+  let activeSeconds = 0;
+  let idleSeconds = 0;
+  let contextSwitches = 0;
+  let longestFocusSeconds = 0;
+
+  rows.forEach((row) => {
+    const duration = Math.max(0, Number(row.durationSeconds ?? 0));
+    const bucket = hourBucket(row.occurredAt);
+    const timelineRow = timelineTotals.get(bucket.key) ?? { label: bucket.label, produtivo: 0, ocioso: 0, trocas: 0, sort: bucket.sort };
+    const heatmapKey = `${bucket.day}-${bucket.hour}`;
+    const heatmapRow = heatmapTotals.get(heatmapKey) ?? { day: bucket.day, hour: bucket.hour, minutes: 0, intensity: 0, switches: 0 };
+
+    if (isContextSwitchMetricRow(row)) {
+      contextSwitches += 1;
+      timelineRow.trocas += 1;
+      heatmapRow.switches += 1;
+      timelineTotals.set(bucket.key, timelineRow);
+      heatmapTotals.set(heatmapKey, heatmapRow);
+      return;
+    }
+    if (isAgentMetricRow(row)) {
+      return;
+    }
+
+    const slice = classifyTimeSlice(row);
+    if (!slice || duration <= 0) {
+      return;
+    }
+
+    bucketSeconds[slice] += duration;
+    heatmapRow.minutes += Math.max(1, Math.round(duration / 60));
+    if (slice === "idle") {
+      idleSeconds += duration;
+      timelineRow.ocioso += Math.max(1, Math.round(duration / 60));
+    } else {
+      activeSeconds += duration;
+      timelineRow.produtivo += Math.max(1, Math.round(duration / 60));
+      longestFocusSeconds = Math.max(longestFocusSeconds, duration);
+      const appRow = appTotals.get(row.app) ?? { seconds: 0, detail: categoryPt(row.category) };
+      appRow.seconds += duration;
+      appTotals.set(row.app, appRow);
+      const teamName = row.teamName || row.department || "Sem equipe";
+      const teamRow = teamTotals.get(teamName) ?? { seconds: 0, detail: row.department };
+      teamRow.seconds += duration;
+      teamTotals.set(teamName, teamRow);
+      const userRow = userTotals.get(row.userName) ?? { seconds: 0, detail: row.userTitle ?? row.teamName ?? row.department };
+      userRow.seconds += duration;
+      userTotals.set(row.userName, userRow);
+    }
+    timelineTotals.set(bucket.key, timelineRow);
+    heatmapTotals.set(heatmapKey, heatmapRow);
+  });
+
+  const trackedSeconds = activeSeconds + idleSeconds;
+  const contextSwitchesPerHour = contextSwitches / Math.max(trackedSeconds / 3600, 1);
+  const focusScore = clamp((activeSeconds / Math.max(trackedSeconds, 1)) * 100 - contextSwitchesPerHour * 1.1);
+  const fragmentationScore = clamp(contextSwitchesPerHour * 3.2 + contextSwitches * 0.08);
+  const heatmapMax = Math.max(...[...heatmapTotals.values()].map((item) => item.minutes), 1);
+  const heatmap = [...heatmapTotals.values()]
+    .map((item) => ({ ...item, intensity: Math.round((item.minutes / heatmapMax) * 100) }))
+    .sort((a, b) => weekdayOrder.indexOf(a.day) - weekdayOrder.indexOf(b.day) || a.hour.localeCompare(b.hour));
+  const latestRow = rows.reduce<MetricsDetailedRow | null>((latest, row) => {
+    if (!latest) {
+      return row;
+    }
+    return new Date(row.occurredAt).getTime() > new Date(latest.occurredAt).getTime() ? row : latest;
+  }, null);
+
+  return {
+    activeSeconds,
+    idleSeconds,
+    trackedSeconds,
+    contextSwitches,
+    contextSwitchesPerHour,
+    focusScore,
+    fragmentationScore,
+    longestFocusSeconds,
+    timeDistribution: buildTimeDistribution(bucketSeconds),
+    appRanking: topRanking(appTotals),
+    teamRanking: topRanking(teamTotals, 8),
+    userRanking: topRanking(userTotals, 8),
+    timeline: [...timelineTotals.values()]
+      .sort((a, b) => a.sort - b.sort)
+      .map(({ sort: _sort, ...point }) => point)
+      .slice(-24),
+    contextTimeline: [...timelineTotals.values()]
+      .sort((a, b) => a.sort - b.sort)
+      .filter((point) => point.trocas > 0)
+      .map((point) => ({ label: point.label, trocas: point.trocas }))
+      .slice(-24),
+    heatmap,
+    currentActivity: latestRow ? `${latestRow.userName}: ${latestRow.app} (${categoryPt(latestRow.category)})` : "Sem evento recente no recorte",
+    sourceLabel: `recorte filtrado (${rows.length} eventos)`
+  };
+}
+
+function emptyMetricsAnalytics(sourceLabel: string): MetricsAnalytics {
+  return {
+    activeSeconds: 0,
+    idleSeconds: 0,
+    trackedSeconds: 0,
+    contextSwitches: 0,
+    contextSwitchesPerHour: 0,
+    focusScore: 0,
+    fragmentationScore: 0,
+    longestFocusSeconds: 0,
+    timeDistribution: [],
+    appRanking: [],
+    teamRanking: [],
+    userRanking: [],
+    timeline: [],
+    contextTimeline: [],
+    heatmap: [],
+    currentActivity: "Sem dados para o filtro atual",
+    sourceLabel
+  };
+}
+
+function buildTimelineHeatmap(timeline: OperationalTimelinePoint[]): HourlyHeatmapPoint[] {
+  const rows = timeline.map((point, index) => {
+    const hourMatch = point.label.match(/(\d{1,2})/);
+    const minutes = Math.round((point.activeSeconds + point.idleSeconds + point.unidentifiedSeconds) / 60);
+    return {
+      day: weekdayOrder[index % weekdayOrder.length],
+      hour: hourMatch ? hourMatch[1].padStart(2, "0") : `${(8 + index).toString().padStart(2, "0")}`,
+      minutes,
+      intensity: 0,
+      switches: point.contextSwitches
+    };
+  });
+  const maxMinutes = Math.max(...rows.map((item) => item.minutes), 1);
+  return rows.map((item) => ({ ...item, intensity: Math.round((item.minutes / maxMinutes) * 100) }));
+}
+
+function buildDemoHeatmap(): HourlyHeatmapPoint[] {
+  const hours = ["08", "09", "10", "11", "14", "15", "16", "17"];
+  const rows = weekdayOrder.slice(0, 5).flatMap((day, dayIndex) =>
+    hours.map((hour, hourIndex) => {
+      const minutes = 18 + ((dayIndex * 13 + hourIndex * 9) % 44);
+      return {
+        day,
+        hour,
+        minutes,
+        intensity: Math.round((minutes / 62) * 100),
+        switches: (dayIndex + hourIndex) % 7
+      };
+    })
+  );
+  return rows;
+}
+
+function buildAgentStatusByOs(devices: Device[]): AgentOsGroup[] {
+  const rows = new Map<string, AgentOsGroup>();
+  devices.forEach((device) => {
+    const os = osFamily(device.os);
+    const row = rows.get(os) ?? { os, online: 0, syncing: 0, offline: 0, pending: 0, total: 0 };
+    const status = normalizeMetricText(device.status);
+    if (status.includes("online")) {
+      row.online += 1;
+    } else if (status.includes("sync")) {
+      row.syncing += 1;
+    } else if (status.includes("offline")) {
+      row.offline += 1;
+    } else {
+      row.pending += 1;
+    }
+    row.total += 1;
+    rows.set(os, row);
+  });
+  return [...rows.values()].sort((a, b) => b.total - a.total);
+}
+
+function buildQualityByOs(rows: MetricsDetailedRow[], devices: Device[]): QualityOsGroup[] {
+  const grouped = new Map<string, QualityOsGroup>();
+  const add = (osValue: string, qualityValue?: string | null) => {
+    const os = osFamily(osValue);
+    const row = grouped.get(os) ?? { os, high: 0, medium: 0, low: 0, blocked: 0, total: 0 };
+    const quality = normalizeMetricText(qualityValue);
+    if (quality.includes("blocked")) {
+      row.blocked += 1;
+    } else if (quality.includes("low") || quality.includes("baixa")) {
+      row.low += 1;
+    } else if (quality.includes("medium") || quality.includes("media")) {
+      row.medium += 1;
+    } else {
+      row.high += 1;
+    }
+    row.total += 1;
+    grouped.set(os, row);
+  };
+  if (rows.length) {
+    rows.forEach((row) => add(row.os, row.collectionQuality));
+  } else {
+    devices.forEach((device) => add(device.os, device.collectionQuality));
+  }
+  return [...grouped.values()].sort((a, b) => b.total - a.total);
+}
+
 export default function HomePage() {
   const [token, setToken] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -1074,6 +1640,7 @@ export default function HomePage() {
   const [authMode, setAuthMode] = useState<"supabase" | "local" | null>(null);
   const [identity, setIdentity] = useState("operador Vulcan");
   const [view, setView] = useState<ViewKey>("dashboard");
+  const [metricsIntent, setMetricsIntent] = useState<MetricsIntent | null>(null);
   const [loginError, setLoginError] = useState("");
   const [metrics, setMetrics] = useState<Metric[]>(fallbackMetrics);
   const [insights, setInsights] = useState<Insight[]>(fallbackInsights);
@@ -1508,6 +2075,11 @@ export default function HomePage() {
     await refreshHierarchyData();
   }
 
+  function openMetricsWithFilters(filters: Omit<MetricsIntent, "nonce">) {
+    setMetricsIntent({ ...filters, nonce: Date.now() });
+    setView("metrics");
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#070707] text-zinc-100">
       <AnimatedAtmosphere />
@@ -1552,6 +2124,8 @@ export default function HomePage() {
             liveStatusLabel={liveStatusLabel}
             allowDemoFallback={!liveTestMode}
             token={token}
+            metricsIntent={metricsIntent}
+            onOpenMetrics={openMetricsWithFilters}
             onDeviceOwnerChange={handleDeviceOwnerChange}
             onHierarchyMemberSave={handleHierarchyMemberSave}
             onHierarchyMemberDelete={handleHierarchyMemberDelete}
@@ -1826,6 +2400,8 @@ function DashboardShell({
   liveStatusLabel,
   allowDemoFallback,
   token,
+  metricsIntent,
+  onOpenMetrics,
   onDeviceOwnerChange,
   onHierarchyMemberSave,
   onHierarchyMemberDelete,
@@ -1858,6 +2434,8 @@ function DashboardShell({
   liveStatusLabel: string;
   allowDemoFallback: boolean;
   token: string;
+  metricsIntent: MetricsIntent | null;
+  onOpenMetrics: (filters: Omit<MetricsIntent, "nonce">) => void;
   onDeviceOwnerChange: (deviceId: string, ownerMembershipId: string | null) => void;
   onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
@@ -1910,6 +2488,7 @@ function DashboardShell({
               onlineAgents={onlineAgents}
               liveStatusLabel={liveStatusLabel}
               allowDemoFallback={allowDemoFallback}
+              onOpenMetrics={onOpenMetrics}
             />
           )}
           {activeView === "hierarchy" && (
@@ -1938,9 +2517,23 @@ function DashboardShell({
               token={token}
               liveStatusLabel={liveStatusLabel}
               allowDemoFallback={allowDemoFallback}
+              metricsIntent={metricsIntent}
             />
           )}
-          {activeView === "insights" && <InsightsView key="insights" insights={insights} />}
+          {activeView === "insights" && (
+            <InsightsView
+              key="insights"
+              insights={insights}
+              token={token}
+              teams={teams}
+              hierarchy={hierarchy}
+              devices={devices}
+              whatsAppStatus={whatsAppStatus}
+              emailStatuses={emailStatuses}
+              liveStatusLabel={liveStatusLabel}
+              onOpenMetrics={onOpenMetrics}
+            />
+          )}
           {activeView === "notifications" && <NotificationsView key="notifications" notifications={notifications} liveStatusLabel={liveStatusLabel} schedules={schedules} />}
           {activeView === "settings" && (
             <SettingsView
@@ -2895,44 +3488,90 @@ function OperationalHealthGauge({
   const idleScore = Math.max(0, 100 - idleRate * 100);
   const switchScore = Math.max(0, 100 - contextSwitchesPerHour * 2.2);
   const signalScore = Math.max(0, 100 - criticalSignals * 9);
-  const score = Math.round((onlineScore * 0.28) + (focusScore * 0.30) + (idleScore * 0.18) + (switchScore * 0.14) + (signalScore * 0.10));
-  const tone = score >= 76 ? "Operação saudável" : score >= 58 ? "Atenção controlada" : "Ação necessária";
+  const score = Math.max(0, Math.min(100, Math.round((onlineScore * 0.28) + (focusScore * 0.30) + (idleScore * 0.18) + (switchScore * 0.14) + (signalScore * 0.10))));
+  const status = score >= 88 ? "Excelente" : score >= 74 ? "Saudável" : score >= 54 ? "Atenção" : "Crítico";
+  const color = score >= 88 ? "#22c55e" : score >= 74 ? "#34d399" : score >= 54 ? "#fb923c" : "#fb7185";
+  const circumference = 283;
+  const dashOffset = circumference - (score / 100) * circumference;
+  const angle = (180 + score * 1.8) * (Math.PI / 180);
+  const pointerX = 120 + Math.cos(angle) * 72;
+  const pointerY = 118 + Math.sin(angle) * 72;
+  const composition = [
+    { label: "Agentes online", value: Math.round(onlineScore), tone: onlineScore >= 75 ? "ok" : "warn" },
+    { label: "Foco", value: Math.round(focusScore), tone: focusScore >= 60 ? "ok" : "warn" },
+    { label: "Baixa ociosidade", value: Math.round(idleScore), tone: idleScore >= 65 ? "ok" : "warn" },
+    { label: "Sincronização", value: Math.round(signalScore), tone: signalScore >= 75 ? "ok" : "warn" }
+  ];
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-      <div className="relative grid min-h-72 place-items-center overflow-hidden rounded-lg border border-orange-400/10 bg-[radial-gradient(circle_at_50%_42%,rgba(249,115,22,0.16),rgba(9,9,11,0)_58%)] p-4">
+    <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+      <div className="relative grid min-h-80 place-items-center overflow-hidden rounded-lg border border-orange-400/10 bg-[radial-gradient(circle_at_50%_58%,rgba(249,115,22,0.18),rgba(9,9,11,0)_62%)] px-4 pb-2 pt-7">
         <motion.div
           className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
           animate={{ x: ["-100%", "100%"], opacity: [0, 0.95, 0] }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+          transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
         />
-        <Tremor.ProgressCircle value={score} size="xl" color={score >= 76 ? "emerald" : score >= 58 ? "orange" : "rose"} strokeWidth={12}>
-          <div className="text-center">
-            <p className="text-5xl font-semibold text-zinc-50">{score}</p>
-            <p className="mt-1 text-[10px] uppercase tracking-[0.22em] text-orange-200">/100</p>
-          </div>
-        </Tremor.ProgressCircle>
+        <svg viewBox="0 0 240 158" className="h-56 w-full max-w-sm overflow-visible" role="img" aria-label={`Saúde operacional ${score} de 100, status ${status}`}>
+          <path d="M30 118 A90 90 0 0 1 210 118" fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="18" strokeLinecap="round" />
+          <motion.path
+            d="M30 118 A90 90 0 0 1 210 118"
+            fill="none"
+            stroke={color}
+            strokeWidth="18"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            initial={{ strokeDashoffset: circumference }}
+            animate={{ strokeDashoffset: dashOffset }}
+            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+          />
+          <path d="M30 118 A90 90 0 0 1 210 118" fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="1" strokeDasharray="2 13" />
+          <motion.line
+            x1="120"
+            y1="118"
+            initial={{ x2: 48, y2: 118 }}
+            animate={{ x2: pointerX, y2: pointerY }}
+            transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
+            stroke="#fafafa"
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+          <circle cx="120" cy="118" r="8" fill="#09090b" stroke={color} strokeWidth="3" />
+          <text x="120" y="86" textAnchor="middle" className="fill-zinc-50 text-[34px] font-semibold">{score}</text>
+          <text x="120" y="106" textAnchor="middle" className="fill-orange-200 text-[8px] uppercase tracking-[0.22em]">/100</text>
+          <text x="30" y="148" textAnchor="middle" className="fill-zinc-600 text-[9px]">0</text>
+          <text x="210" y="148" textAnchor="middle" className="fill-zinc-600 text-[9px]">100</text>
+        </svg>
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 text-center">
+          <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Saúde Operacional</p>
+          <p className="mt-1 text-2xl font-semibold" style={{ color }}>{status}</p>
+        </div>
       </div>
       <div className="grid content-center gap-3">
-        <p className="text-2xl font-semibold text-zinc-50">{tone}</p>
-        <p className="text-sm leading-6 text-zinc-400">
-          Índice composto por agentes online, foco, ociosidade, troca de contexto e sinais críticos. É leitura de supervisão, não relatório longo.
+        <p className="text-3xl font-semibold text-zinc-50">{status === "Crítico" ? "Ação imediata" : status === "Atenção" ? "Atenção controlada" : "Operação sob controle"}</p>
+        <p className="max-w-xl text-sm leading-6 text-zinc-400">
+          Leitura composta por agentes online, estabilidade de sincronização, foco, baixa ociosidade, baixa troca de contexto e qualidade dos dados.
         </p>
-        <Tremor.BarList
-          className="mt-1"
-          data={[
-            { name: "Agentes online", value: Math.round(onlineScore) },
-            { name: "Foco operacional", value: Math.round(focusScore) },
-            { name: "Baixa ociosidade", value: Math.round(idleScore) },
-            { name: "Baixa fragmentação", value: Math.round(switchScore) }
-          ]}
-          color={score >= 76 ? "emerald" : score >= 58 ? "orange" : "rose"}
-        />
+        <div className="grid gap-3">
+          {composition.map((item) => (
+            <div key={item.label} className="rounded-lg border border-zinc-800 bg-black/35 p-3">
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="text-zinc-300">{item.label}</span>
+                <span className={item.tone === "ok" ? "text-emerald-300" : "text-orange-300"}>{item.value}%</span>
+              </div>
+              <div className="h-2 overflow-hidden bg-zinc-900">
+                <motion.div
+                  className={`h-full ${item.tone === "ok" ? "bg-emerald-400" : "bg-orange-400"}`}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, Math.max(0, item.value))}%` }}
+                  transition={{ duration: 0.7, ease: "easeOut" }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
         <div className="grid gap-2 sm:grid-cols-2">
-          <ConnectionSummary label="Agentes" value={`${onlineAgents}/${totalAgents}`} tone={onlineAgents ? "ok" : "warn"} />
-          <ConnectionSummary label="Foco" value={`${Math.round(focusScore)}/100`} tone={focusScore >= 55 ? "ok" : "warn"} />
-          <ConnectionSummary label="Ociosidade" value={`${Math.round(idleRate * 100)}%`} tone={idleRate > 0.32 ? "warn" : "ok"} />
-          <ConnectionSummary label="Sinais críticos" value={`${criticalSignals}`} tone={criticalSignals ? "warn" : "ok"} />
+          <ConnectionSummary label="Agentes" value={`${onlineAgents}/${totalAgents || 0}`} tone={onlineAgents ? "ok" : "warn"} />
+          <ConnectionSummary label="Trocas/hora" value={`${contextSwitchesPerHour.toFixed(1)}`} tone={contextSwitchesPerHour > 20 ? "warn" : "ok"} />
         </div>
       </div>
     </div>
@@ -2956,7 +3595,8 @@ function DashboardView({
   schedules,
   onlineAgents,
   liveStatusLabel,
-  allowDemoFallback
+  allowDemoFallback,
+  onOpenMetrics
 }: {
   metrics: Metric[];
   insights: Insight[];
@@ -2975,601 +3615,269 @@ function DashboardView({
   onlineAgents: number;
   liveStatusLabel: string;
   allowDemoFallback: boolean;
+  onOpenMetrics: (filters: Omit<MetricsIntent, "nonce">) => void;
 }) {
-  const [demoAction, setDemoAction] = useState<string | null>(null);
-  const flowData = useMemo(() => buildFlowData(operationalMetrics, allowDemoFallback), [operationalMetrics, allowDemoFallback]);
-  const topUsers = useMemo(() => buildTopUsers(operationalMetrics, hierarchy), [operationalMetrics, hierarchy]);
-  const departmentPerformance = useMemo(() => buildDepartmentPerformance(operationalMetrics, hierarchy, allowDemoFallback), [operationalMetrics, hierarchy, allowDemoFallback]);
-  const heatmap = useMemo(() => buildHeatmap(operationalIntelligence), [operationalIntelligence]);
-  const appUsageData = useMemo(() => {
-    if (operationalIntelligence.topApps.length) {
-      return operationalIntelligence.topApps
-        .map((item) => ({ app: item.app, minutes: Math.max(1, Math.round((item.activeSeconds || item.idleSeconds) / 60)), category: item.category, percent: item.percent }))
-        .slice(0, 8);
-    }
-    return buildAppUsageData(operationalMetrics, allowDemoFallback).map((item) => ({ ...item, category: "operacional", percent: 0 }));
-  }, [operationalIntelligence, operationalMetrics, allowDemoFallback]);
   const activeSeconds = operationalIntelligence.totalActiveSeconds || sumMetric(operationalMetrics, "active_seconds");
   const idleSeconds = operationalIntelligence.totalIdleSeconds || sumMetric(operationalMetrics, "idle_seconds");
   const contextSwitches = operationalIntelligence.contextSwitches || sumMetric(operationalMetrics, "context_switch_count");
   const trackedSeconds = operationalIntelligence.trackedSeconds || activeSeconds + idleSeconds;
-  const offlineDevices = devices.filter((device) => device.status === "offline").length;
   const [selectedTeamId, setSelectedTeamId] = useState("all");
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
   const visibleDevices = selectedTeam ? devices.filter((device) => device.teamId === selectedTeam.id) : devices;
   const visibleOnlineAgents = visibleDevices.filter((device) => ["online", "syncing"].includes(device.status)).length;
-  const pendingQueue = devices.reduce((total, device) => total + Number(device.queueDepth ?? 0), 0);
-  const qualityIssues = devices.filter((device) => ["low", "blocked_by_os"].includes(device.collectionQuality ?? "")).length;
+  const visibleTotalAgents = visibleDevices.length || devices.length;
+  const offlineDevices = visibleDevices.filter((device) => device.status === "offline").length;
+  const pendingQueue = visibleDevices.reduce((total, device) => total + Number(device.queueDepth ?? 0), 0);
+  const qualityIssues = visibleDevices.filter((device) => ["low", "blocked_by_os"].includes(device.collectionQuality ?? "")).length;
   const pendingNotifications = notifications.filter((item) => ["queued", "missing_credentials", "failed"].includes(item.status)).length;
-  const sentNotifications = notifications.filter((item) => item.status === "sent").length;
   const automationHours = insights.reduce((total, insight) => total + insight.automationSavingsHours, 0);
   const financialSavings = automationHours * 95;
   const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
   const dataPlaneReady = supabaseStatus.configured && supabaseStatus.databaseReachable !== false && supabaseStatus.restReachable !== false;
   const aiReady = aiStatus.openaiConfigured || aiStatus.llamaConfigured;
-  const lossBreakdown = useMemo(
-    () => buildLossBreakdown({ idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours }),
-    [idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours]
-  );
+  const baseMetricsFilter = selectedTeam ? { teamId: selectedTeam.id } : {};
   const recommendedActions = useMemo(
     () => buildRecommendedActions(insights, operationalIntelligence, pendingNotifications, financialSavings),
     [insights, operationalIntelligence, pendingNotifications, financialSavings]
   );
-  const bottlenecks = useMemo(
-    () => buildBottlenecks(insights, appUsageData, departmentPerformance),
-    [insights, appUsageData, departmentPerformance]
+  const lossBreakdown = useMemo(
+    () => buildLossBreakdown({ idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours }),
+    [idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours]
   );
-  const automationOpportunities = useMemo(
-    () => buildAutomationOpportunities(insights, automationHours),
-    [insights, automationHours]
-  );
-  const onboardingChecklist = useMemo(
-    () => buildOnboardingChecklist({ supabaseStatus, hierarchy, devices, whatsAppStatus, emailStatuses, aiStatus, schedules }),
-    [supabaseStatus, hierarchy, devices, whatsAppStatus, emailStatuses, aiStatus, schedules]
-  );
-  const onboardingReady = onboardingChecklist.filter((item) => item.done).length;
   const topLoss = lossBreakdown.reduce<(typeof lossBreakdown)[number] | null>(
     (current, item) => (!current || item.money > current.money ? item : current),
     null
   );
   const primaryAction = recommendedActions[0] ?? null;
-  const channelReadiness = [
-    whatsAppStatus.connected || Boolean(whatsAppStatus.rootChannelNumber),
-    emailReady,
-    schedules.some((schedule) => schedule.enabled)
-  ].filter(Boolean).length;
-  const dashboardMetrics: Metric[] = [
-    ...metrics,
-    { id: "tracked-time", label: "Tempo analisado", value: formatDuration(trackedSeconds), trend: operationalIntelligence.periodLabel, tone: "neutral" },
-    { id: "active-time", label: "Tempo ativo", value: formatDuration(activeSeconds), trend: "uso operacional consolidado", tone: "positive" },
-    { id: "idle-time", label: "Tempo ocioso", value: formatDuration(idleSeconds), trend: `${percentPt(operationalIntelligence.idleRate)} do período`, tone: idleSeconds > activeSeconds * 0.35 ? "warning" : "neutral" },
-    { id: "focus-score", label: "Taxa de foco", value: `${operationalIntelligence.focusScore}/100`, trend: `maior bloco: ${formatDuration(operationalIntelligence.longestFocusSeconds)}`, tone: operationalIntelligence.focusScore >= 55 ? "positive" : "warning" },
-    { id: "fragmentation", label: "Fragmentação", value: `${operationalIntelligence.distractionScore}/100`, trend: `${Number(contextSwitches).toFixed(0)} trocas`, tone: operationalIntelligence.distractionScore > 45 ? "warning" : "neutral" },
-    { id: "online-devices", label: "Dispositivos online", value: `${onlineAgents}`, trend: `${offlineDevices} offline | fila ${pendingQueue}`, tone: offlineDevices ? "warning" : "positive" },
-    { id: "collection-quality", label: "Qualidade de coleta", value: qualityIssues ? `${qualityIssues} atenção` : "estável", trend: "Windows, Linux e macOS demo", tone: qualityIssues ? "warning" : "positive" },
-    { id: "financial-savings", label: "Economia estimada", value: formatMoneyBRL(financialSavings), trend: `${automationHours}h de automação`, tone: "positive" },
-    { id: "notifications-sent", label: "Notificações", value: `${sentNotifications}/${notifications.length}`, trend: `${pendingNotifications} pendentes`, tone: pendingNotifications ? "warning" : "positive" }
-  ];
-  const liveFeed = [
-    ...notifications.slice(0, 4).map((item) => ({
-      id: `ntf-${item.id}`,
-      title: item.title,
-      detail: `${channelPt(item.channel)} | ${statusPt(item.status)}`,
-      tone: item.status === "failed" || item.status === "missing_credentials" ? "warn" : "ok"
-    })),
-    ...operationalIntelligence.qualitySignals.slice(0, 3).map((signal) => ({
-      id: `quality-${signal.device}`,
-      title: signal.device,
-      detail: signal.message,
-      tone: signal.quality === "high" ? "ok" : "warn"
-    })),
-    ...insights.slice(0, 3).map((insight) => ({
+  const activeUsersValue = selectedTeam ? String(selectedTeam.membersCount || 0) : metrics.find((metric) => metric.id === "active-users")?.value ?? String(hierarchy.length || 0);
+  const criticalInsights = insights.filter((item) => item.impact === "high").length;
+  const essentialAlerts = [
+    ...notifications
+      .filter((item) => ["failed", "missing_credentials", "queued"].includes(item.status))
+      .slice(0, 2)
+      .map((item) => ({
+        id: `notification-${item.id}`,
+        title: item.title,
+        detail: `${channelPt(item.channel)} | ${statusPt(item.status)}${item.recipient ? ` | ${item.recipient}` : ""}`,
+        severity: item.status === "failed" ? "crítico" : "atenção",
+        filters: baseMetricsFilter
+      })),
+    ...visibleDevices
+      .filter((device) => device.status === "offline" || Number(device.queueDepth ?? 0) > 6 || ["low", "blocked_by_os"].includes(device.collectionQuality ?? ""))
+      .slice(0, 2)
+      .map((device) => ({
+        id: `device-${device.id}`,
+        title: device.status === "offline" ? `Agente offline: ${device.hostname}` : `Agente exige atenção: ${device.hostname}`,
+        detail: `${device.owner} | fila ${device.queueDepth ?? 0} | coleta ${qualityPt(device.collectionQuality)}`,
+        severity: device.status === "offline" ? "crítico" : "atenção",
+        filters: { ...baseMetricsFilter, deviceId: device.id, agentStatus: device.status }
+      })),
+    ...insights.slice(0, 2).map((insight) => ({
       id: `insight-${insight.id}`,
       title: insight.title,
       detail: `${impactPt(insight.impact)} | ${insight.automationSavingsHours}h potenciais`,
-      tone: insight.impact === "high" ? "warn" : "ok"
+      severity: insight.impact === "high" ? "crítico" : "atenção",
+      filters: baseMetricsFilter
     }))
-  ].slice(0, 8);
-  const executiveLossData = lossBreakdown.slice(0, 5).map((item) => ({
-    name: item.label,
-    value: Math.max(1, Math.round(item.money))
-  }));
-  const executiveSystemData = appUsageData.slice(0, 5).map((item) => ({
-    name: item.app,
-    value: Math.max(1, item.minutes)
-  }));
-  const executiveDepartmentData = departmentPerformance.slice(0, 6).map((department) => ({
-    setor: department.name,
-    foco: department.score,
-    ativo: Math.round(department.active / 60),
-    ocioso: Math.round(department.idle / 60)
-  }));
-  const executivePulseData = flowData.map((point) => ({
-    horario: point.name,
-    eventos: point.events,
-    automacao: point.automation
-  }));
-  const pilotReadinessScore = Math.round((onboardingReady / Math.max(onboardingChecklist.length, 1)) * 100);
+  ].slice(0, 5);
+  const commandKpis = [
+    {
+      label: "Agentes online",
+      value: `${visibleOnlineAgents}/${visibleTotalAgents || 0}`,
+      detail: offlineDevices ? `${offlineDevices} offline` : "sincronização estável",
+      tone: offlineDevices ? "warn" : "ok",
+      filters: { ...baseMetricsFilter, agentStatus: offlineDevices ? "offline" : "online" }
+    },
+    {
+      label: "Usuários ativos",
+      value: activeUsersValue,
+      detail: selectedTeam?.name ?? "escopo visível",
+      tone: "ok",
+      filters: baseMetricsFilter
+    },
+    {
+      label: "Gargalos críticos",
+      value: `${criticalInsights}`,
+      detail: criticalInsights ? "requer decisão" : "sem crítico agora",
+      tone: criticalInsights ? "warn" : "ok",
+      filters: { ...baseMetricsFilter, metricType: "context_switch" }
+    },
+    {
+      label: "Foco operacional",
+      value: `${operationalIntelligence.focusScore}/100`,
+      detail: `maior bloco ${formatDuration(operationalIntelligence.longestFocusSeconds)}`,
+      tone: operationalIntelligence.focusScore >= 60 ? "ok" : "warn",
+      filters: { ...baseMetricsFilter, metricType: "productive" }
+    },
+    {
+      label: "Economia estimada",
+      value: formatMoneyBRL(financialSavings),
+      detail: `${automationHours}h potenciais`,
+      tone: financialSavings ? "ok" : "warn",
+      filters: baseMetricsFilter
+    },
+    {
+      label: "Alertas abertos",
+      value: `${pendingNotifications}`,
+      detail: pendingNotifications ? "fora do painel" : "sem pendências",
+      tone: pendingNotifications ? "warn" : "ok",
+      filters: baseMetricsFilter
+    }
+  ] as const;
+  const statusItems = [
+    { label: "Tempo real", value: "ativo", tone: "ok" as const },
+    { label: "Última atualização", value: liveStatusLabel, tone: "ok" as const },
+    { label: "Agentes", value: `${visibleOnlineAgents}/${visibleTotalAgents || 0}`, tone: visibleOnlineAgents ? "ok" as const : "warn" as const },
+    { label: "IA", value: aiReady ? "configurada" : "mock explícito", tone: aiReady ? "ok" as const : "warn" as const },
+    { label: "Notificações", value: whatsAppStatus.connected || emailReady || schedules.some((schedule) => schedule.enabled) ? "preparadas" : "pendentes", tone: pendingNotifications ? "warn" as const : "ok" as const }
+  ];
+  const quickActivity = operationalIntelligence.currentActivity || "Aguardando sinal operacional";
 
   return (
     <ViewFrame>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <LiveBadge label="Tempo real ativo" detail={`${onlineAgents} agente${onlineAgents === 1 ? "" : "s"} sincronizando | última atualização ${liveStatusLabel}`} />
+        <LiveBadge label="Tempo real ativo" detail={`${onlineAgents} agente${onlineAgents === 1 ? "" : "s"} sincronizando | ${operationalIntelligence.periodLabel}`} />
         <TeamFilter teams={teams} selectedTeamId={selectedTeamId} onChange={setSelectedTeamId} />
         <span className="border border-orange-400/25 bg-orange-950/15 px-3 py-2 text-xs uppercase tracking-[0.2em] text-orange-200">
-          {!dataPlaneReady ? "Modo degradado: banco indisponível" : allowDemoFallback ? "Ambiente demonstrativo" : "Somente dados reais"}
+          {!dataPlaneReady ? "Modo degradado" : allowDemoFallback ? "Demo comercial" : "Dados reais"}
         </span>
       </div>
 
-      <div className="mb-5 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <ConnectionSummary label="Banco operacional" value={dataPlaneReady ? "pronto" : "atenção"} tone={dataPlaneReady ? "ok" : "warn"} />
-        <ConnectionSummary label="IA híbrida" value={aiReady ? "configurada" : "mock explícito"} tone={aiReady ? "ok" : "warn"} />
-        <ConnectionSummary label="WhatsApp" value={whatsAppStatus.connected ? "conectado" : statusPt(whatsAppStatus.status)} tone={whatsAppStatus.connected ? "ok" : "warn"} />
-        <ConnectionSummary label="E-mail" value={emailReady ? "envio pronto" : "pendente"} tone={emailReady ? "ok" : "warn"} />
-        <ConnectionSummary label="Agentes online" value={`${visibleOnlineAgents}/${visibleDevices.length || devices.length}`} tone={visibleOnlineAgents ? "ok" : "warn"} />
-        <ConnectionSummary label="Eventos hoje" value={`${operationalIntelligence.totalEvents || metrics.find((metric) => metric.id === "events")?.value || 0}`} tone={operationalIntelligence.totalEvents ? "ok" : "warn"} />
-      </div>
+      <Panel title="Status geral" icon={Command}>
+        <div className="grid gap-3 md:grid-cols-5">
+          {statusItems.map((item) => (
+            <ConnectionSummary key={item.label} label={item.label} value={item.value} tone={item.tone} />
+          ))}
+        </div>
+      </Panel>
 
-      <ExecutiveAnalyticsDeck
-        lossData={executiveLossData}
-        systemData={executiveSystemData}
-        departmentData={executiveDepartmentData}
-        pulseData={executivePulseData}
-        pilotReadinessScore={pilotReadinessScore}
-        financialSavings={financialSavings}
-        pendingDevices={pendingDevices.length}
-        primaryAction={primaryAction?.title ?? "Conectar mais agentes e consolidar o primeiro ciclo operacional."}
-      />
-
-      <div className="mb-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-        <Panel title="Saúde operacional em tempo real" icon={Gauge}>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
+        <Panel title="Saúde Operacional" icon={Gauge}>
           <OperationalHealthGauge
             onlineAgents={visibleOnlineAgents}
-            totalAgents={visibleDevices.length || devices.length}
+            totalAgents={visibleTotalAgents}
             focusScore={operationalIntelligence.focusScore}
             idleRate={operationalIntelligence.idleRate}
             contextSwitchesPerHour={operationalIntelligence.contextSwitchesPerHour}
             criticalSignals={offlineDevices + qualityIssues + pendingDevices.length}
           />
         </Panel>
-        <Panel title="Dispositivos aguardando adoção" icon={RadioTower}>
-          <div className="grid gap-3 md:grid-cols-3">
-            <ConnectionSummary label="Pendentes" value={`${pendingDevices.length}`} tone={pendingDevices.length ? "warn" : "ok"} />
-            <ConnectionSummary label="Equipe filtrada" value={selectedTeam?.name ?? "Toda empresa"} tone="ok" />
-            <ConnectionSummary label="Privacidade" value="fluxo, não conteúdo" tone="ok" />
-          </div>
-          <div className="mt-4 grid gap-3">
-            {pendingDevices.slice(0, 3).map((device) => (
-              <div key={device.id} className="border border-orange-400/15 bg-black/35 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium text-zinc-100">{device.hostname}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{device.os} | usuário SO: {device.osUser ?? "não informado"} | código {device.adoptionCode ?? "pendente"}</p>
-                  </div>
-                  <span className="text-xs uppercase tracking-[0.16em] text-orange-200">adotar</span>
-                </div>
-              </div>
+
+        <div className="grid gap-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {commandKpis.map((item) => (
+              <CommandKpiCard
+                key={item.label}
+                label={item.label}
+                value={item.value}
+                detail={item.detail}
+                tone={item.tone}
+                onClick={() => onOpenMetrics(item.filters)}
+              />
             ))}
-            {!pendingDevices.length ? <p className="text-sm text-zinc-500">Nenhum agente aguardando adoção agora.</p> : null}
           </div>
-        </Panel>
-      </div>
 
-      <div className="mb-5 grid gap-3 xl:grid-cols-[0.9fr_1.2fr_0.9fr]">
-        <motion.div
-          className="border border-orange-400/25 bg-[linear-gradient(135deg,rgba(249,115,22,0.14),rgba(9,9,11,0.72))] p-5 shadow-[0_0_28px_rgba(249,115,22,0.08)]"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-        >
-          <p className="text-xs uppercase tracking-[0.2em] text-orange-200">Perda financeira prioritaria</p>
-          <p className="mt-3 text-3xl font-semibold text-zinc-50">{formatMoneyBRL(topLoss?.money ?? financialSavings)}</p>
-          <p className="mt-2 text-sm leading-6 text-zinc-300">{topLoss ? `${topLoss.label}: ${topLoss.action}` : "Aguardando mais eventos para estimar o primeiro gargalo financeiro."}</p>
-        </motion.div>
-
-        <motion.div
-          className="border border-zinc-800 bg-black/45 p-5"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.04 }}
-        >
-          <p className="text-xs uppercase tracking-[0.2em] text-orange-200">O que fazer agora</p>
-          <p className="mt-3 text-xl font-semibold text-zinc-50">{primaryAction?.title ?? "Rodar os agentes por algumas horas e revisar o primeiro ranking de gargalos."}</p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <ConnectionSummary label="Urgência" value={primaryAction?.urgency ?? "Média"} tone={primaryAction?.urgency === "Alta" ? "warn" : "ok"} />
-            <ConnectionSummary label="Responsável" value={primaryAction?.owner ?? "Gestor"} tone="ok" />
-            <ConnectionSummary label="Economia" value={formatMoneyBRL(primaryAction?.money ?? financialSavings)} tone={(primaryAction?.money ?? financialSavings) ? "ok" : "warn"} />
-          </div>
-        </motion.div>
-
-        <motion.div
-          className="border border-zinc-800 bg-zinc-950/70 p-5"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.08 }}
-        >
-          <p className="text-xs uppercase tracking-[0.2em] text-orange-200">Piloto pago em 60 segundos</p>
-          <p className="mt-3 text-3xl font-semibold text-zinc-50">{onboardingReady}/{onboardingChecklist.length}</p>
-          <p className="mt-2 text-sm leading-6 text-zinc-400">Base configurada com {channelReadiness}/3 canais essenciais para alertar gestor, supervisor e diretoria.</p>
-        </motion.div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        {dashboardMetrics.map((metric, index) => (
-          <MetricTile key={metric.id} metric={metric} index={index} />
-        ))}
+          <Panel title="Ação recomendada agora" icon={Brain}>
+            <div className="grid gap-4 xl:grid-cols-[1fr_auto]">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-orange-300">Prioridade</p>
+                <p className="mt-3 text-2xl font-semibold leading-tight text-zinc-50">
+                  {primaryAction?.title ?? operationalIntelligence.aiRecommendations[0] ?? "Mantenha os agentes ativos para consolidar o próximo diagnóstico."}
+                </p>
+                <p className="mt-3 text-sm leading-6 text-zinc-400">
+                  Agora: {quickActivity}. Tempo ativo {formatDuration(activeSeconds)}, ocioso {formatDuration(idleSeconds)} e {Math.round(contextSwitches)} trocas no recorte.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenMetrics({ ...baseMetricsFilter, metricType: primaryAction?.urgency === "Alta" ? "context_switch" : undefined })}
+                className="h-12 self-end bg-orange-500 px-5 text-sm font-semibold text-black transition hover:bg-orange-400"
+              >
+                Abrir análise
+              </button>
+            </div>
+          </Panel>
+        </div>
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <Panel title="Pulso executivo da operação" icon={Command}>
-          <div className="grid gap-4">
-            <div className="border border-orange-400/20 bg-black/45 p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-orange-300">O que está acontecendo agora</p>
-              <p className="mt-3 text-3xl font-semibold text-zinc-50">{operationalIntelligence.currentActivity}</p>
-              <p className="mt-4 text-sm leading-6 text-zinc-400">{operationalIntelligence.aiSummary}</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <ConnectionSummary label="Produtivo" value={formatDuration(activeSeconds)} tone="ok" />
-              <ConnectionSummary label="Ocioso" value={formatDuration(idleSeconds)} tone={idleSeconds > activeSeconds * 0.35 ? "warn" : "ok"} />
-              <ConnectionSummary label="Trocas/hora" value={`${operationalIntelligence.contextSwitchesPerHour.toFixed(1)}/h`} tone={operationalIntelligence.contextSwitchesPerHour > 25 ? "warn" : "ok"} />
-            </div>
-            {demoAction ? <FeedbackBanner tone="ok" message={demoAction} /> : null}
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {[
-                "Atualizar simulação",
-                "Gerar novo insight",
-                "Simular agente online/offline",
-                "Simular alerta crítico"
-              ].map((label) => (
-                <motion.button
-                  key={label}
-                  type="button"
-                  onClick={() => setDemoAction(`${label}: ação de demonstração preparada. Para produção, conecte este botão ao job correspondente no backend.`)}
-                  className="min-h-16 border border-zinc-800 bg-zinc-950/70 px-4 text-left text-sm text-zinc-200 transition hover:border-orange-400/45 hover:text-orange-100"
-                  whileHover={{ y: -3 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  {label}
-                </motion.button>
-              ))}
-            </div>
-          </div>
-        </Panel>
-
-        <Panel title="Fluxo operacional" icon={Activity}>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={flowData}>
-                <defs>
-                  <linearGradient id="events" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.75} />
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-                <XAxis dataKey="name" stroke="#71717a" />
-                <YAxis stroke="#71717a" />
-                <Tooltip contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fff" }} />
-                <Area type="monotone" dataKey="events" stroke="#fb923c" fill="url(#events)" strokeWidth={3} />
-                <Line type="monotone" dataKey="automation" stroke="#facc15" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <Panel title="Onde a empresa está perdendo dinheiro" icon={Flame}>
+        <Panel title="Alertas essenciais" icon={BellRing}>
           <div className="grid gap-3">
-            {lossBreakdown.length ? (
-              lossBreakdown.map((item, index) => (
-                <motion.div
-                  key={item.label}
-                  className="border border-zinc-800 bg-black/42 p-4"
-                  initial={{ opacity: 0, y: 14 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
+            {essentialAlerts.length ? (
+              essentialAlerts.map((alert) => (
+                <button
+                  key={alert.id}
+                  type="button"
+                  onClick={() => onOpenMetrics(alert.filters)}
+                  className="group border border-zinc-800 bg-black/42 p-4 text-left transition hover:border-orange-400/45 hover:bg-orange-950/10"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-zinc-100">{item.label}</p>
-                      <p className="mt-1 text-sm leading-6 text-zinc-500">{item.cause}</p>
+                      <p className="font-semibold text-zinc-100">{alert.title}</p>
+                      <p className="mt-1 text-sm text-zinc-500">{alert.detail}</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-lg font-semibold text-orange-200">{formatMoneyBRL(item.money)}</p>
-                      <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{formatDuration(item.impact * 3600)}</p>
-                    </div>
+                    <span className={alert.severity === "crítico" ? "text-rose-300" : "text-orange-300"}>{alert.severity}</span>
                   </div>
-                  <p className="mt-3 border-l border-orange-400/35 pl-3 text-sm leading-6 text-zinc-300">{item.action}</p>
-                </motion.div>
+                  <p className="mt-3 text-xs uppercase tracking-[0.16em] text-zinc-600 transition group-hover:text-orange-200">abrir Métricas filtrada</p>
+                </button>
               ))
             ) : (
-              <EmptyState title="Sem perdas mensuráveis ainda" description="Quando os agentes enviarem eventos suficientes, o Vulcan calcula o impacto por ociosidade, troca de contexto, filas e automação." />
+              <EmptyState title="Sem alerta urgente" description="A central fica limpa quando não há agente offline, fila alta, credencial crítica ou insight de alto impacto." />
             )}
           </div>
         </Panel>
 
-        <Panel title="Ações recomendadas pela IA" icon={Brain}>
-          <div className="grid gap-3">
-            {recommendedActions.map((action, index) => (
-              <motion.div
-                key={action.id}
-                className="border border-orange-400/15 bg-orange-950/10 p-4"
-                initial={{ opacity: 0, x: 18 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.05 }}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="max-w-2xl">
-                    <p className="font-semibold text-orange-50">{action.title}</p>
-                    <p className="mt-2 text-sm text-zinc-400">Setor: {action.scope} | Responsável sugerido: {action.owner}</p>
-                  </div>
-                  <span className="border border-orange-400/25 px-3 py-1 text-xs uppercase tracking-[0.16em] text-orange-200">Urgência {action.urgency}</span>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  <ConnectionSummary label="Impacto esperado" value={action.impact} tone="ok" />
-                  <ConnectionSummary label="Economia estimada" value={formatMoneyBRL(action.money)} tone={action.money ? "ok" : "warn"} />
-                  <ConnectionSummary label="Próximo passo" value="criar alerta" tone="ok" />
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {["Ver detalhes", "Criar alerta", "Enviar por WhatsApp/e-mail"].map((label) => (
-                    <button key={label} type="button" className="border border-zinc-800 bg-black/35 px-3 py-2 text-xs text-zinc-200 transition hover:border-orange-400/50 hover:text-orange-100">
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </Panel>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <Panel title="Gargalos que travam a operação" icon={Gauge}>
-          <div className="grid gap-3">
-            {bottlenecks.map((item, index) => (
-              <div key={item.id} className="border border-zinc-800 bg-black/40 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-zinc-100">{item.system}</p>
-                    <p className="mt-1 text-sm text-zinc-500">{item.sector} | {item.affected}</p>
-                  </div>
-                  <span className="text-sm text-orange-200">{item.time}</span>
-                </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-3">
-                  <ConnectionSummary label="Severidade" value={item.severity} tone={item.severity === "crítico" ? "warn" : "ok"} />
-                  <ConnectionSummary label="Tendência" value={item.trend} tone={item.trend === "subindo" ? "warn" : "ok"} />
-                  <ConnectionSummary label="Prioridade" value={index < 2 ? "agir agora" : "monitorar"} tone={index < 2 ? "warn" : "ok"} />
-                </div>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">{item.recommendation}</p>
-              </div>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title="Plano de automação e ROI" icon={Zap}>
-          <div className="grid gap-3">
-            {automationOpportunities.map((item) => (
-              <div key={item.id} className="border border-zinc-800 bg-black/40 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-zinc-100">{item.process}</p>
-                    <p className="mt-1 text-sm text-zinc-500">Frequência: {item.frequency} | Complexidade: {item.complexity}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-orange-200">{item.roi}</p>
-                    <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{item.wasted}</p>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">{item.suggestion}</p>
-              </div>
-            ))}
-          </div>
-        </Panel>
-      </div>
-
-      <div className="mt-5">
-        <Panel title="Checklist para piloto pago" icon={CheckCircle2}>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {onboardingChecklist.map((item) => (
-              <div key={item.label} className="border border-zinc-800 bg-black/35 p-4">
-                <div className="flex items-start gap-3">
-                  <span className={`mt-1 h-3 w-3 rounded-full ${item.done ? "bg-emerald-400" : "bg-orange-400"}`} />
-                  <div>
-                    <p className="font-medium text-zinc-100">{item.label}</p>
-                    <p className="mt-1 text-sm text-zinc-500">{item.detail}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-4 text-sm text-zinc-400">
-            Prontidão do piloto: {onboardingReady}/{onboardingChecklist.length} blocos essenciais configurados. O objetivo é sair da apresentação com empresa, hierarquia, agente e canal de alerta funcionando.
-          </p>
-        </Panel>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel title="Heatmap operacional por horário" icon={Activity}>
-          {heatmap.length ? (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
-              {heatmap.map((point, index) => (
-                <motion.div
-                  key={`${point.label}-${index}`}
-                  className="min-h-24 border border-zinc-800 p-3"
-                  style={{ backgroundColor: `rgba(249,115,22,${0.08 + point.intensity / 260})` }}
-                  initial={{ opacity: 0, scale: 0.92 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: index * 0.025 }}
-                  whileHover={{ y: -4, borderColor: "rgba(251,146,60,.55)" }}
-                >
-                  <p className="text-sm font-semibold text-zinc-50">{point.label}</p>
-                  <p className="mt-2 text-xs text-zinc-300">{point.activeMinutes}min ativos</p>
-                  <p className="text-xs text-zinc-500">{point.idleMinutes}min ociosos</p>
-                  <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-orange-200">{point.switches} trocas</p>
-                </motion.div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="Heatmap aguardando eventos" description="A distribuição por horário aparece assim que o agente envia eventos recentes ou o seed demo é gerado." />
-          )}
-        </Panel>
-
-        <Panel title="Agentes conectados em tempo real" icon={RadioTower}>
-          <div className="space-y-3">
-            {devices.length ? (
-              devices.map((device, index) => (
-                <motion.div
-                  key={device.id}
-                  className="border border-zinc-800 bg-black/45 p-4"
-                  initial={{ x: 20, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: index * 0.08 }}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-zinc-100">{device.hostname}</p>
-                      <p className="mt-1 text-sm text-zinc-500">{device.owner} | {device.os}</p>
-                      <p className="mt-1 text-xs text-zinc-600">Qualidade de coleta: {qualityPt(device.collectionQuality)} | Fila: {device.queueDepth ?? 0}</p>
-                      {device.collectionQuality === "blocked_by_os" ? <p className="mt-2 text-xs text-orange-300">Coleta limitada pelo ambiente gráfico.</p> : null}
-                    </div>
-                    <span className="text-xs uppercase tracking-[0.18em] text-orange-300">{statusPt(device.status)}</span>
-                  </div>
-                </motion.div>
-              ))
-            ) : (
-              <EmptyState title="Nenhum agente real vinculado" description="Instale ou reinicie o Vulcan Agent neste notebook para o usuário teste. Dados demo não aparecem nesta sessão." />
-            )}
-          </div>
-        </Panel>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-3">
-        <Panel title="Aplicativos mais usados" icon={Gauge}>
-          <div className="grid gap-3">
-            {appUsageData.map((item, index) => (
-              <div key={`${item.app}-${index}`} className="border border-zinc-800 bg-black/40 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-medium text-zinc-100">{item.app}</p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">{item.category}</p>
-                  </div>
-                  <p className="text-orange-200">{item.minutes}min</p>
-                </div>
-                <div className="mt-3 h-2 bg-zinc-900">
-                  <motion.div
-                    className="h-full bg-gradient-to-r from-orange-700 via-orange-400 to-yellow-300"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${Math.min(100, item.percent || item.minutes / Math.max(appUsageData[0]?.minutes ?? 1, 1) * 100)}%` }}
-                    transition={{ duration: 0.7, delay: index * 0.04 }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title="Ranking de usuários" icon={UserRound}>
-          <div className="grid gap-3">
-            {topUsers.length ? (
-              topUsers.map((user, index) => (
-                <motion.div
-                  key={user.id}
-                  className="border border-zinc-800 bg-black/40 p-4"
-                  initial={{ x: 16, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-zinc-100">{user.name}</p>
-                      <p className="mt-1 text-sm text-zinc-500">{user.title}</p>
-                    </div>
-                    <p className="text-orange-200">{formatDuration(user.active)}</p>
-                  </div>
-                  <p className="mt-3 text-xs text-zinc-500">Ocioso: {formatDuration(user.idle)} | Trocas: {Math.round(user.switches)}</p>
-                </motion.div>
-              ))
-            ) : (
-              <EmptyState title="Sem ranking por usuário" description="Faça login com um perfil da demo ou rode o seed para carregar a hierarquia completa." />
-            )}
-          </div>
-        </Panel>
-
-        <Panel title="Setores mais ativos" icon={Building2}>
+        <Panel title="Leitura de 5 segundos" icon={ShieldCheck}>
           <div className="grid gap-4">
-            {departmentPerformance.length ? (
-              departmentPerformance.map((department, index) => (
-                <div key={department.name}>
-                  <div className="mb-2 flex justify-between gap-3 text-sm">
-                    <span>{department.name}</span>
-                    <span className="text-orange-300">{department.score}%</span>
-                  </div>
-                  <div className="h-3 bg-zinc-900">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-orange-700 via-orange-400 to-yellow-300"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${department.score}%` }}
-                      transition={{ duration: 0.8, delay: index * 0.08 }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-500">Ativo: {formatDuration(department.active)} | Ocioso: {formatDuration(department.idle)}</p>
-                </div>
-              ))
-            ) : (
-              <EmptyState title="Sem dados por setor" description="Os setores aparecem quando houver métricas vinculadas aos usuários da árvore." />
-            )}
+            <div className="border border-orange-400/20 bg-[linear-gradient(135deg,rgba(249,115,22,0.12),rgba(9,9,11,0.72))] p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-orange-300">Maior perda provável</p>
+              <p className="mt-3 text-3xl font-semibold text-zinc-50">{formatMoneyBRL(topLoss?.money ?? financialSavings)}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                {topLoss ? `${topLoss.label}: ${topLoss.action}` : "Nenhuma perda relevante detectada no recorte atual."}
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <ConnectionSummary label="Tempo analisado" value={formatDuration(trackedSeconds)} tone="ok" />
+              <ConnectionSummary label="Fila offline" value={`${pendingQueue} evento${pendingQueue === 1 ? "" : "s"}`} tone={pendingQueue ? "warn" : "ok"} />
+              <ConnectionSummary label="Coleta limitada" value={`${qualityIssues}`} tone={qualityIssues ? "warn" : "ok"} />
+              <ConnectionSummary label="Escopo" value={selectedTeam?.name ?? "Toda empresa"} tone="ok" />
+            </div>
           </div>
         </Panel>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        <Panel title="Feed vivo de sinais" icon={Sparkles}>
-          <div className="grid gap-3">
-            {liveFeed.length ? (
-              liveFeed.map((item, index) => (
-                <motion.div
-                  key={item.id}
-                  className="flex items-start gap-3 border border-zinc-800 bg-black/40 p-4"
-                  initial={{ x: -16, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <span className={`mt-1 h-2.5 w-2.5 rounded-full ${item.tone === "ok" ? "bg-emerald-400" : "bg-orange-400"}`} />
-                  <div>
-                    <p className="font-medium text-zinc-100">{item.title}</p>
-                    <p className="mt-1 text-sm text-zinc-500">{item.detail}</p>
-                  </div>
-                </motion.div>
-              ))
-            ) : (
-              <EmptyState title="Feed aguardando sinais" description="Alertas, insights e avisos de coleta aparecem aqui em tempo real." />
-            )}
-          </div>
-        </Panel>
-
-        <Panel title="Saúde da operação" icon={ShieldCheck}>
-          <div className="grid gap-3 md:grid-cols-2">
-            <ConnectionSummary label="Agentes online" value={`${onlineAgents}`} tone={onlineAgents ? "ok" : "warn"} />
-            <ConnectionSummary label="Agentes offline" value={`${offlineDevices}`} tone={offlineDevices ? "warn" : "ok"} />
-            <ConnectionSummary label="Fila offline" value={`${pendingQueue} evento${pendingQueue === 1 ? "" : "s"}`} tone={pendingQueue ? "warn" : "ok"} />
-            <ConnectionSummary label="Coleta limitada" value={`${qualityIssues} dispositivo${qualityIssues === 1 ? "" : "s"}`} tone={qualityIssues ? "warn" : "ok"} />
-            <ConnectionSummary label="Insights gerados" value={`${insights.length}`} tone={insights.length ? "ok" : "warn"} />
-            <ConnectionSummary label="Alertas pendentes" value={`${pendingNotifications}`} tone={pendingNotifications ? "warn" : "ok"} />
-          </div>
-          <div className="mt-5">
-            <p className="text-xs uppercase tracking-[0.18em] text-orange-300">Oportunidades de automação</p>
-            <p className="mt-3 text-4xl font-semibold text-zinc-50">{automationHours}h</p>
-            <p className="mt-2 text-sm text-zinc-400">Economia financeira estimada em {formatMoneyBRL(financialSavings)} por ciclo de análise.</p>
-          </div>
-        </Panel>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        <InsightsView insights={insights} compact />
-        <NotificationsView notifications={notifications} compact />
       </div>
     </ViewFrame>
+  );
+}
+
+function CommandKpiCard({
+  label,
+  value,
+  detail,
+  tone,
+  onClick
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: "ok" | "warn";
+  onClick: () => void;
+}) {
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      className="group min-h-36 rounded-lg border border-zinc-800 bg-zinc-950/78 p-4 text-left shadow-tremor-card transition hover:border-orange-400/45 hover:bg-orange-950/10"
+      whileHover={{ y: -4 }}
+      whileTap={{ scale: 0.985 }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+        <span className={`h-2.5 w-2.5 rounded-full ${tone === "ok" ? "bg-emerald-400" : "bg-orange-400"}`} />
+      </div>
+      <p className="mt-5 text-3xl font-semibold text-zinc-50">{value}</p>
+      <p className="mt-3 text-sm leading-5 text-zinc-500">{detail}</p>
+      <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-zinc-700 transition group-hover:text-orange-200">investigar</p>
+    </motion.button>
   );
 }
 
@@ -3674,7 +3982,8 @@ function MetricsView({
   hierarchy,
   token,
   liveStatusLabel,
-  allowDemoFallback
+  allowDemoFallback,
+  metricsIntent
 }: {
   operationalMetrics: OperationalMetric[];
   operationalIntelligence: OperationalIntelligence;
@@ -3684,79 +3993,97 @@ function MetricsView({
   token: string;
   liveStatusLabel: string;
   allowDemoFallback: boolean;
+  metricsIntent: MetricsIntent | null;
 }) {
   const [period, setPeriod] = useState("24h");
   const [selectedTeamId, setSelectedTeamId] = useState("all");
   const [selectedMembershipId, setSelectedMembershipId] = useState("all");
   const [selectedDeviceId, setSelectedDeviceId] = useState("all");
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState("all");
+  const [selectedDepartment, setSelectedDepartment] = useState("all");
+  const [selectedTitle, setSelectedTitle] = useState("all");
+  const [selectedOs, setSelectedOs] = useState("all");
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedAgentStatus, setSelectedAgentStatus] = useState("all");
+  const [selectedMetricType, setSelectedMetricType] = useState("all");
   const [appFilter, setAppFilter] = useState("");
   const [detailedRows, setDetailedRows] = useState<MetricsDetailedRow[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
-  const appUsageData = useMemo(() => buildAppUsageData(operationalMetrics, allowDemoFallback), [operationalMetrics, allowDemoFallback]);
-  const metricActiveSeconds = operationalMetrics.filter((metric) => metric.metricKey === "active_seconds").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
-  const metricIdleSeconds = operationalMetrics.filter((metric) => metric.metricKey === "idle_seconds").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
-  const metricContextSwitches = operationalMetrics.filter((metric) => metric.metricKey === "context_switch_count").reduce((total, metric) => total + Number(metric.valueNumeric ?? 0), 0);
-  const activeSeconds = operationalIntelligence.totalActiveSeconds || metricActiveSeconds;
-  const idleSecondsTotal = operationalIntelligence.totalIdleSeconds || metricIdleSeconds;
-  const unidentifiedSeconds = operationalIntelligence.unidentifiedSeconds;
-  const contextSwitches = operationalIntelligence.contextSwitches || metricContextSwitches;
-  const trackedSeconds = Math.max(activeSeconds + idleSecondsTotal + unidentifiedSeconds, 1);
-  const activeRate = Math.round((activeSeconds / trackedSeconds) * 100);
-  const idleRate = Math.round((idleSecondsTotal / trackedSeconds) * 100);
-  const unidentifiedRate = Math.round((unidentifiedSeconds / trackedSeconds) * 100);
-  const contextLossHours = contextSwitches * 0.018;
-  const idleLossHours = idleSecondsTotal / 3600;
-  const estimatedLeak = (idleLossHours + contextLossHours) * 95;
-  const topSystems = operationalIntelligence.topApps.length
-    ? operationalIntelligence.topApps.filter((item) => item.app !== "Ociosidade").slice(0, 4)
-    : appUsageData.slice(0, 4).map((item, index) => ({
-        app: item.app,
-        category: index === 0 ? "sistema dominante" : "aplicativo monitorado",
-        activeSeconds: item.minutes * 60,
-        idleSeconds: 0,
-        events: 0,
-        contextSwitches: 0,
-        percent: Math.min(100, Math.round((item.minutes / Math.max(appUsageData[0]?.minutes ?? 1, 1)) * 100)),
-        focusLabel: index === 0 ? "maior concentração" : "acompanhar"
-      }));
-  const topSystem = topSystems[0] ?? null;
-  const compactTimeline = operationalIntelligence.timeline.slice(-8).map((point) => {
-    const total = Math.max(point.activeSeconds + point.idleSeconds + point.unidentifiedSeconds, 1);
+
+  useEffect(() => {
+    if (!metricsIntent) {
+      return;
+    }
+    setPeriod(metricsIntent.period ?? "24h");
+    setSelectedTeamId(metricsIntent.teamId ?? "all");
+    setSelectedMembershipId(metricsIntent.membershipId ?? "all");
+    setSelectedDeviceId(metricsIntent.deviceId ?? "all");
+    setSelectedSupervisorId(metricsIntent.supervisorId ?? "all");
+    setSelectedDepartment(metricsIntent.department ?? "all");
+    setSelectedTitle(metricsIntent.title ?? "all");
+    setSelectedOs(metricsIntent.os ?? "all");
+    setSelectedCategory(metricsIntent.category ?? "all");
+    setSelectedAgentStatus(metricsIntent.agentStatus ?? "all");
+    setSelectedMetricType(metricsIntent.metricType ?? "all");
+    setAppFilter(metricsIntent.app ?? "");
+  }, [metricsIntent]);
+
+  const filterOptions = useMemo(() => {
+    const unique = (values: Array<string | null | undefined>) => [...new Set(values.filter((value): value is string => Boolean(value && value.trim())))].sort((a, b) => a.localeCompare(b, "pt-BR"));
     return {
-      label: point.label,
-      activeRate: Math.round((point.activeSeconds / total) * 100),
-      idleRate: Math.round((point.idleSeconds / total) * 100),
-      switches: point.contextSwitches
+      departments: unique([...hierarchy.map((item) => item.department), ...detailedRows.map((item) => item.department)]),
+      titles: unique([...hierarchy.map((item) => item.title), ...detailedRows.map((item) => item.userTitle)]),
+      supervisors: hierarchy.filter((node) => node.directReports > 0),
+      os: unique([...devices.map((device) => osFamily(device.os)), ...detailedRows.map((row) => osFamily(row.os))]),
+      categories: unique(detailedRows.map((row) => row.category)),
+      agentStatuses: unique(devices.map((device) => device.status)),
+      apps: unique([...operationalIntelligence.topApps.map((item) => item.app).filter((app) => app !== "Ociosidade"), ...detailedRows.map((row) => row.app)]).slice(0, 20)
     };
-  });
-  const metricsTimelineChart = compactTimeline.map((point) => ({
-    periodo: point.label,
-    ativo: point.activeRate,
-    ocioso: point.idleRate,
-    trocas: point.switches
-  }));
-  const timeDistribution = [
-    { name: "Ativo", value: Math.round(activeSeconds / 60), color: "#34d399", detail: "tempo produtivo" },
-    { name: "Ocioso", value: Math.round(idleSecondsTotal / 60), color: "#fb923c", detail: "espera ou pausa" },
-    { name: "Não identificado", value: Math.round(unidentifiedSeconds / 60), color: "#71717a", detail: "coleta limitada" }
-  ].filter((item) => item.value > 0);
-  const topSystemsChart = topSystems.map((item) => ({
-    sistema: item.app,
-    minutos: Math.round((item.activeSeconds || item.idleSeconds) / 60),
-    trocas: item.contextSwitches,
-    eventos: item.events
-  }));
-  const operationalRiskData = [
-    { name: "Ociosidade", value: Math.max(0, idleRate) },
-    { name: "Fragmentação", value: Math.max(0, Math.round(operationalIntelligence.distractionScore)) },
-    { name: "Coleta limitada", value: Math.max(0, Math.round(unidentifiedRate)) },
-    { name: "Trocas por hora", value: Math.max(0, Math.round(operationalIntelligence.contextSwitchesPerHour)) }
-  ];
+  }, [detailedRows, devices, hierarchy, operationalIntelligence.topApps]);
+
+  const filteredDevices = useMemo(() => devices.filter((device) => {
+    if (selectedTeamId !== "all" && device.teamId !== selectedTeamId) {
+      return false;
+    }
+    if (selectedDeviceId !== "all" && device.id !== selectedDeviceId) {
+      return false;
+    }
+    if (selectedOs !== "all" && osFamily(device.os) !== selectedOs) {
+      return false;
+    }
+    if (selectedAgentStatus !== "all" && device.status !== selectedAgentStatus) {
+      return false;
+    }
+    return true;
+  }), [devices, selectedAgentStatus, selectedDeviceId, selectedOs, selectedTeamId]);
+
+  const hasScopedFilters = selectedTeamId !== "all"
+    || selectedMembershipId !== "all"
+    || selectedDeviceId !== "all"
+    || selectedSupervisorId !== "all"
+    || selectedDepartment !== "all"
+    || selectedTitle !== "all"
+    || selectedOs !== "all"
+    || selectedCategory !== "all"
+    || selectedAgentStatus !== "all"
+    || selectedMetricType !== "all"
+    || Boolean(appFilter.trim());
+  const analytics = useMemo(
+    () => buildMetricsAnalytics(detailedRows, operationalMetrics, operationalIntelligence, hierarchy, allowDemoFallback && !hasScopedFilters),
+    [allowDemoFallback, detailedRows, hasScopedFilters, hierarchy, operationalIntelligence, operationalMetrics]
+  );
+  const activeRate = Math.round((analytics.activeSeconds / Math.max(analytics.trackedSeconds, 1)) * 100);
+  const idleRate = Math.round((analytics.idleSeconds / Math.max(analytics.trackedSeconds, 1)) * 100);
+  const contextLossHours = analytics.contextSwitches * 0.018;
+  const idleLossHours = analytics.idleSeconds / 3600;
+  const estimatedLeak = (idleLossHours + contextLossHours) * 95;
+  const agentStatusByOs = useMemo(() => buildAgentStatusByOs(filteredDevices), [filteredDevices]);
+  const qualityByOs = useMemo(() => buildQualityByOs(detailedRows, filteredDevices), [detailedRows, filteredDevices]);
   const actionNow = operationalIntelligence.aiRecommendations[0]
     ?? (idleRate > 25
       ? "Revisar ociosidade do turno e validar se existe espera por sistema ou processo."
-      : contextSwitches > 30
+      : analytics.contextSwitches > 30
         ? "Reduzir alternância entre sistemas com fila única ou automação de etapas repetidas."
         : "Manter coleta por mais algumas horas para consolidar tendência operacional.");
   const metricsQuery = useMemo(() => {
@@ -3770,11 +4097,32 @@ function MetricsView({
     if (selectedDeviceId !== "all") {
       params.set("deviceId", selectedDeviceId);
     }
+    if (selectedSupervisorId !== "all") {
+      params.set("supervisorId", selectedSupervisorId);
+    }
+    if (selectedDepartment !== "all") {
+      params.set("department", selectedDepartment);
+    }
+    if (selectedTitle !== "all") {
+      params.set("title", selectedTitle);
+    }
+    if (selectedOs !== "all") {
+      params.set("os", selectedOs);
+    }
+    if (selectedCategory !== "all") {
+      params.set("category", selectedCategory);
+    }
+    if (selectedAgentStatus !== "all") {
+      params.set("agentStatus", selectedAgentStatus);
+    }
+    if (selectedMetricType !== "all") {
+      params.set("metricType", selectedMetricType);
+    }
     if (appFilter.trim()) {
       params.set("app", appFilter.trim());
     }
     return params.toString();
-  }, [period, selectedTeamId, selectedMembershipId, selectedDeviceId, appFilter]);
+  }, [appFilter, period, selectedAgentStatus, selectedCategory, selectedDepartment, selectedDeviceId, selectedMembershipId, selectedMetricType, selectedOs, selectedSupervisorId, selectedTeamId, selectedTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3813,6 +4161,21 @@ function MetricsView({
     };
   }, [metricsQuery, token]);
 
+  function clearFilters() {
+    setPeriod("24h");
+    setSelectedTeamId("all");
+    setSelectedMembershipId("all");
+    setSelectedDeviceId("all");
+    setSelectedSupervisorId("all");
+    setSelectedDepartment("all");
+    setSelectedTitle("all");
+    setSelectedOs("all");
+    setSelectedCategory("all");
+    setSelectedAgentStatus("all");
+    setSelectedMetricType("all");
+    setAppFilter("");
+  }
+
   async function downloadMetrics(format: "csv" | "excel") {
     setExportFeedback(null);
     try {
@@ -3840,103 +4203,112 @@ function MetricsView({
     }
   }
 
+  function preparedExport(kind: "pdf" | "email" | "whatsapp") {
+    const label = kind === "pdf" ? "PDF" : kind === "email" ? "envio por e-mail" : "envio por WhatsApp";
+    setExportFeedback({ tone: "warn", message: `${label} está preparado na interface, mas depende do módulo de relatórios/canal real estar configurado para produção.` });
+  }
+
   return (
     <ViewFrame>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <LiveBadge label="Métricas essenciais em tempo real" detail={`Última sincronização: ${liveStatusLabel} | ${operationalIntelligence.periodLabel}`} />
+        <LiveBadge label="Métricas analíticas" detail={`Última sincronização: ${liveStatusLabel} | ${analytics.sourceLabel}`} />
         <span className="border border-orange-400/25 bg-orange-950/15 px-3 py-2 text-xs uppercase tracking-[0.2em] text-orange-200">
-          leitura executiva
+          investigação profunda
         </span>
       </div>
 
       <Panel title="Filtros e exportação" icon={Download}>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[0.7fr_1fr_1fr_1fr_1fr_auto]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
+          <MetricFilterSelect label="Período" value={period} onChange={setPeriod} options={[["24h", "Últimas 24h"], ["7d", "Últimos 7 dias"], ["30d", "Últimos 30 dias"], ["90d", "Últimos 90 dias"]]} />
+          <MetricFilterSelect label="Equipe" value={selectedTeamId} onChange={setSelectedTeamId} options={[["all", "Todas"], ...teams.map((team) => [team.id, team.name] as [string, string])]} />
+          <MetricFilterSelect label="Usuário" value={selectedMembershipId} onChange={setSelectedMembershipId} options={[["all", "Todos"], ...hierarchy.map((node) => [node.id, node.name] as [string, string])]} />
+          <MetricFilterSelect label="Supervisor" value={selectedSupervisorId} onChange={setSelectedSupervisorId} options={[["all", "Todos"], ...filterOptions.supervisors.map((node) => [node.id, node.name] as [string, string])]} />
+          <MetricFilterSelect label="Departamento" value={selectedDepartment} onChange={setSelectedDepartment} options={[["all", "Todos"], ...filterOptions.departments.map((item) => [item, item] as [string, string])]} />
+          <MetricFilterSelect label="Cargo" value={selectedTitle} onChange={setSelectedTitle} options={[["all", "Todos"], ...filterOptions.titles.map((item) => [item, item] as [string, string])]} />
+          <MetricFilterSelect label="Dispositivo" value={selectedDeviceId} onChange={setSelectedDeviceId} options={[["all", "Todos"], ...devices.map((device) => [device.id, device.hostname] as [string, string])]} />
+          <MetricFilterSelect label="Sistema operacional" value={selectedOs} onChange={setSelectedOs} options={[["all", "Todos"], ...filterOptions.os.map((item) => [item, item] as [string, string])]} />
+          <MetricFilterSelect label="Categoria" value={selectedCategory} onChange={setSelectedCategory} options={[["all", "Todas"], ...filterOptions.categories.map((item) => [item, categoryPt(item)] as [string, string])]} />
+          <MetricFilterSelect label="Status agente" value={selectedAgentStatus} onChange={setSelectedAgentStatus} options={[["all", "Todos"], ...filterOptions.agentStatuses.map((item) => [item, statusPt(item)] as [string, string])]} />
+          <MetricFilterSelect label="Tipo de métrica" value={selectedMetricType} onChange={setSelectedMetricType} options={[["all", "Todas"], ["productive", "Produtividade"], ["idle", "Ociosidade"], ["context_switch", "Troca de contexto"], ["agent", "Agente/coleta"], ["improductive", "Improdutivo"]]} />
           <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-            Período
-            <select value={period} onChange={(event) => setPeriod(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
-              <option value="24h">Últimas 24h</option>
-              <option value="7d">Últimos 7 dias</option>
-              <option value="30d">Últimos 30 dias</option>
-            </select>
+            Aplicativo
+            <input
+              value={appFilter}
+              onChange={(event) => setAppFilter(event.target.value)}
+              list="metric-apps"
+              placeholder="ERP, Chrome..."
+              className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none transition placeholder:text-zinc-700 focus:border-orange-400"
+            />
+            <datalist id="metric-apps">
+              {filterOptions.apps.map((item) => <option key={item} value={item} />)}
+            </datalist>
           </label>
-          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-            Equipe
-            <select value={selectedTeamId} onChange={(event) => setSelectedTeamId(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
-              <option value="all">Todas</option>
-              {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-            </select>
-          </label>
-          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-            Pessoa
-            <select value={selectedMembershipId} onChange={(event) => setSelectedMembershipId(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
-              <option value="all">Todas</option>
-              {hierarchy.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}
-            </select>
-          </label>
-          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-            Dispositivo
-            <select value={selectedDeviceId} onChange={(event) => setSelectedDeviceId(event.target.value)} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
-              <option value="all">Todos</option>
-              {devices.map((device) => <option key={device.id} value={device.id}>{device.hostname}</option>)}
-            </select>
-          </label>
-          <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-            App
-            <input value={appFilter} onChange={(event) => setAppFilter(event.target.value)} placeholder="ERP, Chrome..." className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none transition placeholder:text-zinc-700 focus:border-orange-400" />
-          </label>
-          <div className="flex gap-2 self-end">
-            <button type="button" onClick={() => void downloadMetrics("csv")} className="h-11 border border-orange-400/25 px-3 text-xs text-orange-200 transition hover:border-orange-300/60">
-              CSV
-            </button>
-            <button type="button" onClick={() => void downloadMetrics("excel")} className="h-11 bg-orange-500 px-3 text-xs font-semibold text-black transition hover:bg-orange-400">
-              Excel
-            </button>
-          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={() => void downloadMetrics("csv")} className="h-10 border border-orange-400/25 px-3 text-xs text-orange-200 transition hover:border-orange-300/60">
+            Exportar CSV
+          </button>
+          <button type="button" onClick={() => void downloadMetrics("excel")} className="h-10 bg-orange-500 px-3 text-xs font-semibold text-black transition hover:bg-orange-400">
+            Exportar Excel
+          </button>
+          <button type="button" onClick={() => preparedExport("pdf")} className="h-10 border border-zinc-800 px-3 text-xs text-zinc-200 transition hover:border-orange-400/45">
+            Exportar PDF
+          </button>
+          <button type="button" onClick={() => preparedExport("email")} className="h-10 border border-zinc-800 px-3 text-xs text-zinc-200 transition hover:border-orange-400/45">
+            Enviar por e-mail
+          </button>
+          <button type="button" onClick={() => preparedExport("whatsapp")} className="h-10 border border-zinc-800 px-3 text-xs text-zinc-200 transition hover:border-orange-400/45">
+            Enviar por WhatsApp
+          </button>
+          <button type="button" onClick={clearFilters} className="h-10 border border-zinc-800 px-3 text-xs text-zinc-500 transition hover:border-orange-400/45 hover:text-zinc-100">
+            Limpar filtros
+          </button>
         </div>
         {exportFeedback ? <div className="mt-3"><FeedbackBanner tone={exportFeedback.tone} message={exportFeedback.message} /></div> : null}
       </Panel>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel title="Velocímetros da operação" icon={Gauge}>
-          <div className="grid gap-4 md:grid-cols-3">
-            <MetricSpeedometer
-              label="Foco operacional"
-              value={operationalIntelligence.focusScore}
-              detail={`Maior bloco: ${formatDuration(operationalIntelligence.longestFocusSeconds)}`}
-              tone={operationalIntelligence.focusScore >= 65 ? "ok" : operationalIntelligence.focusScore >= 45 ? "warn" : "critical"}
+        <Panel title="Saúde operacional do recorte" icon={Gauge}>
+          <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+            <OperationalHealthGauge
+              onlineAgents={filteredDevices.filter((device) => ["online", "syncing"].includes(device.status)).length}
+              totalAgents={filteredDevices.length || devices.length}
+              focusScore={analytics.focusScore}
+              idleRate={analytics.idleSeconds / Math.max(analytics.trackedSeconds, 1)}
+              contextSwitchesPerHour={analytics.contextSwitchesPerHour}
+              criticalSignals={filteredDevices.filter((device) => device.status === "offline").length + filteredDevices.filter((device) => ["low", "blocked_by_os"].includes(device.collectionQuality ?? "")).length}
             />
-            <MetricSpeedometer
-              label="Ociosidade"
-              value={idleRate}
-              detail={`${formatDuration(idleSecondsTotal)} fora de fluxo ativo`}
-              tone={idleRate > 35 ? "critical" : idleRate > 18 ? "warn" : "ok"}
-            />
-            <MetricSpeedometer
-              label="Fragmentação"
-              value={operationalIntelligence.distractionScore}
-              detail={`${Math.round(contextSwitches)} trocas | ${operationalIntelligence.contextSwitchesPerHour.toFixed(1)}/h`}
-              tone={operationalIntelligence.distractionScore > 55 ? "critical" : operationalIntelligence.distractionScore > 35 ? "warn" : "ok"}
-            />
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1">
+              <MetricSpeedometer
+                label="Foco operacional"
+                value={analytics.focusScore}
+                detail={`Maior bloco: ${formatDuration(analytics.longestFocusSeconds)}`}
+                tone={analytics.focusScore >= 65 ? "ok" : analytics.focusScore >= 45 ? "warn" : "critical"}
+              />
+              <MetricSpeedometer
+                label="Ociosidade"
+                value={idleRate}
+                detail={`${formatDuration(analytics.idleSeconds)} fora de fluxo ativo`}
+                tone={idleRate > 35 ? "critical" : idleRate > 18 ? "warn" : "ok"}
+              />
+              <MetricSpeedometer
+                label="Fragmentação"
+                value={analytics.fragmentationScore}
+                detail={`${Math.round(analytics.contextSwitches)} trocas | ${analytics.contextSwitchesPerHour.toFixed(1)}/h`}
+                tone={analytics.fragmentationScore > 55 ? "critical" : analytics.fragmentationScore > 35 ? "warn" : "ok"}
+              />
+            </div>
           </div>
         </Panel>
 
-        <Panel title="Pizza do tempo analisado" icon={Activity}>
-          {timeDistribution.length ? (
-            <div className="grid gap-4 md:grid-cols-[1fr_0.9fr] xl:grid-cols-1 2xl:grid-cols-[1fr_0.9fr]">
-              <Tremor.DonutChart
-                className="h-64"
-                data={timeDistribution}
-                category="value"
-                index="name"
-                colors={["emerald", "orange", "zinc"]}
-                variant="donut"
-                valueFormatter={(value) => `${value}min`}
-                showAnimation
-              />
-              <div className="grid content-center gap-3">
-                <MetricLegend color="#34d399" label="Ativo" value={`${activeRate}%`} detail={formatDuration(activeSeconds)} />
-                <MetricLegend color="#fb923c" label="Ocioso" value={`${idleRate}%`} detail={formatDuration(idleSecondsTotal)} />
-                <MetricLegend color="#71717a" label="Não identificado" value={`${unidentifiedRate}%`} detail={formatDuration(unidentifiedSeconds)} />
+        <Panel title="Distribuição de tempo" icon={Activity}>
+          {analytics.timeDistribution.length ? (
+            <div className="grid gap-4">
+              <PremiumDonutChart data={analytics.timeDistribution} centerLabel={`${activeRate}%`} centerDetail="ativo" />
+              <div className="grid gap-3">
+                {analytics.timeDistribution.map((item) => (
+                  <MetricLegend key={item.name} color={item.color} label={item.name} value={`${item.percent}%`} detail={formatDuration(item.seconds)} />
+                ))}
               </div>
             </div>
           ) : (
@@ -3945,145 +4317,114 @@ function MetricsView({
         </Panel>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-3">
+      <div className="mt-5 grid gap-5 xl:grid-cols-4">
+        <MetricSignalCard
+          icon={Activity}
+          label="Tempo ativo"
+          value={formatDuration(analytics.activeSeconds)}
+          detail={`${activeRate}% do tempo analisado no recorte.`}
+          tone="ok"
+        />
         <MetricSignalCard
           icon={Flame}
           label="Perda estimada"
           value={formatMoneyBRL(estimatedLeak)}
-          detail={`Ociosidade + troca de contexto no período analisado.`}
+          detail="Ociosidade + custo estimado de troca de contexto."
           tone={estimatedLeak > 5000 ? "critical" : estimatedLeak > 1000 ? "warn" : "ok"}
         />
         <MetricSignalCard
           icon={Zap}
-          label="Ação agora"
-          value={actionNow}
-          detail="Uma recomendação clara para o gestor agir sem abrir relatório longo."
-          tone="warn"
+          label="Trocas de contexto"
+          value={`${analytics.contextSwitches}`}
+          detail={`${analytics.contextSwitchesPerHour.toFixed(1)} por hora no recorte.`}
+          tone={analytics.contextSwitchesPerHour > 18 ? "warn" : "ok"}
         />
         <MetricSignalCard
           icon={Brain}
-          label="Sistema que mais pesa"
-          value={topSystem?.app ?? "Aguardando dados"}
-          detail={topSystem ? `${formatDuration(topSystem.activeSeconds || topSystem.idleSeconds)} | ${topSystem.focusLabel}` : "Instale/reinicie o agente para medir apps reais."}
-          tone={topSystem ? "ok" : "warn"}
+          label="Ação analítica"
+          value="Prioridade atual"
+          detail={actionNow}
+          tone="warn"
         />
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <Panel title="Mapa analítico visual" icon={BarChart3}>
-          <div className="grid gap-5">
-            {topSystemsChart.length ? (
-              <Tremor.BarChart
-                className="h-72"
-                data={topSystemsChart}
-                index="sistema"
-                categories={["minutos", "trocas", "eventos"]}
-                colors={["orange", "rose", "zinc"]}
-                valueFormatter={(value: number) => `${value}`}
-                showLegend
-                showAnimation
-              />
-            ) : (
-              <EmptyState title="Sem apps suficientes" description="O gráfico aparece quando houver aplicativos reais no recorte filtrado." />
-            )}
-            <div className="grid gap-3 md:grid-cols-3">
-              <ConnectionSummary label="Ativo" value={`${activeRate}%`} tone="ok" />
-              <ConnectionSummary label="Ocioso" value={`${idleRate}%`} tone={idleRate > 30 ? "warn" : "ok"} />
-              <ConnectionSummary label="Coleta limitada" value={`${unidentifiedRate}%`} tone={unidentifiedRate > 15 ? "warn" : "ok"} />
-            </div>
-          </div>
+        <Panel title="Apps mais usados" icon={BarChart3}>
+          <HorizontalBarsChart data={analytics.appRanking} valueLabel="min" />
         </Panel>
 
-        <Panel title="Tendência e risco" icon={Activity}>
-          <div className="grid gap-5">
-            {metricsTimelineChart.length ? (
-              <Tremor.AreaChart
-                className="h-52"
-                data={metricsTimelineChart}
-                index="periodo"
-                categories={["ativo", "ocioso"]}
-                colors={["emerald", "orange"]}
-                valueFormatter={(value: number) => `${value}%`}
-                showLegend
-                showAnimation
-              />
-            ) : (
-              <EmptyState title="Sem linha temporal" description="A tendência aparece após os primeiros blocos de eventos por horário." />
-            )}
-            <div className="rounded-lg border border-zinc-800 bg-black/35 p-4">
-              <Tremor.Text className="mb-3 text-zinc-500">Riscos que o gestor precisa atacar</Tremor.Text>
-              <Tremor.BarList data={operationalRiskData} color="orange" valueFormatter={(value: number) => `${value}`} />
+        <Panel title="Linha temporal de produtividade" icon={Activity}>
+          {analytics.timeline.length ? (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={analytics.timeline} margin={{ left: 4, right: 10, top: 12, bottom: 4 }}>
+                  <defs>
+                    <linearGradient id="productiveTimeline" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#34d399" stopOpacity={0.55} />
+                      <stop offset="95%" stopColor="#34d399" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="idleTimeline" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#fb923c" stopOpacity={0.45} />
+                      <stop offset="95%" stopColor="#fb923c" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="label" stroke="#71717a" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#71717a" tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fff" }} formatter={(value: number) => `${value}min`} />
+                  <Area type="monotone" dataKey="produtivo" stroke="#34d399" fill="url(#productiveTimeline)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="ocioso" stroke="#fb923c" fill="url(#idleTimeline)" strokeWidth={2} />
+                  <Line type="monotone" dataKey="trocas" stroke="#facc15" strokeWidth={2} dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
-          </div>
+          ) : (
+            <EmptyState title="Sem linha temporal" description="A tendência aparece após os primeiros blocos de eventos por horário." />
+          )}
         </Panel>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <Panel title="Top sistemas para olhar" icon={Layers3}>
-          <div className="grid gap-3">
-            {topSystems.length ? (
-              topSystems.map((item, index) => (
-                <motion.div key={`${item.app}-${item.category}`} className="border border-zinc-800 bg-black/45 p-4" initial={{ opacity: 0, x: 18 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.05 }} whileHover={{ x: 4, borderColor: "rgba(251,146,60,.45)" }}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-zinc-100">{item.app}</p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">{item.category} | {item.focusLabel}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-semibold text-orange-200">{formatDuration(item.activeSeconds || item.idleSeconds)}</p>
-                      <p className="text-xs text-zinc-500">{Math.round(item.percent)}% do comparável</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 h-2 bg-zinc-900">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-orange-700 via-orange-400 to-yellow-300"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, item.percent)}%` }}
-                      transition={{ duration: 0.7, delay: index * 0.04 }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-600">{item.events} evento{item.events === 1 ? "" : "s"} | {item.contextSwitches} troca{item.contextSwitches === 1 ? "" : "s"} de contexto</p>
-                </motion.div>
-              ))
-            ) : (
-              <EmptyState title="Sem ranking ainda" description="O ranking aparece quando o agente enviar uso real de aplicativos." />
-            )}
-          </div>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <Panel title="Heatmap por hora e dia" icon={Activity}>
+          <HourlyHeatmap data={analytics.heatmap} />
         </Panel>
 
-        <Panel title="Ritmo do turno" icon={RadioTower}>
-          {compactTimeline.length ? (
-            <div className="grid gap-4">
-              <div className="grid grid-cols-4 gap-2 md:grid-cols-8">
-                {compactTimeline.map((point, index) => (
-                  <motion.div
-                    key={`${point.label}-${index}`}
-                    className="relative min-h-32 overflow-hidden border border-zinc-800 bg-black/45 p-3"
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.04 }}
-                    whileHover={{ y: -4, borderColor: "rgba(251,146,60,.45)" }}
-                  >
-                    <p className="text-xs font-semibold text-zinc-200">{point.label}</p>
-                    <div className="absolute inset-x-3 bottom-3 h-20 bg-zinc-900">
-                      <motion.div
-                        className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-emerald-500 to-orange-300"
-                        initial={{ height: 0 }}
-                        animate={{ height: `${point.activeRate}%` }}
-                        transition={{ duration: 0.65, delay: index * 0.04 }}
-                      />
-                    </div>
-                    <p className="absolute bottom-24 left-3 text-[10px] uppercase tracking-[0.12em] text-orange-200">{point.switches} trocas</p>
-                  </motion.div>
-                ))}
-              </div>
-              <p className="text-sm leading-6 text-zinc-400">
-                Quanto maior a barra, maior o tempo ativo no recorte. Trocas altas com barra baixa indicam interrupção, espera ou retrabalho.
-              </p>
+        <Panel title="Troca de contexto" icon={Zap}>
+          {analytics.contextTimeline.length ? (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={analytics.contextTimeline} margin={{ left: 4, right: 10, top: 12, bottom: 4 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="label" stroke="#71717a" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#71717a" tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fff" }} />
+                  <Bar dataKey="trocas" fill="#fb923c" radius={[5, 5, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           ) : (
-            <EmptyState title="Sem ritmo calculado" description="Acompanhe alguns minutos de uso para o Vulcan montar o pulso do turno." />
+            <EmptyState title="Sem trocas no recorte" description="As alternâncias entre sistemas aparecem aqui por bloco de horário." />
           )}
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        <Panel title="Ranking de equipes" icon={Building2}>
+          <HorizontalBarsChart data={analytics.teamRanking} valueLabel="min" />
+        </Panel>
+
+        <Panel title="Ranking de usuários" icon={UserRound}>
+          <HorizontalBarsChart data={analytics.userRanking} valueLabel="min" />
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        <Panel title="Status dos agentes por SO" icon={RadioTower}>
+          <AgentOsChart data={agentStatusByOs} />
+        </Panel>
+
+        <Panel title="Qualidade de coleta por sistema" icon={ShieldCheck}>
+          <QualityByOsChart data={qualityByOs} />
         </Panel>
       </div>
 
@@ -4094,11 +4435,11 @@ function MetricsView({
       </div>
 
       <div className="mt-5">
-        <Panel title="Resumo que o gestor realmente lê" icon={Brain}>
+        <Panel title="Resumo analítico" icon={Brain}>
           <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
             <div className="border border-orange-400/20 bg-black/45 p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Agora</p>
-              <p className="mt-3 text-2xl font-semibold text-zinc-50">{operationalIntelligence.currentActivity}</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Recorte atual</p>
+              <p className="mt-3 text-2xl font-semibold text-zinc-50">{analytics.currentActivity}</p>
               <p className="mt-3 text-sm leading-6 text-zinc-400">{operationalIntelligence.aiSummary}</p>
             </div>
             <div className="grid gap-3">
@@ -4119,6 +4460,252 @@ function MetricsView({
         </Panel>
       </div>
     </ViewFrame>
+  );
+}
+
+function MetricFilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: [string, string][] }) {
+  return (
+    <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+      {label}
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="h-11 min-w-0 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={`${label}-${optionValue}`} value={optionValue}>{optionLabel}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function PremiumDonutChart({ data, centerLabel, centerDetail }: { data: TimeDistributionSlice[]; centerLabel: string; centerDetail: string }) {
+  if (!data.length) {
+    return <EmptyState title="Sem distribuição" description="Não há tempo suficiente no recorte atual para montar o donut." />;
+  }
+
+  return (
+    <div className="relative h-72 overflow-hidden rounded-lg border border-orange-400/10 bg-black/35">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart margin={{ top: 12, right: 12, bottom: 12, left: 12 }}>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="name"
+            innerRadius="62%"
+            outerRadius="86%"
+            paddingAngle={2}
+            stroke="#09090b"
+            strokeWidth={4}
+            isAnimationActive
+            animationDuration={850}
+          >
+            {data.map((entry) => (
+              <Cell key={entry.key} fill={entry.color} />
+            ))}
+          </Pie>
+          <Tooltip
+            contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fafafa" }}
+            itemStyle={{ color: "#fafafa" }}
+            formatter={(value, name) => [`${value}min`, name]}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="pointer-events-none absolute inset-0 grid place-items-center">
+        <div className="text-center">
+          <p className="text-4xl font-semibold text-zinc-50">{centerLabel}</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.22em] text-orange-200">{centerDetail}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HorizontalBarsChart({ data, valueLabel }: { data: RankingChartItem[]; valueLabel: string }) {
+  const chartData = data.slice(0, 8);
+  const colors = ["#fb923c", "#f97316", "#facc15", "#34d399", "#38bdf8", "#a78bfa", "#f472b6", "#71717a"];
+
+  if (!chartData.length) {
+    return <EmptyState title="Sem ranking no recorte" description="Aplique outro filtro ou aguarde a sincronização dos eventos reais." />;
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="h-72">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} layout="vertical" margin={{ top: 8, right: 22, bottom: 8, left: 8 }}>
+            <CartesianGrid horizontal={false} stroke="rgba(255,255,255,0.06)" />
+            <XAxis type="number" hide />
+            <YAxis
+              type="category"
+              dataKey="name"
+              width={118}
+              axisLine={false}
+              tickLine={false}
+              stroke="#a1a1aa"
+              tick={{ fontSize: 11 }}
+            />
+            <Tooltip
+              cursor={{ fill: "rgba(249,115,22,0.06)" }}
+              contentStyle={{ background: "#09090b", border: "1px solid rgba(249,115,22,.35)", color: "#fafafa" }}
+              formatter={(value) => [`${value}${valueLabel}`, "Tempo"]}
+            />
+            <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={18}>
+              {chartData.map((entry, index) => (
+                <Cell key={`${entry.name}-${index}`} fill={colors[index % colors.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="grid gap-2">
+        {chartData.slice(0, 3).map((item, index) => (
+          <div key={`${item.name}-detail`} className="flex items-center justify-between gap-3 border border-zinc-800 bg-black/35 px-3 py-2 text-xs">
+            <span className="truncate text-zinc-300">{index + 1}. {item.name}</span>
+            <span className="shrink-0 text-orange-200">{item.detail ?? `${item.value}${valueLabel}`}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HourlyHeatmap({ data }: { data: HourlyHeatmapPoint[] }) {
+  if (!data.length) {
+    return <EmptyState title="Sem mapa de horário" description="O heatmap aparece quando houver eventos com hora válida no recorte." />;
+  }
+
+  const hours = [...new Set(data.map((item) => item.hour))].sort((a, b) => a.localeCompare(b));
+  const days = weekdayOrder.filter((day) => data.some((item) => item.day === day));
+  const byKey = new Map(data.map((item) => [`${item.day}-${item.hour}`, item]));
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[560px]">
+        <div className="grid gap-2" style={{ gridTemplateColumns: `72px repeat(${hours.length}, minmax(38px, 1fr))` }}>
+          <div />
+          {hours.map((hour) => (
+            <div key={hour} className="text-center text-[10px] uppercase tracking-[0.12em] text-zinc-500">{hour}h</div>
+          ))}
+          {days.map((day) => (
+            <div key={day} className="contents">
+              <div className="flex h-10 items-center text-xs font-medium text-zinc-300">{day}</div>
+              {hours.map((hour) => {
+                const item = byKey.get(`${day}-${hour}`);
+                const alpha = item ? 0.12 + (item.intensity / 100) * 0.58 : 0.04;
+                return (
+                  <div
+                    key={`${day}-${hour}`}
+                    className="grid h-10 place-items-center border border-zinc-900 text-[10px] text-zinc-100"
+                    title={item ? `${day} ${hour}h: ${item.minutes}min, ${item.switches} trocas` : `${day} ${hour}h: sem dados`}
+                    style={{ backgroundColor: item ? `rgba(249,115,22,${alpha})` : "rgba(39,39,42,0.32)", boxShadow: item && item.intensity > 70 ? "0 0 18px rgba(249,115,22,0.18)" : "none" }}
+                  >
+                    {item?.minutes ? item.minutes : ""}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex items-center justify-between text-xs text-zinc-500">
+          <span>menos atividade</span>
+          <div className="flex gap-1">
+            {[0.1, 0.22, 0.36, 0.52, 0.7].map((alpha) => (
+              <span key={alpha} className="h-3 w-8 border border-zinc-900" style={{ backgroundColor: `rgba(249,115,22,${alpha})` }} />
+            ))}
+          </div>
+          <span>mais atividade</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentOsChart({ data }: { data: AgentOsGroup[] }) {
+  if (!data.length) {
+    return <EmptyState title="Sem agentes no recorte" description="Nenhum dispositivo respeita os filtros atuais." />;
+  }
+
+  return (
+    <div className="grid gap-3">
+      {data.map((row) => (
+        <StackedOperationalRow
+          key={row.os}
+          label={row.os}
+          total={row.total}
+          segments={[
+            { label: "online", value: row.online, color: "#34d399" },
+            { label: "sync", value: row.syncing, color: "#facc15" },
+            { label: "offline", value: row.offline, color: "#fb7185" },
+            { label: "pendente", value: row.pending, color: "#71717a" }
+          ]}
+        />
+      ))}
+    </div>
+  );
+}
+
+function QualityByOsChart({ data }: { data: QualityOsGroup[] }) {
+  if (!data.length) {
+    return <EmptyState title="Sem sinal de coleta" description="A qualidade aparece quando agentes ou eventos trouxerem metadados de coleta." />;
+  }
+
+  return (
+    <div className="grid gap-3">
+      {data.map((row) => (
+        <StackedOperationalRow
+          key={row.os}
+          label={row.os}
+          total={row.total}
+          segments={[
+            { label: "alta", value: row.high, color: "#34d399" },
+            { label: "média", value: row.medium, color: "#facc15" },
+            { label: "baixa", value: row.low, color: "#fb923c" },
+            { label: "bloqueada", value: row.blocked, color: "#fb7185" }
+          ]}
+        />
+      ))}
+    </div>
+  );
+}
+
+function StackedOperationalRow({
+  label,
+  total,
+  segments
+}: {
+  label: string;
+  total: number;
+  segments: Array<{ label: string; value: number; color: string }>;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-black/35 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="font-medium text-zinc-100">{label}</p>
+          <p className="mt-1 text-xs text-zinc-500">{total} registro{total === 1 ? "" : "s"}</p>
+        </div>
+        <span className="text-sm font-semibold text-orange-200">{total}</span>
+      </div>
+      <div className="flex h-3 overflow-hidden bg-zinc-900">
+        {segments.filter((segment) => segment.value > 0).map((segment) => (
+          <motion.div
+            key={segment.label}
+            className="h-full"
+            style={{ backgroundColor: segment.color }}
+            initial={{ width: 0 }}
+            animate={{ width: `${(segment.value / Math.max(total, 1)) * 100}%` }}
+            transition={{ duration: 0.65, ease: "easeOut" }}
+            title={`${segment.label}: ${segment.value}`}
+          />
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-zinc-500">
+        {segments.map((segment) => (
+          <span key={segment.label} className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: segment.color }} />
+            {segment.label}: {segment.value}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -4148,14 +4735,17 @@ function AdvancedMetricsTable({ rows, loading }: { rows: MetricsDetailedRow[]; l
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60">
+    <div className="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950/60">
       <Tremor.Table>
         <Tremor.TableHead>
           <Tremor.TableRow>
             <Tremor.TableHeaderCell>Hora</Tremor.TableHeaderCell>
             <Tremor.TableHeaderCell>Pessoa</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Cargo</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Supervisor</Tremor.TableHeaderCell>
             <Tremor.TableHeaderCell>Equipe</Tremor.TableHeaderCell>
             <Tremor.TableHeaderCell>Dispositivo</Tremor.TableHeaderCell>
+            <Tremor.TableHeaderCell>Status</Tremor.TableHeaderCell>
             <Tremor.TableHeaderCell>App</Tremor.TableHeaderCell>
             <Tremor.TableHeaderCell>Categoria</Tremor.TableHeaderCell>
             <Tremor.TableHeaderCell>Duração</Tremor.TableHeaderCell>
@@ -4167,11 +4757,18 @@ function AdvancedMetricsTable({ rows, loading }: { rows: MetricsDetailedRow[]; l
             <Tremor.TableRow key={row.id} className="transition hover:bg-orange-950/10">
               <Tremor.TableCell className="whitespace-nowrap text-zinc-400">{formatEventDate(row.occurredAt)}</Tremor.TableCell>
               <Tremor.TableCell className="font-medium text-zinc-100">{row.userName}</Tremor.TableCell>
+              <Tremor.TableCell>{row.userTitle ?? "sem cargo"}</Tremor.TableCell>
+              <Tremor.TableCell>{row.supervisorName ?? "sem supervisor"}</Tremor.TableCell>
               <Tremor.TableCell>{row.teamName ?? "sem equipe"}</Tremor.TableCell>
               <Tremor.TableCell>{row.device}</Tremor.TableCell>
+              <Tremor.TableCell>
+                <Tremor.Badge color={["online", "syncing"].includes(row.agentStatus ?? "") ? "emerald" : row.agentStatus === "offline" ? "rose" : "orange"} size="xs">
+                  {statusPt(row.agentStatus ?? "pendente")}
+                </Tremor.Badge>
+              </Tremor.TableCell>
               <Tremor.TableCell className="text-orange-100">{row.app}</Tremor.TableCell>
               <Tremor.TableCell>
-                <Tremor.Badge color="zinc" size="xs">{row.category}</Tremor.Badge>
+                <Tremor.Badge color="zinc" size="xs">{categoryPt(row.category)}</Tremor.Badge>
               </Tremor.TableCell>
               <Tremor.TableCell className="whitespace-nowrap text-zinc-100">{formatDuration(row.durationSeconds)}</Tremor.TableCell>
               <Tremor.TableCell>
@@ -4285,39 +4882,536 @@ function MetricSignalCard({
   );
 }
 
-function InsightsView({ insights, compact = false }: { insights: Insight[]; compact?: boolean }) {
+function InsightsView({
+  insights,
+  token,
+  teams = [],
+  hierarchy = [],
+  devices = [],
+  whatsAppStatus,
+  emailStatuses = [],
+  liveStatusLabel = "agora",
+  compact = false,
+  onOpenMetrics
+}: {
+  insights: Insight[];
+  token?: string;
+  teams?: Team[];
+  hierarchy?: HierarchyNode[];
+  devices?: Device[];
+  whatsAppStatus?: WhatsAppStatus;
+  emailStatuses?: EmailProviderStatus[];
+  liveStatusLabel?: string;
+  compact?: boolean;
+  onOpenMetrics?: (filters: Omit<MetricsIntent, "nonce">) => void;
+}) {
+  const [items, setItems] = useState<Insight[]>(insights);
+  const [period, setPeriod] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [teamFilter, setTeamFilter] = useState("all");
+  const [userFilter, setUserFilter] = useState("all");
+  const [deliveryFilter, setDeliveryFilter] = useState("all");
+  const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
+  const [question, setQuestion] = useState("");
+  const [aiAnswer, setAiAnswer] = useState<InsightAskResponse | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
+
+  useEffect(() => {
+    setItems(insights);
+  }, [insights]);
+
+  const selectedInsight = items.find((item) => item.id === selectedInsightId) ?? items[0] ?? null;
+  const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
+  const whatsReady = Boolean(whatsAppStatus?.connected);
+  const insightTypes = [...new Set(items.map((item) => item.insightType ?? "recomendacao_processo"))].sort();
+  const severities = [...new Set(items.map((item) => item.severity ?? item.impact ?? "medium"))].sort();
+  const statuses = [...new Set(items.map((item) => item.status ?? "open"))].sort();
+  const visibleUsers = hierarchy.map((node) => [node.id, node.name] as [string, string]);
+  const visibleTeams = teams.map((team) => [team.id, team.name] as [string, string]);
+  const filteredInsights = items.filter((item) => {
+    if (typeFilter !== "all" && (item.insightType ?? "recomendacao_processo") !== typeFilter) return false;
+    if (severityFilter !== "all" && (item.severity ?? item.impact) !== severityFilter) return false;
+    if (statusFilter !== "all" && (item.status ?? "open") !== statusFilter) return false;
+    if (teamFilter !== "all" && item.targetTeamId !== teamFilter && !item.affectedTeams?.includes(teams.find((team) => team.id === teamFilter)?.name ?? "")) return false;
+    if (userFilter !== "all" && item.targetUserId !== userFilter && item.membershipId !== userFilter) return false;
+    if (deliveryFilter === "whatsapp" && !item.sentToWhatsapp) return false;
+    if (deliveryFilter === "email" && !item.sentToEmail) return false;
+    if (deliveryFilter === "not_sent" && (item.sentToWhatsapp || item.sentToEmail)) return false;
+    if (period !== "all" && item.createdAt) {
+      const days = period === "24h" ? 1 : period === "7d" ? 7 : 30;
+      if (Date.now() - new Date(item.createdAt).getTime() > days * 86400000) return false;
+    }
+    return true;
+  });
+  const criticalCount = items.filter((item) => ["critical", "high"].includes(item.severity ?? item.impact)).length;
+  const automationCount = items.filter((item) => (item.insightType ?? "").includes("autom") || item.automationSavingsHours > 0).length;
+  const totalSavings = items.reduce((total, item) => total + (item.estimatedSavings ?? item.automationSavingsHours * 95), 0);
+  const sentWhats = items.filter((item) => item.sentToWhatsapp).length;
+  const sentEmail = items.filter((item) => item.sentToEmail).length;
+  const resolved = items.filter((item) => (item.status ?? "open") === "resolved").length;
+  const severityChart = severities.map((severity) => ({
+    name: severityPt(severity),
+    value: items.filter((item) => (item.severity ?? item.impact) === severity).length
+  }));
+  const typeChart = insightTypes.slice(0, 6).map((type) => ({
+    name: insightTypePt(type),
+    value: items.filter((item) => (item.insightType ?? "recomendacao_processo") === type).length
+  }));
+
+  async function runInsightAction(action: string, endpoint: string, options?: RequestInit) {
+    if (!token) {
+      setFeedback({ tone: "warn", message: "Sessão expirada. Faça login novamente." });
+      return null;
+    }
+    try {
+      setBusyAction(action);
+      setFeedback(null);
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-Tenant-Id": DEMO_TENANT_ID
+        },
+        ...options
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(String(body.detail ?? "Ação recusada pelo backend."));
+      }
+      return response;
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível executar a ação." });
+      return null;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function refreshInsights() {
+    if (!token) return;
+    const next = await fetchProtected<Insight[]>("/insights", token, items);
+    setItems(next);
+    setFeedback({ tone: "ok", message: "Insights atualizados com o escopo permitido." });
+  }
+
+  async function generateInsight() {
+    const response = await runInsightAction("generate", "/insights/generate", {
+      body: JSON.stringify({ tenantId: DEMO_TENANT_ID, period: period === "all" ? "24h" : period })
+    });
+    if (!response) return;
+    const insight = (await response.json()) as Insight;
+    setItems((current) => [insight, ...current.filter((item) => item.id !== insight.id)]);
+    setSelectedInsightId(insight.id);
+    setFeedback({ tone: "ok", message: "Insight gerado por regras determinísticas. GPT/Llama entram quando as chaves estiverem configuradas." });
+  }
+
+  async function askSelectedInsight(customQuestion?: string) {
+    if (!selectedInsight) return;
+    const currentQuestion = (customQuestion ?? question).trim();
+    if (!currentQuestion) {
+      setFeedback({ tone: "warn", message: "Digite uma pergunta para aprofundar o diagnóstico." });
+      return;
+    }
+    const response = await runInsightAction("ask", `/insights/${selectedInsight.id}/ask`, {
+      body: JSON.stringify({ question: currentQuestion })
+    });
+    if (!response) return;
+    setAiAnswer((await response.json()) as InsightAskResponse);
+  }
+
+  async function mutateInsight(action: "send-whatsapp" | "send-email" | "resolve" | "create-action") {
+    if (!selectedInsight) return;
+    const body = action === "create-action"
+      ? { title: selectedInsight.recommendation, priority: selectedInsight.severity === "critical" ? "crítica" : "alta", note: selectedInsight.summary }
+      : undefined;
+    const response = await runInsightAction(action, `/insights/${selectedInsight.id}/${action}`, body ? { body: JSON.stringify(body) } : undefined);
+    if (!response) return;
+    const updated = (await response.json()) as Insight;
+    setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    setSelectedInsightId(updated.id);
+    const actionLabel = action === "send-whatsapp" ? "WhatsApp" : action === "send-email" ? "e-mail" : action === "resolve" ? "resolução" : "plano de ação";
+    setFeedback({ tone: "ok", message: `${actionLabel} registrado. Status: ${updated.whatsappStatus || updated.emailStatus || updated.status || updated.actionStatus || "ok"}.` });
+  }
+
+  function openMetricsForInsight(item: Insight) {
+    onOpenMetrics?.({
+      period: "7d",
+      teamId: item.targetTeamId ?? undefined,
+      membershipId: item.targetUserId ?? item.membershipId ?? undefined,
+      department: item.targetDepartmentId ? undefined : item.affectedTeams?.[0],
+      metricType: (item.insightType ?? "").includes("context") ? "context_switch" : (item.insightType ?? "").includes("ocios") ? "idle" : undefined
+    });
+  }
+
+  if (compact) {
+    return (
+      <ViewFrame compact>
+        <Panel title="Fluxo de insights de IA" icon={Sparkles}>
+          <div className="grid gap-4">
+            {items.length ? (
+              items.slice(0, 4).map((insight, index) => (
+                <motion.article
+                  key={insight.id}
+                  className="border border-orange-400/15 bg-black/45 p-5 transition hover:border-orange-300/50"
+                  initial={{ y: 24, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: index * 0.08 }}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <h3 className="text-lg font-semibold">{insight.title}</h3>
+                    <span className="border border-orange-400/25 px-3 py-1 text-xs uppercase tracking-[0.18em] text-orange-300">{severityPt(insight.severity ?? insight.impact)}</span>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-zinc-400">{insight.summary}</p>
+                  <p className="mt-4 text-sm leading-6 text-zinc-200">{insight.recommendation}</p>
+                </motion.article>
+              ))
+            ) : (
+              <EmptyState title="Sem insights gerados" description="Os insights aparecem depois que houver volume real suficiente de métricas operacionais." />
+            )}
+          </div>
+        </Panel>
+      </ViewFrame>
+    );
+  }
+
   return (
-    <ViewFrame compact={compact}>
-      <Panel title="Fluxo de insights de IA" icon={Sparkles}>
-        <div className="grid gap-4">
-          {insights.length ? (
-            insights.map((insight, index) => (
-              <motion.article
-                key={insight.id}
-                className="border border-orange-400/15 bg-black/45 p-5 transition hover:border-orange-300/50 hover:shadow-[0_0_24px_rgba(249,115,22,0.08)]"
-                initial={{ y: 24, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: index * 0.08 }}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <h3 className="text-lg font-semibold">{insight.title}</h3>
-                  <span className="border border-orange-400/25 px-3 py-1 text-xs uppercase tracking-[0.18em] text-orange-300">{impactPt(insight.impact)}</span>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">{insight.summary}</p>
-                <p className="mt-4 text-sm leading-6 text-zinc-200">{insight.recommendation}</p>
-                <div className="mt-4 flex items-center gap-2 text-orange-300">
-                  <Zap className="h-4 w-4" />
-                  <span>{insight.automationSavingsHours}h de potencial de automação</span>
-                </div>
-              </motion.article>
-            ))
-          ) : (
-            <EmptyState title="Sem insights gerados" description="Os insights aparecem depois que houver volume real suficiente de métricas operacionais." />
-          )}
+    <ViewFrame>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <LiveBadge label="Insights inteligentes" detail={`Tempo real ativo | última atualização ${liveStatusLabel}`} />
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void generateInsight()} disabled={busyAction === "generate"} className="h-10 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-50">
+            {busyAction === "generate" ? "Gerando..." : "Gerar novo insight"}
+          </button>
+          <button type="button" onClick={() => void refreshInsights()} className="h-10 border border-zinc-800 bg-black/45 px-4 text-sm text-zinc-200 transition hover:border-orange-400/45">
+            Atualizar
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-5 grid gap-5 xl:grid-cols-[1.08fr_0.92fr]">
+        <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Cérebro operacional</Tremor.Text>
+              <Tremor.Title className="mt-2 text-zinc-50">Diagnósticos que explicam o que aconteceu, por que importa e o que fazer agora.</Tremor.Title>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Tremor.Badge color={whatsReady ? "emerald" : "orange"}>WhatsApp {whatsReady ? "pronto" : "pendente"}</Tremor.Badge>
+              <Tremor.Badge color={emailReady ? "emerald" : "orange"}>E-mail {emailReady ? "pronto" : "pendente"}</Tremor.Badge>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <MetricSignalCard icon={Flame} label="Críticos" value={`${criticalCount}`} detail="Prioridades com risco operacional ou financeiro." tone={criticalCount ? "critical" : "ok"} />
+            <MetricSignalCard icon={Zap} label="Automações" value={`${automationCount}`} detail="Processos com indício de repetição automatizável." tone={automationCount ? "warn" : "ok"} />
+            <MetricSignalCard icon={Brain} label="Economia potencial" value={formatMoneyBRL(totalSavings)} detail="Estimativa a partir dos insights visíveis." tone={totalSavings > 0 ? "ok" : "warn"} />
+          </div>
+        </Tremor.Card>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+            <Tremor.Title className="mb-4 text-zinc-50">Severidade</Tremor.Title>
+            {severityChart.length ? <Tremor.BarList data={severityChart} color="orange" valueFormatter={(value: number) => `${value}`} /> : <EmptyState title="Sem dados" description="Gere o primeiro insight para montar o painel." />}
+          </Tremor.Card>
+          <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+            <Tremor.Title className="mb-4 text-zinc-50">Envios e resolução</Tremor.Title>
+            <div className="grid gap-3">
+              <ConnectionSummary label="WhatsApp" value={`${sentWhats}/${items.length}`} tone={sentWhats ? "ok" : "warn"} />
+              <ConnectionSummary label="E-mail" value={`${sentEmail}/${items.length}`} tone={sentEmail ? "ok" : "warn"} />
+              <ConnectionSummary label="Resolvidos" value={`${resolved}/${items.length}`} tone={resolved ? "ok" : "warn"} />
+            </div>
+          </Tremor.Card>
+        </div>
+      </div>
+
+      <Panel title="Filtros de diagnóstico" icon={Layers3}>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
+          <MetricFilterSelect label="Período" value={period} onChange={setPeriod} options={[["all", "Todos"], ["24h", "24h"], ["7d", "7 dias"], ["30d", "30 dias"]]} />
+          <MetricFilterSelect label="Tipo" value={typeFilter} onChange={setTypeFilter} options={[["all", "Todos"], ...insightTypes.map((item) => [item, insightTypePt(item)] as [string, string])]} />
+          <MetricFilterSelect label="Severidade" value={severityFilter} onChange={setSeverityFilter} options={[["all", "Todas"], ...severities.map((item) => [item, severityPt(item)] as [string, string])]} />
+          <MetricFilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={[["all", "Todos"], ...statuses.map((item) => [item, insightStatusPt(item)] as [string, string])]} />
+          <MetricFilterSelect label="Equipe" value={teamFilter} onChange={setTeamFilter} options={[["all", "Todas"], ...visibleTeams]} />
+          <MetricFilterSelect label="Usuário" value={userFilter} onChange={setUserFilter} options={[["all", "Todos"], ...visibleUsers]} />
+          <MetricFilterSelect label="Envio" value={deliveryFilter} onChange={setDeliveryFilter} options={[["all", "Todos"], ["whatsapp", "WhatsApp enviado"], ["email", "E-mail enviado"], ["not_sent", "Não enviados"]]} />
+          <MetricFilterSelect label="Origem" value="all" onChange={() => undefined} options={[["all", "IA + regras"]]} />
         </div>
       </Panel>
+
+      {feedback ? <div className="mt-4"><FeedbackBanner tone={feedback.tone} message={feedback.message} /></div> : null}
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="grid gap-4">
+          {filteredInsights.length ? (
+            filteredInsights.map((insight, index) => (
+              <InsightDiagnosticCard
+                key={insight.id}
+                insight={insight}
+                index={index}
+                selected={selectedInsight?.id === insight.id}
+                onSelect={() => {
+                  setSelectedInsightId(insight.id);
+                  setAiAnswer(null);
+                  setQuestion("");
+                }}
+                onOpenMetrics={() => openMetricsForInsight(insight)}
+              />
+            ))
+          ) : (
+            <EmptyState title="Nenhum insight no filtro" description="Altere período, severidade, tipo ou gere um novo insight com base nos dados atuais." />
+          )}
+        </div>
+
+        <Panel title="Detalhe, IA e ação" icon={Brain}>
+          {selectedInsight ? (
+            <div className="grid gap-5">
+              <div className="border border-orange-400/20 bg-black/45 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-orange-300">{insightTypePt(selectedInsight.insightType ?? "recomendacao_processo")}</p>
+                    <h3 className="mt-2 text-2xl font-semibold text-zinc-50">{selectedInsight.title}</h3>
+                  </div>
+                  <span className="border border-orange-400/25 px-3 py-1 text-xs uppercase tracking-[0.18em] text-orange-200">{severityPt(selectedInsight.severity ?? selectedInsight.impact)}</span>
+                </div>
+                <p className="mt-4 text-sm leading-6 text-zinc-300">{selectedInsight.diagnosis || selectedInsight.summary}</p>
+                <p className="mt-4 border-l border-orange-400/40 pl-3 text-sm leading-6 text-zinc-100">{selectedInsight.recommendation}</p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <ConnectionSummary label="Confiança" value={`${Math.round((selectedInsight.confidence ?? 0.72) * 100)}%`} tone="ok" />
+                <ConnectionSummary label="Tempo perdido" value={`${selectedInsight.estimatedTimeLoss ?? selectedInsight.automationSavingsHours}h`} tone={(selectedInsight.estimatedTimeLoss ?? 0) > 0 ? "warn" : "ok"} />
+                <ConnectionSummary label="Economia" value={formatMoneyBRL(selectedInsight.estimatedSavings ?? selectedInsight.automationSavingsHours * 95)} tone="ok" />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="border border-zinc-800 bg-black/35 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Evidências</p>
+                  <div className="mt-3 grid gap-2">
+                    {(selectedInsight.evidence?.length ? selectedInsight.evidence : [selectedInsight.summary]).map((item) => (
+                      <p key={item} className="text-sm leading-6 text-zinc-300">• {item}</p>
+                    ))}
+                  </div>
+                </div>
+                <div className="border border-zinc-800 bg-black/35 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Escopo e envio</p>
+                  <div className="mt-3 grid gap-2">
+                    <ConnectionSummary label="Escopo" value={scopeTypePt(selectedInsight.scopeType ?? "tenant")} tone="ok" />
+                    <ConnectionSummary label="WhatsApp" value={deliveryStatusPt(selectedInsight.whatsappStatus ?? "not_sent")} tone={selectedInsight.sentToWhatsapp ? "ok" : "warn"} />
+                    <ConnectionSummary label="E-mail" value={deliveryStatusPt(selectedInsight.emailStatus ?? "not_sent")} tone={selectedInsight.sentToEmail ? "ok" : "warn"} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <p className="text-xs uppercase tracking-[0.18em] text-orange-300">Perguntas sugeridas</p>
+                <div className="flex flex-wrap gap-2">
+                  {(selectedInsight.suggestedQuestions?.length ? selectedInsight.suggestedQuestions : ["Por que isso aconteceu?", "O que eu faço primeiro?", "Dá para automatizar?"]).map((item) => (
+                    <button key={item} type="button" onClick={() => void askSelectedInsight(item)} className="border border-zinc-800 bg-black/45 px-3 py-2 text-xs text-zinc-200 transition hover:border-orange-400/45">
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border border-zinc-800 bg-zinc-950/65 p-4">
+                <label className="grid gap-2 text-sm text-zinc-300">
+                  Aprofundar com IA
+                  <textarea
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    placeholder="Ex.: quanto isso pode custar por mês?"
+                    className="min-h-24 border border-zinc-800 bg-black/55 p-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-700 focus:border-orange-400"
+                  />
+                </label>
+                <button type="button" onClick={() => void askSelectedInsight()} disabled={busyAction === "ask"} className="mt-3 h-10 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-50">
+                  {busyAction === "ask" ? "Analisando..." : "Aprofundar com IA"}
+                </button>
+                {aiAnswer ? (
+                  <motion.div className="mt-4 border border-orange-400/20 bg-black/45 p-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+                    <p className="text-xs uppercase tracking-[0.18em] text-orange-300">{aiAnswer.aiMode}</p>
+                    <p className="mt-3 text-sm leading-6 text-zinc-200">{aiAnswer.answer}</p>
+                  </motion.div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-2">
+                <button type="button" onClick={() => openMetricsForInsight(selectedInsight)} className="h-11 border border-zinc-800 bg-black/45 px-3 text-sm text-zinc-200 transition hover:border-orange-400/45">Abrir Métricas relacionadas</button>
+                <button type="button" onClick={() => void mutateInsight("create-action")} disabled={busyAction === "create-action"} className="h-11 border border-zinc-800 bg-black/45 px-3 text-sm text-zinc-200 transition hover:border-orange-400/45">Criar plano de ação</button>
+                <button type="button" onClick={() => void mutateInsight("send-whatsapp")} disabled={busyAction === "send-whatsapp"} className="h-11 border border-orange-400/25 px-3 text-sm text-orange-200 transition hover:border-orange-300/60">Enviar por WhatsApp</button>
+                <button type="button" onClick={() => void mutateInsight("send-email")} disabled={busyAction === "send-email"} className="h-11 border border-orange-400/25 px-3 text-sm text-orange-200 transition hover:border-orange-300/60">Enviar por e-mail</button>
+                <button type="button" onClick={() => navigator.clipboard?.writeText(`${selectedInsight.title}\n${selectedInsight.summary}\nAção: ${selectedInsight.recommendation}`)} className="h-11 border border-zinc-800 bg-black/45 px-3 text-sm text-zinc-200 transition hover:border-orange-400/45">Copiar resumo</button>
+                <button type="button" onClick={() => void mutateInsight("resolve")} disabled={busyAction === "resolve"} className="h-11 border border-emerald-400/25 px-3 text-sm text-emerald-200 transition hover:border-emerald-300/60">Marcar resolvido</button>
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="Selecione um insight" description="O diagnóstico completo, evidências, IA e ações aparecem aqui." />
+          )}
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        <Panel title="Insights por tipo" icon={Activity}>
+          {typeChart.length ? <HorizontalBarsChart data={typeChart.map((item) => ({ ...item, detail: `${item.value} diagnóstico(s)` }))} valueLabel="" /> : <EmptyState title="Sem distribuição" description="Gere insights para visualizar tipos." />}
+        </Panel>
+        <Panel title="Privacidade e hierarquia" icon={ShieldCheck}>
+          <div className="grid gap-3">
+            <p className="text-sm leading-6 text-zinc-300">A tela usa apenas insights retornados pelo backend para o escopo autenticado. Operadores recebem visão pessoal; gestores recebem a árvore permitida; diretoria/admin recebe visão agregada do tenant.</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              <ConnectionSummary label="Pessoas no escopo" value={`${hierarchy.length}`} tone={hierarchy.length ? "ok" : "warn"} />
+              <ConnectionSummary label="Equipes" value={`${teams.length}`} tone={teams.length ? "ok" : "warn"} />
+              <ConnectionSummary label="Dispositivos" value={`${devices.length}`} tone={devices.length ? "ok" : "warn"} />
+            </div>
+          </div>
+        </Panel>
+      </div>
     </ViewFrame>
   );
+}
+
+function InsightDiagnosticCard({
+  insight,
+  index,
+  selected,
+  onSelect,
+  onOpenMetrics
+}: {
+  insight: Insight;
+  index: number;
+  selected: boolean;
+  onSelect: () => void;
+  onOpenMetrics: () => void;
+}) {
+  const tone = ["critical", "high"].includes(insight.severity ?? insight.impact) ? "critical" : insight.impact === "medium" ? "warn" : "ok";
+  const Icon = insightIcon(insight.insightType ?? "");
+  return (
+    <motion.article
+      className={`relative overflow-hidden border p-5 transition ${selected ? "border-orange-300/70 bg-orange-950/10 shadow-[0_0_34px_rgba(249,115,22,0.12)]" : "border-zinc-800 bg-zinc-950/70 hover:border-orange-400/45"}`}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05 }}
+      whileHover={{ y: -4 }}
+    >
+      <motion.div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent" animate={{ x: ["-100%", "100%"], opacity: [0, 0.75, 0] }} transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }} />
+      <button type="button" onClick={onSelect} className="relative z-10 block w-full text-left">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center bg-orange-500 text-black"><Icon className="h-5 w-5" /></div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-orange-300">{insightTypePt(insight.insightType ?? "recomendacao_processo")}</p>
+              <h3 className="mt-1 text-xl font-semibold text-zinc-50">{insight.title}</h3>
+            </div>
+          </div>
+          <span className={`border px-3 py-1 text-xs uppercase tracking-[0.16em] ${tone === "critical" ? "border-rose-400/30 text-rose-200" : tone === "warn" ? "border-orange-400/30 text-orange-200" : "border-emerald-400/30 text-emerald-200"}`}>{severityPt(insight.severity ?? insight.impact)}</span>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-zinc-400">{insight.summary}</p>
+        <p className="mt-3 text-sm leading-6 text-zinc-200">{insight.recommendation}</p>
+      </button>
+      <div className="relative z-10 mt-4 grid gap-2 md:grid-cols-4">
+        <ConnectionSummary label="Economia" value={formatMoneyBRL(insight.estimatedSavings ?? insight.automationSavingsHours * 95)} tone="ok" />
+        <ConnectionSummary label="Confiança" value={`${Math.round((insight.confidence ?? 0.72) * 100)}%`} tone="ok" />
+        <ConnectionSummary label="WhatsApp" value={deliveryStatusPt(insight.whatsappStatus ?? "not_sent")} tone={insight.sentToWhatsapp ? "ok" : "warn"} />
+        <ConnectionSummary label="Status" value={insightStatusPt(insight.status ?? "open")} tone={(insight.status ?? "open") === "resolved" ? "ok" : "warn"} />
+      </div>
+      <div className="relative z-10 mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={onSelect} className="h-9 bg-orange-500 px-3 text-xs font-semibold text-black transition hover:bg-orange-400">Ver diagnóstico</button>
+        <button type="button" onClick={onOpenMetrics} className="h-9 border border-zinc-800 px-3 text-xs text-zinc-200 transition hover:border-orange-400/45">Métricas</button>
+      </div>
+    </motion.article>
+  );
+}
+
+function insightTypePt(type: string) {
+  const normalized = type.toLowerCase();
+  const map: Record<string, string> = {
+    produtividade: "Produtividade",
+    ociosidade: "Ociosidade",
+    foco: "Foco",
+    troca_contexto: "Troca de contexto",
+    context_switch: "Troca de contexto",
+    bottleneck: "Gargalo operacional",
+    gargalo_operacional: "Gargalo operacional",
+    automation: "Automação sugerida",
+    automacao_sugerida: "Automação sugerida",
+    risco_operacional: "Risco operacional",
+    agent: "Agente",
+    agente_offline: "Agente offline",
+    coleta_limitada: "Coleta limitada",
+    equipe_sobrecarregada: "Equipe sobrecarregada",
+    desvio_padrao: "Desvio de padrão",
+    eficiencia_equipe: "Eficiência por equipe",
+    economia_estimada: "Economia estimada",
+    tendencia_negativa: "Tendência negativa",
+    tendencia_positiva: "Tendência positiva",
+    relatorio_executivo: "Relatório executivo",
+    alerta_critico: "Alerta crítico",
+    treinamento: "Treinamento",
+    recomendacao_processo: "Recomendação de processo",
+    recomendacao_integracao: "Recomendação de integração"
+  };
+  return map[normalized] ?? normalized.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function severityPt(value: string) {
+  const map: Record<string, string> = {
+    critical: "Crítica",
+    high: "Alta",
+    medium: "Média",
+    low: "Baixa",
+    warn: "Atenção"
+  };
+  return map[value] ?? value;
+}
+
+function insightStatusPt(value: string) {
+  const map: Record<string, string> = {
+    open: "Aberto",
+    resolved: "Resolvido",
+    ignored: "Ignorado",
+    in_progress: "Em andamento",
+    reviewing: "Em análise"
+  };
+  return map[value] ?? value;
+}
+
+function deliveryStatusPt(value: string) {
+  const map: Record<string, string> = {
+    not_sent: "Não enviado",
+    ready: "Pronto",
+    sent: "Enviado",
+    queued: "Na fila",
+    mocked: "Simulado",
+    missing_credentials: "Credencial pendente",
+    failed: "Falhou",
+    disabled: "Desativado",
+    missing_destination: "Sem destino"
+  };
+  return map[value] ?? value;
+}
+
+function scopeTypePt(value: string) {
+  const map: Record<string, string> = {
+    self: "Individual",
+    user: "Usuário",
+    team: "Equipe",
+    department: "Departamento",
+    subtree: "Subárvore",
+    tenant: "Empresa",
+    global: "Global"
+  };
+  return map[value] ?? value;
+}
+
+function insightIcon(type: string): typeof Gauge {
+  const normalized = type.toLowerCase();
+  if (normalized.includes("autom")) return Zap;
+  if (normalized.includes("agent") || normalized.includes("agente") || normalized.includes("coleta")) return RadioTower;
+  if (normalized.includes("risco") || normalized.includes("alerta")) return ShieldCheck;
+  if (normalized.includes("econom")) return Flame;
+  if (normalized.includes("equipe") || normalized.includes("supervisor")) return Network;
+  if (normalized.includes("foco") || normalized.includes("produt")) return Gauge;
+  return Brain;
 }
 
 function NotificationsView({ notifications, liveStatusLabel = "agora", schedules = [], compact = false }: { notifications: NotificationItem[]; liveStatusLabel?: string; schedules?: NotificationSchedule[]; compact?: boolean }) {

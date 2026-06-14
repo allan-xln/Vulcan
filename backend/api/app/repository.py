@@ -1550,6 +1550,53 @@ class VulcanRepository:
                 syncIntervalSeconds=30,
             )
 
+    def _ensure_pending_agent_device(
+        self,
+        conn: psycopg.Connection,
+        tenant_id: UUID,
+        device_id: UUID | None,
+        machine_fingerprint: str,
+        hostname: str,
+        os_name: str = "Linux",
+        metadata: dict | None = None,
+    ) -> dict:
+        row = conn.execute(
+            """
+            insert into public.devices (
+              id, tenant_id, owner_membership_id, hostname, os,
+              device_fingerprint, status, last_seen_at, metadata
+            )
+            values (
+              coalesce(%s, gen_random_uuid()), %s, null, %s, %s,
+              %s, 'pending', timezone('utc', now()), %s
+            )
+            on conflict (tenant_id, device_fingerprint) do update
+            set hostname = excluded.hostname,
+                os = coalesce(public.devices.os, excluded.os),
+                status = case when public.devices.owner_membership_id is null then 'pending' else public.devices.status end,
+                last_seen_at = timezone('utc', now()),
+                metadata = public.devices.metadata || excluded.metadata,
+                updated_at = timezone('utc', now())
+            returning id, owner_membership_id, metadata
+            """,
+            (
+                device_id,
+                tenant_id,
+                hostname,
+                os_name,
+                machine_fingerprint,
+                Jsonb(
+                    {
+                        "source": "vulcan-agent",
+                        "adoptionStatus": "pending",
+                        "adoptionCode": f"VLC-{str(machine_fingerprint).upper()[:6]}",
+                        **(metadata or {}),
+                    }
+                ),
+            ),
+        ).fetchone()
+        return row
+
     def agent_heartbeat(self, request: AgentHeartbeatRequest) -> AgentHeartbeatResponse:
         if self.enabled:
             with self._connect() as conn:
@@ -1585,6 +1632,20 @@ class VulcanRepository:
                         request.machine_fingerprint,
                     ),
                 ).fetchone()
+                if not row:
+                    row = self._ensure_pending_agent_device(
+                        conn,
+                        request.tenant_id,
+                        request.device_id,
+                        request.machine_fingerprint,
+                        request.hostname,
+                        metadata={
+                            "agentVersion": request.agent_version,
+                            "queueDepth": request.queue_depth,
+                            "lastError": request.last_error,
+                            **request.metadata,
+                        },
+                    )
                 if row and row["owner_membership_id"] is None:
                     metadata = row["metadata"] or {}
                     membership_id = self._resolve_agent_membership(
@@ -1639,6 +1700,14 @@ class VulcanRepository:
                 """,
                 (request.tenant_id, request.device_id, request.device_id, request.machine_fingerprint),
             ).fetchone()
+            if not device:
+                device = self._ensure_pending_agent_device(
+                    conn,
+                    request.tenant_id,
+                    request.device_id,
+                    request.machine_fingerprint,
+                    request.hostname,
+                )
             device_id = device["id"] if device else request.device_id
             event_membership_id = request.membership_id or (device["owner_membership_id"] if device else None)
             if event_membership_id is None and device and (device["metadata"] or {}).get("linkedUser") == "teste":
@@ -1842,6 +1911,13 @@ class VulcanRepository:
         team_id: UUID | None = None,
         membership_id: UUID | None = None,
         device_id: UUID | None = None,
+        supervisor_id: UUID | None = None,
+        department: str | None = None,
+        title: str | None = None,
+        os_name: str | None = None,
+        category: str | None = None,
+        agent_status: str | None = None,
+        metric_type: str | None = None,
         app: str | None = None,
     ) -> list[dict]:
         if not self.enabled:
@@ -1862,6 +1938,40 @@ class VulcanRepository:
             if device_id:
                 filters.append("e.device_id = %s")
                 query_params.append(device_id)
+            if supervisor_id:
+                self._assert_membership_visible(conn, access, supervisor_id)
+                filters.append("m.direct_manager_membership_id = %s")
+                query_params.append(supervisor_id)
+            if department:
+                filters.append("lower(coalesce(dpt.name, '')) like lower(%s)")
+                query_params.append(f"%{department}%")
+            if title:
+                filters.append("lower(coalesce(m.title, '')) like lower(%s)")
+                query_params.append(f"%{title}%")
+            if os_name:
+                filters.append("lower(coalesce(d.os, '')) like lower(%s)")
+                query_params.append(f"%{os_name}%")
+            if category:
+                filters.append("lower(coalesce(e.category, '')) = lower(%s)")
+                query_params.append(category)
+            if agent_status:
+                filters.append("lower(coalesce(d.status, '')) = lower(%s)")
+                query_params.append(agent_status)
+            if metric_type:
+                normalized_metric_type = metric_type.strip().lower()
+                if normalized_metric_type == "idle":
+                    filters.append("(e.event_type in ('idle_started', 'idle_ended') or lower(coalesce(e.category, '')) = 'idle')")
+                elif normalized_metric_type == "context_switch":
+                    filters.append("e.event_type = 'context_switch'")
+                elif normalized_metric_type == "agent":
+                    filters.append("e.event_type in ('heartbeat', 'sync_status', 'collection_quality', 'agent_error', 'agent_health')")
+                elif normalized_metric_type == "productive":
+                    filters.append("lower(coalesce(e.category, '')) in ('productivity', 'business', 'development', 'desenvolvimento', 'gestão', 'gestao', 'produtividade')")
+                elif normalized_metric_type == "improductive":
+                    filters.append("lower(coalesce(e.category, '')) in ('idle', 'distraction', 'communication', 'ocioso', 'distração', 'distracao', 'comunicação', 'comunicacao')")
+                else:
+                    filters.append("lower(e.event_type) = lower(%s)")
+                    query_params.append(metric_type)
             if app:
                 filters.append("lower(coalesce(e.app_name, '')) like lower(%s)")
                 query_params.append(f"%{app}%")
@@ -1873,12 +1983,16 @@ class VulcanRepository:
                        e.tenant_id as "tenantId",
                        e.membership_id as "membershipId",
                        coalesce(m.full_name, 'Sem usuário') as "userName",
+                       m.title as "userTitle",
+                       m.direct_manager_membership_id as "supervisorId",
+                       supervisor.full_name as "supervisorName",
                        tm.team_id as "teamId",
                        t.name as "teamName",
                        coalesce(dpt.name, 'Sem departamento') as department,
                        e.device_id as "deviceId",
                        coalesce(d.hostname, 'Sem dispositivo') as device,
                        coalesce(d.os, 'desconhecido') as os,
+                       d.status as "agentStatus",
                        coalesce(e.app_name, 'Desconhecido') as app,
                        coalesce(e.category, 'operacional') as category,
                        e.event_type as "eventType",
@@ -1887,6 +2001,7 @@ class VulcanRepository:
                        d.metadata ->> 'collectionQuality' as "collectionQuality"
                 from public.activity_events e
                 left join public.memberships m on m.id = e.membership_id
+                left join public.memberships supervisor on supervisor.id = m.direct_manager_membership_id
                 left join public.departments dpt on dpt.id = m.department_id
                 left join public.devices d on d.id = e.device_id
                 left join public.team_members tm on tm.tenant_id = e.tenant_id and tm.membership_id = e.membership_id
@@ -1906,9 +2021,30 @@ class VulcanRepository:
         team_id: UUID | None = None,
         membership_id: UUID | None = None,
         device_id: UUID | None = None,
+        supervisor_id: UUID | None = None,
+        department: str | None = None,
+        title: str | None = None,
+        os_name: str | None = None,
+        category: str | None = None,
+        agent_status: str | None = None,
+        metric_type: str | None = None,
         app: str | None = None,
     ) -> str:
-        rows = self.list_detailed_metrics(context, period=period, team_id=team_id, membership_id=membership_id, device_id=device_id, app=app)
+        rows = self.list_detailed_metrics(
+            context,
+            period=period,
+            team_id=team_id,
+            membership_id=membership_id,
+            device_id=device_id,
+            supervisor_id=supervisor_id,
+            department=department,
+            title=title,
+            os_name=os_name,
+            category=category,
+            agent_status=agent_status,
+            metric_type=metric_type,
+            app=app,
+        )
         output = StringIO()
         output.write("\ufeff")
         writer = csv.writer(output)
@@ -1917,17 +2053,27 @@ class VulcanRepository:
         writer.writerow(["filtro_team_id", str(team_id or "")])
         writer.writerow(["filtro_membership_id", str(membership_id or "")])
         writer.writerow(["filtro_device_id", str(device_id or "")])
+        writer.writerow(["filtro_supervisor_id", str(supervisor_id or "")])
+        writer.writerow(["filtro_departamento", department or ""])
+        writer.writerow(["filtro_cargo", title or ""])
+        writer.writerow(["filtro_so", os_name or ""])
+        writer.writerow(["filtro_categoria", category or ""])
+        writer.writerow(["filtro_status_agente", agent_status or ""])
+        writer.writerow(["filtro_tipo_metrica", metric_type or ""])
         writer.writerow(["filtro_app", app or ""])
         writer.writerow([])
-        writer.writerow(["data_hora", "usuario", "equipe", "departamento", "dispositivo", "so", "app", "categoria", "evento", "duracao_segundos", "qualidade_coleta"])
+        writer.writerow(["data_hora", "usuario", "equipe", "cargo", "supervisor", "departamento", "dispositivo", "so", "status_agente", "app", "categoria", "evento", "duracao_segundos", "qualidade_coleta"])
         for row in rows:
             writer.writerow([
                 row["occurredAt"],
                 row["userName"],
                 row["teamName"] or "",
+                row["userTitle"] or "",
+                row["supervisorName"] or "",
                 row["department"],
                 row["device"],
                 row["os"],
+                row["agentStatus"] or "",
                 row["app"],
                 row["category"],
                 row["eventType"],
@@ -2368,9 +2514,45 @@ class VulcanRepository:
             real_data_condition = self._real_agent_data_filter(access, "i")
             return list(conn.execute(
                 f"""
-                select i.id::text, i.title,
+                select i.id::text,
+                       i.tenant_id as "tenantId",
+                       i.membership_id as "membershipId",
+                       i.department_id as "departmentId",
+                       coalesce(i.metadata ->> 'scopeType', case when i.membership_id is null then 'tenant' else 'user' end) as "scopeType",
+                       coalesce(i.metadata ->> 'scopeId', coalesce(i.membership_id::text, i.department_id::text, i.tenant_id::text)) as "scopeId",
+                       i.membership_id as "targetUserId",
+                       nullif(i.metadata ->> 'targetTeamId', '')::uuid as "targetTeamId",
+                       i.department_id as "targetDepartmentId",
+                       coalesce(i.metadata -> 'roleVisibility', '[]'::jsonb) as "roleVisibility",
+                       coalesce(i.metadata ->> 'type', i.metadata ->> 'insightType', 'recomendacao_processo') as "insightType",
+                       i.title,
                        case when i.impact = 'critical' then 'high' else i.impact::text end as impact,
-                       i.summary, coalesce(i.recommendation, '') as recommendation,
+                       i.summary,
+                       coalesce(i.metadata ->> 'diagnosis', i.summary) as diagnosis,
+                       coalesce(i.recommendation, '') as recommendation,
+                       coalesce(i.metadata -> 'evidence', '[]'::jsonb) as evidence,
+                       coalesce(i.metadata -> 'metricsUsed', '[]'::jsonb) as "metricsUsed",
+                       coalesce(i.metadata -> 'affectedUsers', '[]'::jsonb) as "affectedUsers",
+                       coalesce(i.metadata -> 'affectedTeams', '[]'::jsonb) as "affectedTeams",
+                       coalesce(i.metadata ->> 'severity', case when i.impact in ('critical', 'high') then 'critical' else i.impact::text end) as severity,
+                       i.confidence::float as confidence,
+                       coalesce((i.metadata ->> 'estimatedTimeLoss')::float, coalesce(i.automation_savings_hours, 0)::float) as "estimatedTimeLoss",
+                       coalesce((i.metadata ->> 'estimatedCostLoss')::float, coalesce(i.automation_savings_hours, 0)::float * 95) as "estimatedCostLoss",
+                       coalesce((i.metadata ->> 'estimatedSavings')::float, coalesce(i.automation_savings_hours, 0)::float * 95) as "estimatedSavings",
+                       coalesce(nullif(i.metadata ->> 'periodStart', '')::timestamptz, i.created_at - interval '7 days') as "periodStart",
+                       coalesce(nullif(i.metadata ->> 'periodEnd', '')::timestamptz, i.created_at) as "periodEnd",
+                       coalesce(i.metadata ->> 'status', 'open') as status,
+                       i.source_route::text as "sourceRoute",
+                       coalesce((i.metadata ->> 'sentToWhatsapp')::bool, false) as "sentToWhatsapp",
+                       coalesce((i.metadata ->> 'sentToEmail')::bool, false) as "sentToEmail",
+                       coalesce(i.metadata ->> 'whatsappStatus', 'not_sent') as "whatsappStatus",
+                       coalesce(i.metadata ->> 'emailStatus', 'not_sent') as "emailStatus",
+                       nullif(i.metadata ->> 'lastSentAt', '')::timestamptz as "lastSentAt",
+                       coalesce(i.metadata -> 'recipients', '[]'::jsonb) as recipients,
+                       coalesce(i.metadata -> 'suggestedQuestions', '[]'::jsonb) as "suggestedQuestions",
+                       i.metadata ->> 'actionStatus' as "actionStatus",
+                       i.created_at as "createdAt",
+                       coalesce(nullif(i.metadata ->> 'updatedAt', '')::timestamptz, i.created_at) as "updatedAt",
                        coalesce(i.automation_savings_hours, 0)::int as "automationSavingsHours"
                 from public.ai_insights i
                 where {condition}
@@ -2380,6 +2562,167 @@ class VulcanRepository:
                 """,
                 params,
             ).fetchall())
+
+    def get_insight(self, context: AuthContext, insight_id: UUID) -> dict | None:
+        return next((item for item in self.list_insights(context) if str(item["id"]) == str(insight_id)), None)
+
+    def generate_insight(self, context: AuthContext, tenant_id: UUID, period: str = "24h") -> dict:
+        if not self.enabled:
+            return {
+                "id": str(uuid4()),
+                "title": "Geração de insight preparada",
+                "impact": "medium",
+                "summary": "Banco indisponível; geração real depende do PostgreSQL.",
+                "recommendation": "Configure DATABASE_URL para persistir insights reais.",
+                "automationSavingsHours": 0,
+            }
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            if not access.is_root and tenant_id != access.tenant_id:
+                raise ValueError("tenant mismatch")
+            condition, params = self._owner_filter(access, "e.membership_id", "e.tenant_id")
+            row = conn.execute(
+                f"""
+                select
+                  count(*) as events,
+                  coalesce(sum(duration_seconds) filter (where event_type in ('idle_started', 'idle_ended') or lower(coalesce(category, '')) = 'idle'), 0) as idle_seconds,
+                  count(*) filter (where event_type = 'context_switch') as switches,
+                  coalesce(max(app_name), 'operação') as app_name
+                from public.activity_events e
+                where {condition}
+                  and e.occurred_at >= timezone('utc', now()) - case
+                    when %s = '30d' then interval '30 days'
+                    when %s = '7d' then interval '7 days'
+                    else interval '24 hours'
+                  end
+                """,
+                (*params, period, period),
+            ).fetchone()
+            events = int(row["events"] or 0)
+            idle_hours = float(row["idle_seconds"] or 0) / 3600
+            switches = int(row["switches"] or 0)
+            severity = "critical" if idle_hours >= 4 or switches >= 80 else "high" if idle_hours >= 1.5 or switches >= 35 else "medium"
+            insight_type = "troca_contexto" if switches >= max(idle_hours * 10, 20) else "ociosidade"
+            title = "Troca de contexto elevada no recorte" if insight_type == "troca_contexto" else "Ociosidade fora do padrão no recorte"
+            summary = (
+                f"Foram identificadas {switches} trocas de contexto em {events} eventos analisados."
+                if insight_type == "troca_contexto"
+                else f"Foram identificadas {idle_hours:.1f} horas potenciais de espera, pausa ou bloqueio operacional."
+            )
+            recommendation = (
+                "Agrupe etapas repetitivas em blocos e reduza alternância entre comunicação e sistema operacional."
+                if insight_type == "troca_contexto"
+                else "Valide se a ociosidade vem de pausa real, gargalo de sistema ou fila aguardando aprovação."
+            )
+            inserted = conn.execute(
+                """
+                insert into public.ai_insights (
+                  tenant_id, membership_id, source_route, source_model,
+                  title, summary, recommendation, impact, automation_savings_hours, confidence, metadata
+                )
+                values (%s, %s, 'rules', 'deterministic-vulcan-rules', %s, %s, %s, %s, %s, 0.82, %s)
+                returning id
+                """,
+                (
+                    tenant_id,
+                    access.membership_id if access.scope == "self" else None,
+                    title,
+                    summary,
+                    recommendation,
+                    "high" if severity in {"critical", "high"} else "medium",
+                    max(1, round(idle_hours + switches * 0.018)),
+                    Jsonb(
+                        {
+                            "type": insight_type,
+                            "severity": severity,
+                            "status": "open",
+                            "scopeType": "user" if access.scope == "self" else "tenant",
+                            "diagnosis": summary,
+                            "evidence": [f"{events} eventos no período {period}", f"{switches} trocas de contexto", f"{idle_hours:.1f}h de ociosidade estimada"],
+                            "metricsUsed": ["activity_events", "duration_seconds", "context_switch"],
+                            "estimatedTimeLoss": max(1, round(idle_hours + switches * 0.018, 1)),
+                            "estimatedCostLoss": round(max(1, idle_hours + switches * 0.018) * 95, 2),
+                            "estimatedSavings": round(max(1, idle_hours + switches * 0.018) * 95, 2),
+                            "suggestedQuestions": [
+                                "Por que isso aconteceu?",
+                                "O que eu faço primeiro?",
+                                "Dá para automatizar esse processo?",
+                            ],
+                        }
+                    ),
+                ),
+            ).fetchone()
+            self.write_audit(conn, context, tenant_id, "insight.generated", "ai_insight", inserted["id"], {"period": period, "type": insight_type})
+            conn.commit()
+            insight = self.get_insight(context, inserted["id"])
+            return insight or {"id": str(inserted["id"]), "title": title, "impact": "medium", "summary": summary, "recommendation": recommendation, "automationSavingsHours": 0}
+
+    def ask_insight(self, context: AuthContext, insight_id: UUID, question: str) -> dict:
+        insight = self.get_insight(context, insight_id)
+        if not insight:
+            raise ValueError("insight not found or outside hierarchy")
+        forbidden_terms = ("fora da minha hierarquia", "todos os tenants", "outro tenant")
+        if any(term in question.lower() for term in forbidden_terms):
+            answer = "Você não possui permissão para visualizar dados fora da sua hierarquia."
+        else:
+            evidence = "; ".join(insight.get("evidence") or []) or insight["summary"]
+            answer = (
+                f"Diagnóstico: {insight.get('diagnosis') or insight['summary']} "
+                f"Evidências: {evidence}. "
+                f"Ação recomendada: {insight['recommendation']} "
+                f"Impacto estimado: {insight.get('estimatedTimeLoss', 0)}h e {float(insight.get('estimatedCostLoss') or 0):.2f} em custo operacional."
+            )
+        return {
+            "insightId": str(insight_id),
+            "question": question,
+            "answer": answer,
+            "aiMode": "rules_fallback_explicit",
+            "suggestedActions": [
+                insight["recommendation"],
+                "Abrir métricas filtradas para confirmar a evidência.",
+                "Criar plano de ação com responsável e prazo.",
+            ],
+        }
+
+    def update_insight_metadata(self, context: AuthContext, insight_id: UUID, patch: dict, audit_action: str) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._owner_filter(access, "membership_id", "tenant_id")
+            row = conn.execute(
+                f"""
+                update public.ai_insights
+                set metadata = metadata || %s
+                where id = %s and {condition}
+                returning id, tenant_id
+                """,
+                (Jsonb({**patch, "updatedAt": datetime.now(timezone.utc).isoformat()}), insight_id, *params),
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return None
+            self.write_audit(conn, context, row["tenant_id"], audit_action, "ai_insight", row["id"], patch)
+            conn.commit()
+        return self.get_insight(context, insight_id)
+
+    def create_insight_action(self, context: AuthContext, insight_id: UUID, payload: dict) -> dict | None:
+        return self.update_insight_metadata(
+            context,
+            insight_id,
+            {
+                "actionStatus": "open",
+                "action": {
+                    "title": payload.get("title"),
+                    "ownerMembershipId": str(payload.get("owner_membership_id") or ""),
+                    "priority": payload.get("priority", "alta"),
+                    "dueDate": payload.get("due_date").isoformat() if payload.get("due_date") else None,
+                    "note": payload.get("note"),
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                },
+            },
+            "insight.action_created",
+        )
 
     def list_notifications(self, context: AuthContext) -> list[dict]:
         if not self.enabled:

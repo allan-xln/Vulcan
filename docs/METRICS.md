@@ -1,6 +1,8 @@
-# Métricas Operacionais
+# Metricas Operacionais
 
-O Vulcan transforma eventos do agente em métricas para inteligência operacional. O foco é produtividade, gargalos, eficiência, automação e recomendações, sem capturar conteúdo privado.
+A tela `Metricas` e o centro analitico do Vulcan. Ela existe para investigar causas, comparar recortes, exportar evidencias e transformar sinais operacionais em decisao.
+
+Regra principal: Metricas nao e Comando. Tudo que exige filtro, tabela, comparacao, ranking ou investigacao fica aqui.
 
 ## Eventos De Entrada
 
@@ -22,71 +24,171 @@ Eventos aceitos no MVP:
 - `heartbeat`;
 - `sync_status`;
 - `collection_quality`;
-- `agent_error`.
+- `agent_error`;
+- `agent_health`.
 
-## Métricas Calculadas
+## Filtros
 
-- tempo por aplicativo;
-- tempo por janela quando permitido por política;
+Filtros da tela:
+
+- periodo;
+- equipe;
+- usuario;
+- supervisor responsavel;
+- departamento;
+- cargo;
+- dispositivo;
+- sistema operacional;
+- categoria;
+- status do agente;
+- tipo de metrica;
+- aplicativo.
+
+Todos os graficos, rankings, tabela e exportacoes usam o mesmo query string enviado para `GET /metrics/detailed` e `GET /metrics/export`.
+
+## Tipos De Metrica
+
+O filtro `metricType` aceita:
+
+- `productive`;
+- `idle`;
+- `context_switch`;
+- `agent`;
+- `improductive`.
+
+O backend traduz esses tipos para eventos e categorias equivalentes.
+
+## Graficos Obrigatorios
+
+1. Velocimetro de saude operacional
+
+- SVG customizado;
+- ponteiro animado;
+- score de 0 a 100;
+- composicao por agentes online, foco, ociosidade, trocas e sinais criticos.
+
+2. Donut de distribuicao de tempo
+
+Categorias:
+
+- produtivo;
+- ocioso;
+- comunicacao;
+- sistemas internos;
+- navegacao;
+- outros.
+
+3. Barras horizontais de apps mais usados
+
+Ranking por minutos no recorte filtrado.
+
+4. Linha temporal de produtividade
+
+Mostra minutos produtivos, ociosos e trocas de contexto por janela de tempo.
+
+5. Heatmap por hora e dia
+
+Mostra concentracao de atividade e trocas por faixa horaria.
+
+6. Ranking de equipes
+
+Agrupa tempo ativo por equipe/departamento.
+
+7. Ranking de usuarios
+
+Agrupa tempo ativo por usuario.
+
+8. Grafico de troca de contexto
+
+Mostra volume de alternancias por janela temporal.
+
+9. Status dos agentes por SO
+
+Agrupa online, sincronizando, offline e pendente por familia de sistema operacional.
+
+10. Qualidade de coleta por sistema
+
+Agrupa coleta alta, media, baixa e bloqueada por SO.
+
+## Metricas Calculadas
+
 - tempo ativo;
 - tempo ocioso;
-- tempo analisado;
-- tempo fragmentado;
-- maior bloco de foco;
-- trocas de contexto por hora;
-- aplicativos mais usados;
-- janelas mais usadas;
-- períodos de maior atividade;
-- períodos de ociosidade;
+- tempo produtivo;
+- tempo improdutivo configuravel;
+- foco operacional;
+- indice de fragmentacao;
+- troca de contexto por hora;
+- tempo por app;
+- tempo por equipe;
+- tempo por usuario;
+- tempo por dispositivo;
+- uso por sistema operacional;
+- agentes online/offline;
+- fila pendente dos agentes;
 - qualidade de coleta;
-- estabilidade dos agentes;
-- fila offline;
-- dispositivos online/offline;
-- gargalos por sistema;
-- oportunidades de automação;
-- economia estimada de horas;
-- economia financeira estimada.
+- gargalos por app;
+- gargalos por equipe;
+- oportunidades de automacao;
+- economia estimada em horas;
+- economia estimada em dinheiro;
+- ranking de apps;
+- ranking de equipes;
+- ranking de usuarios;
+- tendencia temporal;
+- heatmap por horario;
+- alertas por periodo.
 
-## Tela De Métricas
+## Formula Do Score
 
-A tela `Métricas` é a área de investigação. Ela mostra leitura executiva no topo e permite filtrar detalhes por:
+O velocimetro combina:
 
-- período: últimas 24h, 7 dias ou 30 dias;
-- equipe;
-- pessoa;
-- dispositivo;
-- app/sistema.
+- percentual de agentes online;
+- score de foco;
+- baixa ociosidade;
+- baixa troca de contexto;
+- ausencia de sinais criticos.
 
-Os filtros consultam `GET /metrics/detailed` e respeitam tenant, escopo de hierarquia e permissões do usuário logado.
+Formula aplicada no frontend:
 
-## Exportação
+```text
+score = online*0.28 + foco*0.30 + baixa_ociosidade*0.18 + baixa_troca*0.14 + sinais_ok*0.10
+```
 
-A exportação usa `GET /metrics/export` com os mesmos filtros aplicados na tela.
+Faixas:
 
-Formatos atuais:
+- `0 a 53`: Critico;
+- `54 a 73`: Atencao;
+- `74 a 87`: Saudavel;
+- `88 a 100`: Excelente.
 
-- CSV;
-- CSV compatível com Excel.
+## Exportacao
 
-O download é feito pelo frontend com `Authorization: Bearer`, não por link aberto sem token. Isso preserva isolamento por tenant.
+Leia `docs/EXPORTS.md`.
+
+CSV e Excel respeitam os filtros atuais. PDF, e-mail e WhatsApp estao preparados na interface e dependem dos modulos reais de relatorio/canal.
+
+## Dados Reais Versus Demo
+
+Se nao houver filtro analitico e existir seed/demo, a tela pode exibir dados demo sinalizados. Se um filtro retorna vazio, a tela mostra estado sem resultado, sem substituir por dado global.
 
 ## Coleta Limitada
 
-Em GNOME/Wayland, o sistema operacional pode bloquear detalhes finos da janela ativa. Quando isso ocorre, o Vulcan marca a qualidade como `low` ou `blocked_by_os` e mostra o alerta em português. O agente não tenta burlar controles de privacidade.
+Em GNOME/Wayland e outros ambientes restritos, o sistema operacional pode bloquear detalhes finos da janela ativa. Quando isso ocorre, o Vulcan marca a qualidade como `low` ou `blocked_by_os` e exibe o estado correspondente.
 
-## Política De Privacidade
+## Privacidade
 
-O agente não coleta:
+O agente nao coleta:
 
 - senhas;
 - teclas digitadas;
-- prints contínuos de tela;
+- prints continuos;
 - webcam;
-- áudio;
+- audio;
 - clipboard irrestrito;
 - cookies;
 - tokens;
-- conteúdo de mensagens privadas;
+- conteudo de mensagens privadas;
 - documentos pessoais.
 
-Coletas sensíveis como título de janela, URL de navegador e lista de processos dependem de flags explícitas na política do agente.
+Coletas sensiveis como titulo de janela, URL de navegador e lista de processos dependem de politica explicita.

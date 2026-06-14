@@ -229,12 +229,16 @@ class MetricsDetailedRow(ApiModel):
     tenant_id: UUID = Field(alias="tenantId")
     membership_id: UUID | None = Field(default=None, alias="membershipId")
     user_name: str = Field(alias="userName")
+    user_title: str | None = Field(default=None, alias="userTitle")
+    supervisor_id: UUID | None = Field(default=None, alias="supervisorId")
+    supervisor_name: str | None = Field(default=None, alias="supervisorName")
     team_id: UUID | None = Field(default=None, alias="teamId")
     team_name: str | None = Field(default=None, alias="teamName")
     department: str
     device_id: UUID | None = Field(default=None, alias="deviceId")
     device: str
     os: str
+    agent_status: str | None = Field(default=None, alias="agentStatus")
     app: str
     category: str
     event_type: str = Field(alias="eventType")
@@ -462,11 +466,78 @@ class OperationalIntelligence(ApiModel):
 
 class Insight(ApiModel):
     id: str
+    tenant_id: UUID | None = Field(default=None, alias="tenantId")
+    membership_id: UUID | None = Field(default=None, alias="membershipId")
+    department_id: UUID | None = Field(default=None, alias="departmentId")
+    scope_type: str = Field(default="tenant", alias="scopeType")
+    scope_id: str | None = Field(default=None, alias="scopeId")
+    target_user_id: UUID | None = Field(default=None, alias="targetUserId")
+    target_team_id: UUID | None = Field(default=None, alias="targetTeamId")
+    target_department_id: UUID | None = Field(default=None, alias="targetDepartmentId")
+    role_visibility: list[str] = Field(default_factory=list, alias="roleVisibility")
+    insight_type: str = Field(default="recomendacao_processo", alias="insightType")
     title: str
     impact: Literal["high", "medium", "low"]
     summary: str
+    diagnosis: str = ""
     recommendation: str
+    evidence: list[str] = Field(default_factory=list)
+    metrics_used: list[str] = Field(default_factory=list, alias="metricsUsed")
+    affected_users: list[str] = Field(default_factory=list, alias="affectedUsers")
+    affected_teams: list[str] = Field(default_factory=list, alias="affectedTeams")
+    severity: str = "medium"
+    confidence: float | None = None
+    estimated_time_loss: float = Field(default=0, alias="estimatedTimeLoss")
+    estimated_cost_loss: float = Field(default=0, alias="estimatedCostLoss")
+    estimated_savings: float = Field(default=0, alias="estimatedSavings")
+    period_start: datetime | None = Field(default=None, alias="periodStart")
+    period_end: datetime | None = Field(default=None, alias="periodEnd")
+    status: str = "open"
+    source_route: str | None = Field(default=None, alias="sourceRoute")
+    sent_to_whatsapp: bool = Field(default=False, alias="sentToWhatsapp")
+    sent_to_email: bool = Field(default=False, alias="sentToEmail")
+    whatsapp_status: str = Field(default="not_sent", alias="whatsappStatus")
+    email_status: str = Field(default="not_sent", alias="emailStatus")
+    last_sent_at: datetime | None = Field(default=None, alias="lastSentAt")
+    recipients: list[str] = Field(default_factory=list)
+    suggested_questions: list[str] = Field(default_factory=list, alias="suggestedQuestions")
+    action_status: str | None = Field(default=None, alias="actionStatus")
+    created_at: datetime | None = Field(default=None, alias="createdAt")
+    updated_at: datetime | None = Field(default=None, alias="updatedAt")
     automation_savings_hours: int = Field(alias="automationSavingsHours")
+
+
+class InsightAskRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    question: str = Field(min_length=2)
+
+
+class InsightAskResponse(ApiModel):
+    insight_id: str = Field(alias="insightId")
+    question: str
+    answer: str
+    ai_mode: str = Field(alias="aiMode")
+    suggested_actions: list[str] = Field(default_factory=list, alias="suggestedActions")
+
+
+class InsightGenerateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    period: str = "24h"
+    scope_type: str = Field(default="auto", alias="scopeType")
+    force: bool = False
+
+
+class InsightActionRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str | None = None
+    owner_membership_id: UUID | None = Field(default=None, alias="ownerMembershipId")
+    priority: str = "alta"
+    due_date: datetime | None = Field(default=None, alias="dueDate")
+    note: str | None = None
 
 
 class Notification(ApiModel):

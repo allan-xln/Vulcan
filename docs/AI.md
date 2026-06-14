@@ -80,8 +80,20 @@ The provider abstraction must support:
 - `POST /ai/analyze` in `backend/api`
 - `POST /ai/insights/generate` in `backend/api`
 - `POST /ai/copilot` in `backend/api`
+- `POST /insights/{insight_id}/ask` in `backend/api`
 
 The explain endpoint accepts tenant-scoped structured facts and returns operational recommendations. When credentials are missing, services return explicit mock responses instead of silently pretending that production AI is active.
+
+## Insight Diagnosis In The Product
+
+The product Insights screen uses a hierarchy-safe flow:
+
+1. `GET /insights` loads only insights visible to the authenticated membership.
+2. `POST /insights/generate` creates a deterministic insight from real operational events.
+3. `POST /insights/{insight_id}/ask` deepens the selected diagnosis.
+4. WhatsApp, e-mail, action creation and resolution update the insight metadata with auditable status.
+
+Until the GPT/Llama provider is fully connected to this route, `ask` returns `aiMode=rules_fallback_explicit`. This is intentional: the UI must never hide a mock or rules fallback as real premium AI.
 
 ## Ollama Local Runtime
 

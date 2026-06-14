@@ -683,14 +683,22 @@ def seed() -> None:
             )
 
         insights = [
+            ("Bom bloco de foco individual no ERP", "low", "O Operador 1 manteve períodos longos sem troca de janela durante execução no ERP.", "Manter blocos de trabalho semelhantes e registrar interrupções recorrentes quando surgirem.", 3, "foco", "operations", "operador1"),
             ("Troca de contexto entre ERP e WhatsApp Web aumentou 32%", "high", "A equipe operacional alternou com frequência entre ERP, WhatsApp Web e sistema interno nos últimos 7 dias.", "Criar fila única de exceções e reduzir retorno manual entre canais.", 18, "bottleneck", "operations", "lider"),
             ("Financeiro concentra 41% do tempo em planilhas", "high", "Gerente e supervisor passam grande parte do tempo entre ERP Billing e Excel, indicando retrabalho de conferência.", "Automatizar validação de notas e conciliação antes do fechamento diário.", 27, "automation", "finance", "gerente"),
             ("Operador 2 com ociosidade elevada após 15h", "medium", "Nos últimos 3 dias, o Operador 2 teve aumento de períodos sem atividade no fim da tarde.", "Rebalancear fila logística e criar alerta preventivo de ociosidade por janela.", 9, "productivity", "logistics", "operador2"),
+            ("Operador 3 com coleta limitada", "medium", "O agente do Operador 3 indica qualidade de coleta baixa por limitação do ambiente ou dependência local.", "Verificar serviço do agente e permissões do ambiente antes de comparar métricas individuais.", 4, "coleta_limitada", "support", "operador3"),
             ("ERP Billing concentra sessões longas", "critical", "Sessões longas no ERP Billing indicam gargalo de processo e dependência de validação manual.", "Priorizar automação de campos recorrentes e trilha de aprovação assistida.", 31, "bottleneck", "finance", "supervisor"),
             ("18 horas semanais de atividades repetitivas detectadas", "high", "A IA identificou padrão de baixa variação em rotinas administrativas e operacionais.", "Criar playbook de automação para tarefas repetitivas por setor.", 18, "automation", "operations", "coordenador"),
             ("Agente LINUX-SUPORTE-001 está offline", "medium", "Um dispositivo de suporte não sincroniza há mais de 8 horas.", "Verificar serviço local, rede e fila offline antes do próximo ciclo de atendimento.", 2, "agent", "support", "operador3"),
+            ("Equipe de faturamento com risco de fila represada", "high", "Supervisor e líder concentram tempo em aprovações manuais, criando risco de atraso no fechamento.", "Definir responsável por triagem e automatizar validações recorrentes do faturamento.", 16, "risco_operacional", "finance", "supervisor"),
+            ("Financeiro tem maior potencial de automação mensal", "high", "O conjunto ERP Billing, Excel e Sistema Financeiro concentra alto volume de repetição operacional.", "Priorizar uma automação piloto no fluxo de conciliação antes de expandir para outros setores.", 46, "economia_estimada", "finance", "diretor"),
+            ("Estabilidade dos agentes precisa de atenção executiva", "medium", "Dispositivos offline e coleta limitada reduzem confiança nos indicadores consolidados.", "Criar rotina semanal de saúde dos agentes e alerta automático para filas locais.", 8, "relatorio_executivo", "executive", "teste"),
+            ("Suporte apresentou tendência positiva de foco", "low", "A equipe de suporte reduziu alternância entre base de conhecimento e ferramenta de chamados.", "Manter o fluxo atual e transformar o padrão em referência para outros times.", 6, "tendencia_positiva", "support", "coordenador"),
         ]
         for title, impact, summary, recommendation, hours, insight_type, department_key, login in insights:
+            severity = "critical" if impact == "critical" else "high" if impact == "high" else "medium" if impact == "medium" else "low"
+            role_visibility = ["self"] if login.startswith("operador") else ["hierarchy", "tenant"]
             conn.execute(
                 """
                 insert into public.ai_insights (
@@ -710,7 +718,34 @@ def seed() -> None:
                     recommendation,
                     impact,
                     hours,
-                    Jsonb({"seed": SEED_TAG, "type": insight_type, "scope": department_key, "period": "últimos 7 dias"}),
+                    Jsonb({
+                        "seed": SEED_TAG,
+                        "type": insight_type,
+                        "scope": department_key,
+                        "scopeType": "user" if login.startswith("operador") else "subtree" if login in {"lider", "supervisor", "gerente", "coordenador"} else "tenant",
+                        "period": "últimos 7 dias",
+                        "severity": severity,
+                        "status": "open",
+                        "diagnosis": summary,
+                        "evidence": [
+                            "Eventos operacionais consolidados dos últimos 7 dias",
+                            f"Departamento: {department_key}",
+                            f"Potencial estimado: {hours}h/mês",
+                        ],
+                        "metricsUsed": ["activity_events", "operational_metrics", "devices"],
+                        "affectedUsers": [people_by_login[login]["name"]],
+                        "affectedTeams": [TEAM_BY_DEPARTMENT.get(department_key, department_key)],
+                        "roleVisibility": role_visibility,
+                        "estimatedTimeLoss": hours,
+                        "estimatedCostLoss": hours * 95,
+                        "estimatedSavings": hours * 95,
+                        "suggestedQuestions": [
+                            "Por que isso aconteceu?",
+                            "O que eu faço primeiro?",
+                            "Quanto isso pode custar por mês?",
+                            "Dá para automatizar esse processo?",
+                        ],
+                    }),
                     now - timedelta(hours=len(title) % 9),
                 ),
             )

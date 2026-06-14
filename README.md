@@ -81,7 +81,26 @@ teste / Root Demo
                     └── Operador 3
 ```
 
-O seed cria dispositivos Windows, Linux e macOS, eventos dos ultimos 30 dias, metricas operacionais, insights, notificacoes e auditoria. Leia `docs/DEMO.md`, `docs/DASHBOARD.md`, `docs/METRICS.md`, `docs/HIERARCHY.md` e `docs/QA.md`.
+O seed cria dispositivos Windows, Linux e macOS, eventos dos ultimos 30 dias, metricas operacionais, insights, notificacoes e auditoria. Leia `docs/DEMO.md`, `docs/DASHBOARD.md`, `docs/METRICS.md`, `docs/INSIGHTS.md`, `docs/HIERARCHY.md` e `docs/QA.md`.
+
+## Comando E Metricas
+
+O Vulcan separa acompanhamento rapido de investigacao analitica:
+
+- `Comando`: central executiva enxuta para TV, supervisor e gestao em tempo quase real. Mostra status geral, velocimetro de saude operacional, ate seis KPIs, recomendacao da IA e alertas essenciais.
+- `Metricas`: area profunda para investigar por periodo, equipe, usuario, departamento, cargo, supervisor, dispositivo, sistema operacional, app, categoria, status do agente e tipo de metrica.
+
+Itens criticos do `Comando` abrem `Metricas` ja filtrada. Exportacoes CSV e Excel ficam em `Metricas` e respeitam o recorte atual.
+
+Documentacao:
+
+- `docs/COMMAND_CENTER.md`
+- `docs/METRICS.md`
+- `docs/INSIGHTS.md`
+- `docs/DASHBOARD.md`
+- `docs/EXPORTS.md`
+- `docs/API.md`
+- `docs/QA.md`
 
 ## Hybrid AI Setup
 
@@ -148,6 +167,24 @@ bash ./instalar-vulcan-teste.sh --backend-url "http://localhost:3001" --install-
 ```
 
 See `docs/AGENT.md`, `docs/LINUX_AGENT.md` and `agentes/linux/README.md` for privacy policy flags, logs, uninstall and collection-quality notes for GNOME/Wayland.
+
+## Comandos Finais De Validacao
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
+
+./scripts/bootstrap.sh
+corepack pnpm supabase:validate
+corepack pnpm supabase:migrate
+corepack pnpm seed:demo
+corepack pnpm demo:validate
+corepack pnpm verify:phase2
+corepack pnpm lint
+corepack pnpm typecheck
+corepack pnpm build
+corepack pnpm test
+corepack pnpm dev
+```
 
 ## Venda E Piloto Pago
 

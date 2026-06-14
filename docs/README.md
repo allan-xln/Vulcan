@@ -52,6 +52,11 @@ Vulcan is not a surveillance, espionage, or monitoring product. The agent must n
 - `FRONTEND.md`
 - `SUPABASE.md`
 - `LOCAL_SETUP.md`
+- `COMMAND_CENTER.md`
+- `METRICS.md`
+- `INSIGHTS.md`
+- `DASHBOARD.md`
+- `EXPORTS.md`
 - `NOTIFICATIONS.md`
 - `API.md`
 - `DEPLOY.md`

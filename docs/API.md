@@ -20,9 +20,18 @@ Base service: `backend/api`
 - `GET /activity-events`
 - `POST /activity-events`
 - `GET /metrics`
+- `GET /metrics/detailed`
+- `GET /metrics/export`
 - `GET /operational-metrics`
 - `GET /operational-intelligence`
 - `GET /insights`
+- `GET /insights/{insight_id}`
+- `POST /insights/generate`
+- `POST /insights/{insight_id}/ask`
+- `POST /insights/{insight_id}/send-whatsapp`
+- `POST /insights/{insight_id}/send-email`
+- `POST /insights/{insight_id}/resolve`
+- `POST /insights/{insight_id}/create-action`
 - `GET /notifications`
 - `POST /notifications/test`
 - `POST /notifications/send`
@@ -113,6 +122,86 @@ Eventos ricos aceitos pelo agente:
 - linha do tempo ativa/ociosa;
 - sinais de qualidade da coleta;
 - resumo e recomendações determinísticas no formato de IA operacional.
+
+## Insights Inteligentes
+
+`GET /insights` retorna diagnosticos operacionais ja filtrados pelo tenant e pela hierarquia do usuario autenticado. Operadores recebem apenas seus proprios insights; gestores recebem a subarvore permitida; diretor/admin recebem a visao agregada do tenant.
+
+Campos principais:
+
+- `scopeType`, `scopeId`, `targetUserId`, `targetTeamId` e `targetDepartmentId`;
+- `roleVisibility`;
+- `insightType`;
+- `title`, `summary`, `diagnosis` e `recommendation`;
+- `evidence`, `metricsUsed`, `affectedUsers` e `affectedTeams`;
+- `severity`, `confidence`, `estimatedTimeLoss`, `estimatedCostLoss` e `estimatedSavings`;
+- `sentToWhatsapp`, `sentToEmail`, `whatsappStatus`, `emailStatus` e `lastSentAt`;
+- `suggestedQuestions`, `status` e `actionStatus`.
+
+`POST /insights/generate` gera e persiste um novo insight deterministico a partir de eventos reais no periodo informado (`24h`, `7d` ou `30d`). Quando GPT/Llama estiverem configurados, essa rota pode virar o ponto de orquestracao para enriquecimento por IA.
+
+`POST /insights/{insight_id}/ask` aprofunda um insight dentro do mesmo escopo autorizado. Sem chave de IA real, responde com `aiMode=rules_fallback_explicit`, deixando claro que e fallback de regras.
+
+`POST /insights/{insight_id}/send-whatsapp` e `POST /insights/{insight_id}/send-email` usam os servicos centrais de notificacao e salvam o status de entrega no metadata do insight.
+
+`POST /insights/{insight_id}/create-action` cria um plano de acao vinculado ao insight no metadata atual. Antes do SaaS enterprise self-service, recomenda-se evoluir para uma tabela dedicada de acoes.
+
+Mais detalhes: `docs/INSIGHTS.md`.
+
+## Metricas Detalhadas E Exportacao
+
+`GET /metrics/detailed` retorna ate 1000 eventos operacionais detalhados para a tela `Metricas`.
+
+Parametros:
+
+- `period`: `24h`, `7d`, `30d` ou `90d`;
+- `teamId`;
+- `membershipId`;
+- `deviceId`;
+- `supervisorId`;
+- `department`;
+- `title`;
+- `os`;
+- `category`;
+- `agentStatus`;
+- `metricType`;
+- `app`.
+
+Campos retornados:
+
+- `id`;
+- `tenantId`;
+- `membershipId`;
+- `userName`;
+- `userTitle`;
+- `supervisorId`;
+- `supervisorName`;
+- `teamId`;
+- `teamName`;
+- `department`;
+- `deviceId`;
+- `device`;
+- `os`;
+- `agentStatus`;
+- `app`;
+- `category`;
+- `eventType`;
+- `durationSeconds`;
+- `occurredAt`;
+- `collectionQuality`.
+
+`GET /metrics/export` usa os mesmos filtros e aceita `format=csv` ou `format=excel`. A resposta e um arquivo CSV com BOM UTF-8, metadados de filtro e tabela detalhada.
+
+`metricType` aceita:
+
+- `productive`;
+- `idle`;
+- `context_switch`;
+- `agent`;
+- `improductive`;
+- ou um `event_type` especifico.
+
+Todos os filtros passam pelo contexto autenticado, tenant e hierarquia visivel. Supervisor e usuario sao validados contra o escopo permitido antes da consulta.
 
 ## Ingestion Gateway
 

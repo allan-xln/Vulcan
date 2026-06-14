@@ -45,6 +45,10 @@ from app.schemas import (
     HierarchyNode,
     IntegrationStatus,
     Insight,
+    InsightActionRequest,
+    InsightAskRequest,
+    InsightAskResponse,
+    InsightGenerateRequest,
     LoginRequest,
     LoginResponse,
     Membership,
@@ -481,9 +485,30 @@ def detailed_metrics(
     team_id: UUID | None = Query(default=None, alias="teamId"),
     membership_id: UUID | None = Query(default=None, alias="membershipId"),
     device_id: UUID | None = Query(default=None, alias="deviceId"),
+    supervisor_id: UUID | None = Query(default=None, alias="supervisorId"),
+    department: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    os_name: str | None = Query(default=None, alias="os"),
+    category: str | None = Query(default=None),
+    agent_status: str | None = Query(default=None, alias="agentStatus"),
+    metric_type: str | None = Query(default=None, alias="metricType"),
     app: str | None = Query(default=None),
 ) -> list[MetricsDetailedRow]:
-    rows = repo.list_detailed_metrics(context, period=period, team_id=team_id, membership_id=membership_id, device_id=device_id, app=app)
+    rows = repo.list_detailed_metrics(
+        context,
+        period=period,
+        team_id=team_id,
+        membership_id=membership_id,
+        device_id=device_id,
+        supervisor_id=supervisor_id,
+        department=department,
+        title=title,
+        os_name=os_name,
+        category=category,
+        agent_status=agent_status,
+        metric_type=metric_type,
+        app=app,
+    )
     return [MetricsDetailedRow.model_validate(row) for row in rows]
 
 
@@ -496,11 +521,32 @@ def export_metrics(
     team_id: UUID | None = Query(default=None, alias="teamId"),
     membership_id: UUID | None = Query(default=None, alias="membershipId"),
     device_id: UUID | None = Query(default=None, alias="deviceId"),
+    supervisor_id: UUID | None = Query(default=None, alias="supervisorId"),
+    department: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    os_name: str | None = Query(default=None, alias="os"),
+    category: str | None = Query(default=None),
+    agent_status: str | None = Query(default=None, alias="agentStatus"),
+    metric_type: str | None = Query(default=None, alias="metricType"),
     app: str | None = Query(default=None),
 ) -> Response:
     if format not in {"csv", "excel"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="format must be csv or excel")
-    content = repo.export_metrics_csv(context, period=period, team_id=team_id, membership_id=membership_id, device_id=device_id, app=app)
+    content = repo.export_metrics_csv(
+        context,
+        period=period,
+        team_id=team_id,
+        membership_id=membership_id,
+        device_id=device_id,
+        supervisor_id=supervisor_id,
+        department=department,
+        title=title,
+        os_name=os_name,
+        category=category,
+        agent_status=agent_status,
+        metric_type=metric_type,
+        app=app,
+    )
     filename = "vulcan-metricas.csv" if format == "csv" else "vulcan-metricas-excel.csv"
     return Response(
         content=content,
@@ -517,6 +563,107 @@ def operational_intelligence(context: AuthContext = Authenticated, repo: VulcanR
 @app.get("/insights", response_model=list[Insight])
 def list_insights(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[Insight]:
     return [Insight.model_validate(item) for item in repo.list_insights(context)]
+
+
+@app.get("/insights/{insight_id}", response_model=Insight)
+def get_insight(insight_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Insight:
+    insight = repo.get_insight(context, insight_id)
+    if not insight:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="insight not found")
+    return Insight.model_validate(insight)
+
+
+@app.post("/insights/generate", response_model=Insight)
+def generate_insight(request: InsightGenerateRequest, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Insight:
+    try:
+        return Insight.model_validate(repo.generate_insight(context, request.tenant_id, request.period))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.post("/insights/{insight_id}/ask", response_model=InsightAskResponse)
+def ask_insight(insight_id: UUID, request: InsightAskRequest, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> InsightAskResponse:
+    try:
+        return InsightAskResponse.model_validate(repo.ask_insight(context, insight_id, request.question))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/insights/{insight_id}/send-whatsapp", response_model=Insight)
+def send_insight_whatsapp(insight_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Insight:
+    insight = repo.get_insight(context, insight_id)
+    if not insight:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="insight not found")
+    service = WhatsAppNotificationService()
+    delivery = service.send_alert(
+        str(insight["tenantId"]),
+        insight["title"],
+        f"{insight['summary']}\n\nAção recomendada: {insight['recommendation']}",
+    )
+    updated = repo.update_insight_metadata(
+        context,
+        insight_id,
+        {
+            "sentToWhatsapp": delivery.ok,
+            "whatsappStatus": delivery.status,
+            "lastSentAt": datetime.now(timezone.utc).isoformat(),
+            "recipients": [delivery.provider_result],
+            "lastWhatsappResult": delivery.provider_result,
+        },
+        "insight.sent_whatsapp",
+    )
+    return Insight.model_validate(updated or insight)
+
+
+@app.post("/insights/{insight_id}/send-email", response_model=Insight)
+def send_insight_email(insight_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Insight:
+    insight = repo.get_insight(context, insight_id)
+    if not insight:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="insight not found")
+    service = EmailNotificationService()
+    delivery = service.send_test(
+        None,
+        insight["title"],
+        f"{insight['summary']}\n\nAção recomendada: {insight['recommendation']}",
+    )
+    updated = repo.update_insight_metadata(
+        context,
+        insight_id,
+        {
+            "sentToEmail": delivery.ok,
+            "emailStatus": delivery.status,
+            "lastSentAt": datetime.now(timezone.utc).isoformat(),
+            "lastEmailResult": delivery.provider_result,
+        },
+        "insight.sent_email",
+    )
+    return Insight.model_validate(updated or insight)
+
+
+@app.post("/insights/{insight_id}/resolve", response_model=Insight)
+def resolve_insight(insight_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Insight:
+    updated = repo.update_insight_metadata(context, insight_id, {"status": "resolved"}, "insight.resolved")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="insight not found")
+    return Insight.model_validate(updated)
+
+
+@app.post("/insights/{insight_id}/create-action", response_model=Insight)
+def create_insight_action(insight_id: UUID, request: InsightActionRequest, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Insight:
+    updated = repo.create_insight_action(
+        context,
+        insight_id,
+        {
+            "title": request.title,
+            "owner_membership_id": request.owner_membership_id,
+            "priority": request.priority,
+            "due_date": request.due_date,
+            "note": request.note,
+        },
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="insight not found")
+    return Insight.model_validate(updated)
 
 
 @app.get("/notifications", response_model=list[Notification])
