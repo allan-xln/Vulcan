@@ -2667,13 +2667,13 @@ function CommandOverlay({
     <AnimatePresence>
       {open ? (
         <motion.div
-          className="fixed inset-0 z-50 bg-black/78 p-4 backdrop-blur-xl md:p-8"
+          className="fixed inset-0 z-50 overflow-hidden bg-black/78 p-4 backdrop-blur-xl md:p-8"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="mx-auto flex h-full max-w-6xl flex-col border border-orange-400/20 bg-zinc-950/88 p-4 shadow-[0_0_48px_rgba(249,115,22,0.10)] md:p-6"
+            className="mx-auto flex h-full max-w-[76rem] flex-col overflow-hidden border border-orange-400/20 bg-zinc-950/88 p-4 shadow-[0_0_48px_rgba(249,115,22,0.10)] md:p-6"
             initial={{ scale: 0.96, y: 20, filter: "blur(10px)" }}
             animate={{ scale: 1, y: 0, filter: "blur(0px)" }}
             exit={{ scale: 0.98, y: 18, filter: "blur(8px)" }}
@@ -2700,7 +2700,7 @@ function CommandOverlay({
               </motion.button>
             </div>
 
-            <div className="grid flex-1 auto-rows-fr gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid min-h-0 flex-1 auto-rows-fr gap-3 overflow-hidden p-2 md:grid-cols-2 xl:grid-cols-3">
               {commands.map((command, index) => {
                 const Icon = command.icon;
                 const active = activeView === command.key;
@@ -2709,7 +2709,7 @@ function CommandOverlay({
                     key={command.key}
                     type="button"
                     onClick={() => setView(command.key)}
-                    className={`group relative min-h-40 overflow-hidden border p-5 text-left transition ${
+                    className={`group relative min-h-36 overflow-hidden border p-5 text-left transition will-change-transform md:min-h-40 ${
                       active
                         ? "border-orange-300 bg-orange-500 text-black shadow-[0_0_24px_rgba(249,115,22,0.18)]"
                         : "border-zinc-800 bg-black/48 text-zinc-100 hover:border-orange-400/60 hover:bg-zinc-950"
@@ -2717,7 +2717,7 @@ function CommandOverlay({
                     initial={{ y: 28, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: index * 0.045 }}
-                    whileHover={{ y: -5, scale: 1.015 }}
+                    whileHover={{ y: -5, scale: 1.012 }}
                     whileTap={{ scale: 0.985 }}
                   >
                     <motion.div
