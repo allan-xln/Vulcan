@@ -22,6 +22,9 @@ def load_env() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
         os.environ.setdefault(key, value)
 
 
@@ -751,16 +754,31 @@ def seed() -> None:
             )
 
         notification_types = [
-            "resumo_diario",
-            "resumo_semanal",
-            "gargalo_detectado",
-            "oportunidade_automacao",
-            "queda_produtividade",
-            "anomalia_operacional",
-            "insight_executivo",
-            "alerta_critico",
             "agente_offline",
             "agente_online",
+            "fila_offline_alta",
+            "falha_sincronizacao",
+            "dispositivo_aguardando_adocao",
+            "coleta_limitada",
+            "gargalo_operacional",
+            "ociosidade_elevada",
+            "troca_contexto_excessiva",
+            "queda_produtividade",
+            "insight_critico",
+            "insight_executivo",
+            "oportunidade_automacao",
+            "relatorio_diario",
+            "relatorio_semanal",
+            "relatorio_mensal",
+            "falha_whatsapp",
+            "falha_email",
+            "falha_ia",
+            "seguranca_lgpd",
+            "usuario_sem_equipe",
+            "usuario_sem_gestor",
+            "metrica_fora_padrao",
+            "acao_pendente",
+            "acao_vencida",
         ]
         for person in PEOPLE:
             for channel in ["system", "email", "whatsapp", "windows"]:
@@ -772,17 +790,121 @@ def seed() -> None:
                         on conflict (tenant_id, membership_id, channel, notification_type) do update
                         set enabled = true, updated_at = timezone('utc', now())
                         """,
-                        (DEMO_TENANT_ID, person["membership_id"], channel, notification_type, Jsonb({"start": "22:00", "end": "07:00"})),
+                        (
+                            DEMO_TENANT_ID,
+                            person["membership_id"],
+                            channel,
+                            notification_type,
+                            Jsonb({
+                                "start": "22:00",
+                                "end": "07:00",
+                                "timezone": "America/Sao_Paulo",
+                                "frequency": "imediato" if notification_type in {"agente_offline", "insight_critico", "falha_sincronizacao", "falha_whatsapp", "falha_email"} else "resumo_diario",
+                                "businessHoursOnly": notification_type not in {"insight_critico", "seguranca_lgpd"},
+                            }),
+                        ),
                     )
 
         notifications = [
-            ("system", "sent", "Gargalo detectado", "ERP Billing concentrou sessões longas no Financeiro.", "gargalo_detectado", "gerente"),
-            ("whatsapp", "missing_credentials", "Insight executivo", "18 horas semanais de automação potencial foram detectadas.", "insight_executivo", "diretor"),
-            ("email", "queued", "Resumo operacional diário", "Resumo pronto para envio aos gestores.", "resumo_diario", "coordenador"),
-            ("windows", "mocked", "Agente offline", "LINUX-SUPORTE-001 está sem sincronização recente.", "agente_offline", "operador3"),
-            ("system", "sent", "Queda de produtividade", "Operador 2 apresentou aumento de ociosidade após 15h.", "queda_produtividade", "supervisor"),
+            {
+                "channel": "system",
+                "db_status": "sent",
+                "delivery": "delivered",
+                "title": "Insight crítico gerado",
+                "message": "Financeiro concentrou troca de contexto acima do normal entre ERP, Excel e WhatsApp Web.",
+                "type": "insight_critico",
+                "login": "gerente",
+                "priority": "critico",
+                "attempts": 1,
+                "error": None,
+            },
+            {
+                "channel": "whatsapp",
+                "db_status": "missing_credentials",
+                "delivery": "missing_credentials",
+                "title": "WhatsApp pendente de credencial",
+                "message": "Canal raiz Vulcan está configurado no produto, mas ainda precisa de token/provedor para envio real.",
+                "type": "falha_whatsapp",
+                "login": "teste",
+                "priority": "alto",
+                "attempts": 1,
+                "error": "WHATSAPP_ACCESS_TOKEN não configurado",
+            },
+            {
+                "channel": "email",
+                "db_status": "queued",
+                "delivery": "queued",
+                "title": "Resumo operacional diário",
+                "message": "Resumo executivo pronto para envio aos gestores às 08:00.",
+                "type": "relatorio_diario",
+                "login": "coordenador",
+                "priority": "informativo",
+                "attempts": 0,
+                "error": None,
+            },
+            {
+                "channel": "windows",
+                "db_status": "mocked",
+                "delivery": "mocked",
+                "title": "Agente requer atenção",
+                "message": "LINUX-SUPORTE-001 acumulou fila offline e precisa validar conectividade.",
+                "type": "fila_offline_alta",
+                "login": "operador3",
+                "priority": "alto",
+                "attempts": 0,
+                "error": None,
+            },
+            {
+                "channel": "system",
+                "db_status": "sent",
+                "delivery": "sent",
+                "title": "Dispositivo aguardando adoção",
+                "message": "WIN-NOVO-001 apareceu na rede e precisa ser vinculado a usuário/equipe.",
+                "type": "dispositivo_aguardando_adocao",
+                "login": "teste",
+                "priority": "medio",
+                "attempts": 1,
+                "error": None,
+            },
+            {
+                "channel": "email",
+                "db_status": "failed",
+                "delivery": "failed",
+                "title": "Falha no envio de e-mail",
+                "message": "SMTP ainda não possui credenciais válidas para envio de relatório semanal.",
+                "type": "falha_email",
+                "login": "teste",
+                "priority": "alto",
+                "attempts": 3,
+                "error": "SMTP_HOST/SMTP_PASS ausentes",
+            },
+            {
+                "channel": "system",
+                "db_status": "queued",
+                "delivery": "retrying",
+                "title": "Ação operacional vencendo",
+                "message": "Plano de ação do gargalo no faturamento vence hoje e aguarda retorno do supervisor.",
+                "type": "acao_pendente",
+                "login": "supervisor",
+                "priority": "medio",
+                "attempts": 2,
+                "error": None,
+            },
+            {
+                "channel": "whatsapp",
+                "db_status": "mocked",
+                "delivery": "mocked",
+                "title": "Simulação WhatsApp: automação sugerida",
+                "message": "Automação de conferência recorrente pode economizar 34h/mês no Financeiro.",
+                "type": "oportunidade_automacao",
+                "login": "diretor",
+                "priority": "alto",
+                "attempts": 1,
+                "error": None,
+            },
         ]
-        for index, (channel, status, title, message, notification_type, login) in enumerate(notifications, start=1):
+        for index, item in enumerate(notifications, start=1):
+            sent_at = now - timedelta(minutes=index * 9) if item["db_status"] in {"sent", "mocked"} else None
             conn.execute(
                 """
                 insert into public.notifications (
@@ -793,15 +915,98 @@ def seed() -> None:
                 """,
                 (
                     DEMO_TENANT_ID,
-                    people_by_login[login]["membership_id"],
-                    channel,
-                    notification_type,
-                    status,
-                    title,
-                    message,
-                    now - timedelta(minutes=index * 9) if status == "sent" else None,
-                    Jsonb({"seed": SEED_TAG, "attempts": 1 if status in {"queued", "missing_credentials"} else 0}),
+                    people_by_login[item["login"]]["membership_id"],
+                    item["channel"],
+                    item["type"],
+                    item["db_status"],
+                    item["title"],
+                    item["message"],
+                    sent_at,
+                    Jsonb({"seed": SEED_TAG}),
                     now - timedelta(minutes=index * 12),
+                ),
+            )
+
+        for index, item in enumerate(notifications, start=1):
+            conn.execute(
+                """
+                update public.notifications
+                set metadata = metadata || %s
+                where tenant_id = %s
+                  and title = %s
+                  and metadata ->> 'seed' = %s
+                """,
+                (
+                    Jsonb({
+                        "priority": item["priority"],
+                        "deliveryStatus": item["delivery"],
+                        "attempts": item["attempts"],
+                        "maxAttempts": 3,
+                        "lastError": item["error"],
+                        "requiresAck": item["priority"] in {"alto", "critico"},
+                        "scheduledFor": (now + timedelta(hours=2)).isoformat() if item["delivery"] == "queued" else None,
+                        "readAt": (now - timedelta(minutes=4)).isoformat() if item["delivery"] in {"sent", "delivered"} else None,
+                        "resolvedAt": None,
+                        "actionUrl": "http://localhost:3002",
+                    }),
+                    DEMO_TENANT_ID,
+                    item["title"],
+                    SEED_TAG,
+                ),
+            )
+
+        notification_schedules = [
+            {
+                "name": "Resumo operacional diário",
+                "recurrence": "diário",
+                "timezone": "America/Sao_Paulo",
+                "daysOfWeek": ["seg", "ter", "qua", "qui", "sex"],
+                "times": ["08:00"],
+                "reportType": "daily",
+                "recipients": ["diretor", "coordenador", "gerente"],
+                "channels": ["system", "email"],
+                "enabled": True,
+            },
+            {
+                "name": "Alertas críticos em tempo real",
+                "recurrence": "imediato",
+                "timezone": "America/Sao_Paulo",
+                "daysOfWeek": [],
+                "times": ["tempo real"],
+                "reportType": "critical",
+                "recipients": ["gestores no escopo"],
+                "channels": ["system", "whatsapp"],
+                "enabled": True,
+            },
+            {
+                "name": "Relatório executivo semanal",
+                "recurrence": "semanal",
+                "timezone": "America/Sao_Paulo",
+                "daysOfWeek": ["seg"],
+                "times": ["07:30"],
+                "reportType": "weekly",
+                "recipients": ["diretoria"],
+                "channels": ["email"],
+                "enabled": True,
+            },
+        ]
+        for schedule in notification_schedules:
+            conn.execute(
+                """
+                insert into public.notifications (
+                  tenant_id, recipient_membership_id, channel, notification_type,
+                  status, title, message, provider, metadata, created_at
+                )
+                values (%s, %s, 'system', 'schedule_config', %s, %s, %s, 'vulcan-scheduler', %s, %s)
+                """,
+                (
+                    DEMO_TENANT_ID,
+                    people_by_login["teste"]["membership_id"],
+                    "queued" if schedule["enabled"] else "disabled",
+                    schedule["name"],
+                    f"Agendamento {schedule['recurrence']} configurado para {', '.join(schedule['channels'])}.",
+                    Jsonb({**schedule, "seed": SEED_TAG, "deliveryStatus": "queued", "priority": "informativo"}),
+                    now - timedelta(minutes=5),
                 ),
             )
 

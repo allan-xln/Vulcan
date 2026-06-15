@@ -33,11 +33,26 @@ Base service: `backend/api`
 - `POST /insights/{insight_id}/resolve`
 - `POST /insights/{insight_id}/create-action`
 - `GET /notifications`
+- `GET /notifications/summary`
+- `GET /notifications/{notification_id}`
 - `POST /notifications/test`
 - `POST /notifications/send`
+- `POST /notifications/{notification_id}/retry`
+- `POST /notifications/{notification_id}/cancel`
+- `POST /notifications/{notification_id}/mark-read`
+- `POST /notifications/{notification_id}/resolve`
+- `GET /notification-types`
 - `GET /notifications/preferences`
 - `PUT /notifications/preferences/{preference_id}`
 - `GET /notifications/schedules`
+- `POST /notification-schedules`
+- `PUT /notification-schedules/{schedule_id}`
+- `DELETE /notification-schedules/{schedule_id}`
+- `POST /notification-schedules/{schedule_id}/pause`
+- `POST /notification-schedules/{schedule_id}/resume`
+- `GET /notification-templates`
+- `POST /notification-templates/{template_id}/preview`
+- `POST /notification-templates/{template_id}/test`
 - `GET /reports/templates`
 - `GET /integrations/whatsapp/status`
 - `POST /integrations/whatsapp/test`
@@ -147,6 +162,24 @@ Campos principais:
 `POST /insights/{insight_id}/create-action` cria um plano de acao vinculado ao insight no metadata atual. Antes do SaaS enterprise self-service, recomenda-se evoluir para uma tabela dedicada de acoes.
 
 Mais detalhes: `docs/INSIGHTS.md`.
+
+## Notificacoes
+
+`GET /notifications` retorna historico, fila, tentativas, erro legivel, prioridade e status de entrega ja filtrados por tenant e hierarquia.
+
+`GET /notifications/summary` retorna contadores para a central: pendentes, enviadas, falhas, criticas, nao lidas, canais e prioridades.
+
+`GET /notification-types` retorna os 25 tipos operacionais padrao com prioridade, canais permitidos, audiencia e possibilidade de desativacao.
+
+`GET /notification-templates` retorna os templates centrais. `POST /notification-templates/{template_id}/preview` renderiza variaveis sem disparar envio.
+
+`POST /notifications/test` e `POST /notifications/send` usam `NotificationService` e gravam o resultado em `notifications`. Sem credenciais reais, o status fica explicito: `mocked`, `missing_credentials`, `missing_destination`, `failed` ou equivalente.
+
+`POST /notifications/{notification_id}/retry` tenta reenviar pelo provider configurado e incrementa tentativas. `cancel`, `mark-read` e `resolve` atualizam metadata com auditoria.
+
+`GET /notifications/schedules` le agendamentos persistidos em `notifications` com `notification_type='schedule_config'`; se nao houver registros, devolve defaults comerciais. Endpoints `POST/PUT/DELETE/pause/resume` persistem a configuracao no mesmo modelo de compatibilidade.
+
+Mais detalhes: `docs/NOTIFICATIONS.md`, `docs/WHATSAPP.md`, `docs/EMAIL.md` e `docs/AGENT_NOTIFICATIONS.md`.
 
 ## Metricas Detalhadas E Exportacao
 

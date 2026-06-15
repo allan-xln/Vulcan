@@ -544,15 +544,57 @@ class Notification(ApiModel):
     id: str
     tenant_id: UUID | None = Field(default=None, alias="tenantId")
     channel: Literal["system", "push", "windows", "whatsapp", "email"]
-    status: Literal["queued", "sent", "failed", "ready", "mocked", "missing_credentials", "disabled"]
+    status: Literal["pending", "queued", "sending", "sent", "delivered", "failed", "cancelled", "skipped", "retrying", "ready", "mocked", "missing_credentials", "missing_destination", "unknown_provider", "disabled", "resolved"]
     title: str
     message: str
     recipient: str | None = None
     recipient_membership_id: UUID | None = Field(default=None, alias="recipientMembershipId")
     notification_type: str | None = Field(default=None, alias="notificationType")
+    priority: Literal["informativo", "baixo", "medio", "alto", "critico"] = "medio"
     attempts: int = 0
+    max_attempts: int = Field(default=3, alias="maxAttempts")
     error: str | None = None
+    provider: str | None = None
+    provider_message_id: str | None = Field(default=None, alias="providerMessageId")
+    scheduled_for: datetime | None = Field(default=None, alias="scheduledFor")
+    sent_at: datetime | None = Field(default=None, alias="sentAt")
+    delivered_at: datetime | None = Field(default=None, alias="deliveredAt")
+    read_at: datetime | None = Field(default=None, alias="readAt")
+    resolved_at: datetime | None = Field(default=None, alias="resolvedAt")
+    action_url: str | None = Field(default=None, alias="actionUrl")
+    requires_ack: bool = Field(default=False, alias="requiresAck")
     created_at: str = Field(alias="createdAt")
+
+
+class NotificationSummary(ApiModel):
+    total: int
+    pending: int
+    sent: int
+    failed: int
+    critical: int
+    unread: int
+    whatsapp_ready: bool = Field(alias="whatsappReady")
+    email_ready: bool = Field(alias="emailReady")
+    agent_ready: bool = Field(alias="agentReady")
+    next_schedule_at: str | None = Field(default=None, alias="nextScheduleAt")
+    by_channel: dict[str, int] = Field(default_factory=dict, alias="byChannel")
+    by_status: dict[str, int] = Field(default_factory=dict, alias="byStatus")
+    by_priority: dict[str, int] = Field(default_factory=dict, alias="byPriority")
+
+
+class NotificationTypeDefinition(ApiModel):
+    id: str
+    name: str
+    description: str
+    default_priority: str = Field(alias="defaultPriority")
+    allowed_channels: list[str] = Field(alias="allowedChannels")
+    default_audience: str = Field(alias="defaultAudience")
+    default_frequency: str = Field(alias="defaultFrequency")
+    template: str
+    can_disable: bool = Field(alias="canDisable")
+    requires_permission: bool = Field(alias="requiresPermission")
+    critical: bool
+    enabled: bool = True
 
 
 class NotificationPreference(ApiModel):
@@ -562,19 +604,29 @@ class NotificationPreference(ApiModel):
     channel: Literal["system", "push", "windows", "whatsapp", "email"]
     notification_type: str = Field(alias="notificationType")
     enabled: bool
+    quiet_hours: dict[str, Any] = Field(default_factory=dict, alias="quietHours")
+    frequency: str = "imediato"
 
 
 class NotificationPreferenceUpdate(BaseModel):
-    enabled: bool
+    enabled: bool | None = None
+    quiet_hours: dict[str, Any] | None = Field(default=None, alias="quietHours")
+    frequency: str | None = None
 
 
 class NotificationSendRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     tenant_id: UUID = Field(alias="tenantId")
     channel: Literal["system", "push", "windows", "whatsapp", "email"]
     notification_type: str = Field(alias="notificationType")
     title: str
     message: str
     recipient_membership_id: UUID | None = Field(default=None, alias="recipientMembershipId")
+    destination: str | None = None
+    priority: str = "medio"
+    scheduled_for: datetime | None = Field(default=None, alias="scheduledFor")
+    action_url: str | None = Field(default=None, alias="actionUrl")
 
 
 class NotificationSendResponse(ApiModel):
@@ -582,6 +634,50 @@ class NotificationSendResponse(ApiModel):
     channel: str
     status: str
     provider_result: str = Field(alias="providerResult")
+
+
+class NotificationActionResponse(ApiModel):
+    id: str
+    status: str
+    message: str
+
+
+class NotificationScheduleCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    recurrence: str
+    timezone: str = "America/Sao_Paulo"
+    days_of_week: list[str] = Field(default_factory=list, alias="daysOfWeek")
+    times: list[str] = Field(default_factory=lambda: ["08:00"])
+    report_type: str = Field(default="operational_summary", alias="reportType")
+    recipients: list[str] = Field(default_factory=list)
+    channels: list[str] = Field(default_factory=lambda: ["system"])
+    enabled: bool = True
+
+
+class NotificationTemplate(ApiModel):
+    id: str
+    channel: Literal["system", "push", "windows", "whatsapp", "email"]
+    notification_type: str = Field(alias="notificationType")
+    title: str
+    body: str
+    variables: list[str]
+    language: str = "pt-BR"
+    version: int = 1
+    active: bool = True
+
+
+class NotificationTemplatePreviewRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    variables: dict[str, Any] = Field(default_factory=dict)
+
+
+class NotificationTemplatePreviewResponse(ApiModel):
+    title: str
+    body: str
+    variables_used: dict[str, Any] = Field(alias="variablesUsed")
 
 
 class ConnectionTestRequest(BaseModel):

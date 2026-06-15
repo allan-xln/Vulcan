@@ -1,59 +1,79 @@
 # WhatsApp
 
-## Architecture
+O Vulcan possui canal WhatsApp proprio. Ele pode se inspirar em conceitos do LanChat, mas nao altera arquivos, banco ou secrets do LanChat.
 
-Vulcan owns its WhatsApp notification channel. It must not depend on LanChat database tables and must not modify LanChat.
-
-The LanChat logic can inspire provider behavior, but Vulcan keeps its own configuration, logs and delivery model.
-
-## Root Channel
+## Canal Raiz
 
 ```env
 ROOT_WHATSAPP_ENABLED=true
-ROOT_WHATSAPP_PROVIDER=lanchat
+ROOT_WHATSAPP_PROVIDER=
 ROOT_WHATSAPP_NUMBER=5541984166423
 ROOT_WHATSAPP_NAME=Vulcan Notifications
 ```
 
-Do not hardcode the number outside configuration.
+Numero inicial: `+55 41 98416-6423`.
 
-## Recipients
+Esse numero deve permanecer centralizado em configuracao. Nao hardcodar em telas, seed ou servicos fora da camada de config/env.
 
-Recipients are configured per tenant and user preference:
+## Credenciais De Producao
 
-- owner;
-- director;
-- coordinator;
-- manager;
-- supervisor;
-- team lead;
-- custom recipients.
+```env
+WHATSAPP_PROVIDER=
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_BUSINESS_ACCOUNT_ID=
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=
+```
 
-## Schedules
+Sem credenciais, o provider deve responder `missing_credentials` ou `mocked`. Nunca apresentar isso como envio real.
 
-Supported schedule model:
+## Destinatarios
 
-- immediate;
-- daily;
-- twice a day;
-- weekly;
-- twice a week;
-- monthly;
-- twice a month;
-- custom timezone, time and weekday.
+Destinatarios podem ser definidos por:
 
-## Test Flow
+- tenant;
+- usuario;
+- equipe;
+- cargo/perfil;
+- hierarquia;
+- destinatario customizado com permissao.
 
-1. Configure root channel env vars.
-2. Configure tenant recipients.
-3. Run API.
-4. Login as admin.
-5. Open settings/integrations.
-6. Send a test message.
-7. Review notification logs.
+O envio deve respeitar a subarvore do usuario autenticado. Operador nao envia dado de equipe. Supervisor envia apenas para sua equipe/subarvore. Diretor/admin opera no tenant inteiro.
 
-## Production Gaps
+## Tipos Recomendados Para WhatsApp
 
-- Provider credentials and webhook verification must be finalized.
-- Retry/dead-letter queue should be backed by a durable queue.
-- Delivery receipts should update notification status.
+- insight critico;
+- agente offline por mais de X minutos;
+- fila offline alta;
+- falha de sincronizacao;
+- falha de integracao;
+- gargalo operacional critico;
+- oportunidade de automacao de alto impacto;
+- relatorio executivo agendado.
+
+Informativos leves devem ficar no sistema ou em resumo diario, para nao gerar ruido.
+
+## Teste
+
+1. Configure as variaveis raiz.
+2. Configure provider/token real ou deixe em mock explicito.
+3. Rode backend e frontend.
+4. Login `teste/teste`.
+5. Abra Notificacoes.
+6. Clique em `Testar WhatsApp`.
+7. Verifique status em Historico e logs.
+
+Status esperados:
+
+- `sent`/`delivered`: envio real ou confirmado pelo provider;
+- `mocked`: simulacao assumida;
+- `missing_credentials`: credencial pendente;
+- `failed`: provider respondeu erro;
+- `queued`/`retrying`: fila ou retentativa.
+
+## Pendencias Para Producao Total
+
+- Definir provider final: WhatsApp Business API, gateway homologado ou sessao local controlada.
+- Implementar webhooks de entrega/leitura.
+- Criar tabela dedicada de tentativas/receipts para alto volume.
+- Validar templates aprovados quando usar API oficial.

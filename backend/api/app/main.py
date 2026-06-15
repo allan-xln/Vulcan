@@ -59,11 +59,18 @@ from app.schemas import (
     Metric,
     MetricsDetailedRow,
     Notification,
+    NotificationActionResponse,
     NotificationPreference,
     NotificationPreferenceUpdate,
+    NotificationScheduleCreate,
     NotificationSendRequest,
     NotificationSendResponse,
     NotificationSchedule,
+    NotificationSummary,
+    NotificationTemplate,
+    NotificationTemplatePreviewRequest,
+    NotificationTemplatePreviewResponse,
+    NotificationTypeDefinition,
     OperationalIntelligence,
     OperationalMetric,
     ReportTemplate,
@@ -677,6 +684,11 @@ def list_notifications(context: AuthContext = Authenticated, repo: VulcanReposit
     return [Notification.model_validate(item) for item in repo.list_notifications(context)]
 
 
+@app.get("/notifications/summary", response_model=NotificationSummary)
+def notification_summary(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationSummary:
+    return NotificationSummary.model_validate(repo.notification_summary(context))
+
+
 @app.post("/notifications/test", response_model=NotificationSendResponse)
 def test_notification(
     request: NotificationSendRequest,
@@ -684,7 +696,7 @@ def test_notification(
     repo: VulcanRepository = Depends(repository),
 ) -> NotificationSendResponse:
     service = NotificationService()
-    delivery = service.send(request.channel, NotificationPayload(title=request.title, message=request.message, tenant_id=str(request.tenant_id)))
+    delivery = service.send(request.channel, NotificationPayload(title=request.title, message=request.message, tenant_id=str(request.tenant_id), destination=request.destination))
     try:
         return repo.create_notification_record(context, request, delivery.status, delivery.provider_result)
     except ValueError as exc:
@@ -698,11 +710,48 @@ def send_notification(
     repo: VulcanRepository = Depends(repository),
 ) -> NotificationSendResponse:
     service = NotificationService()
-    delivery = service.send(request.channel, NotificationPayload(title=request.title, message=request.message, tenant_id=str(request.tenant_id)))
+    delivery = service.send(request.channel, NotificationPayload(title=request.title, message=request.message, tenant_id=str(request.tenant_id), destination=request.destination))
     try:
         return repo.create_notification_record(context, request, delivery.status, delivery.provider_result)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.post("/notifications/{notification_id}/retry", response_model=Notification)
+def retry_notification(notification_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Notification:
+    updated = repo.retry_notification(context, notification_id)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notification not found")
+    return Notification.model_validate(updated)
+
+
+@app.post("/notifications/{notification_id}/cancel", response_model=NotificationActionResponse)
+def cancel_notification(notification_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationActionResponse:
+    updated = repo._patch_notification_metadata(context, notification_id, {"deliveryStatus": "cancelled", "cancelledAt": datetime.now(timezone.utc).isoformat()}, "notification.cancelled", "disabled")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notification not found")
+    return NotificationActionResponse(id=str(notification_id), status="cancelled", message="Notificação cancelada.")
+
+
+@app.post("/notifications/{notification_id}/mark-read", response_model=NotificationActionResponse)
+def mark_notification_read(notification_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationActionResponse:
+    updated = repo._patch_notification_metadata(context, notification_id, {"readAt": datetime.now(timezone.utc).isoformat()}, "notification.read")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notification not found")
+    return NotificationActionResponse(id=str(notification_id), status="read", message="Notificação marcada como lida.")
+
+
+@app.post("/notifications/{notification_id}/resolve", response_model=NotificationActionResponse)
+def resolve_notification(notification_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationActionResponse:
+    updated = repo._patch_notification_metadata(context, notification_id, {"deliveryStatus": "resolved", "resolvedAt": datetime.now(timezone.utc).isoformat()}, "notification.resolved")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notification not found")
+    return NotificationActionResponse(id=str(notification_id), status="resolved", message="Notificação resolvida.")
+
+
+@app.get("/notification-types", response_model=list[NotificationTypeDefinition])
+def notification_types(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[NotificationTypeDefinition]:
+    return [NotificationTypeDefinition.model_validate(item) for item in repo.list_notification_types(context)]
 
 
 @app.get("/integrations/whatsapp/status", response_model=WhatsAppStatus)
@@ -787,45 +836,76 @@ def integrations_status(context: AuthContext = Authenticated) -> list[Integratio
 
 
 @app.get("/notifications/schedules", response_model=list[NotificationSchedule])
-def notification_schedules(context: AuthContext = Authenticated) -> list[NotificationSchedule]:
-    return [
-        NotificationSchedule(
-            id="imediato-alertas",
-            name="Alertas críticos em tempo real",
-            recurrence="Imediatamente",
-            timezone="America/Sao_Paulo",
-            daysOfWeek=["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"],
-            times=["tempo real"],
-            reportType="alerta_tempo_real",
-            recipients=["Supervisor", "Gerente", "Diretor"],
-            channels=["sistema", "windows", "whatsapp", "email"],
-            enabled=True,
-        ),
-        NotificationSchedule(
-            id="resumo-diario",
-            name="Resumo operacional diário",
-            recurrence="Diário",
-            timezone="America/Sao_Paulo",
-            daysOfWeek=["segunda", "terça", "quarta", "quinta", "sexta"],
-            times=["08:00", "18:00"],
-            reportType="resumo_operacional_diario",
-            recipients=["Gerente", "Coordenador"],
-            channels=["whatsapp", "email"],
-            enabled=True,
-        ),
-        NotificationSchedule(
-            id="executivo-semanal",
-            name="Resumo executivo semanal",
-            recurrence="Semanal",
-            timezone="America/Sao_Paulo",
-            daysOfWeek=["segunda"],
-            times=["07:30"],
-            reportType="resumo_executivo_semanal",
-            recipients=["Diretor", "Dono da empresa"],
-            channels=["whatsapp", "email"],
-            enabled=True,
-        ),
-    ]
+def notification_schedules(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[NotificationSchedule]:
+    return [NotificationSchedule.model_validate(item) for item in repo.list_notification_schedules(context)]
+
+
+@app.post("/notification-schedules", response_model=NotificationSchedule)
+def create_notification_schedule(request: NotificationScheduleCreate, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationSchedule:
+    return NotificationSchedule.model_validate(repo.create_notification_schedule(context, request))
+
+
+@app.put("/notification-schedules/{schedule_id}", response_model=NotificationActionResponse)
+def update_notification_schedule(schedule_id: UUID, request: NotificationScheduleCreate, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationActionResponse:
+    updated = repo.update_notification_schedule(context, schedule_id, request.model_dump(by_alias=True))
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
+    return NotificationActionResponse(id=str(schedule_id), status="updated", message="Agendamento atualizado.")
+
+
+@app.delete("/notification-schedules/{schedule_id}", response_model=NotificationActionResponse)
+def delete_notification_schedule(schedule_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationActionResponse:
+    updated = repo._patch_notification_metadata(context, schedule_id, {"enabled": False, "deliveryStatus": "cancelled"}, "notification_schedule.deleted", "disabled")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
+    return NotificationActionResponse(id=str(schedule_id), status="deleted", message="Agendamento desativado.")
+
+
+@app.post("/notification-schedules/{schedule_id}/pause", response_model=NotificationActionResponse)
+def pause_notification_schedule(schedule_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationActionResponse:
+    updated = repo._patch_notification_metadata(context, schedule_id, {"enabled": False}, "notification_schedule.paused", "disabled")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
+    return NotificationActionResponse(id=str(schedule_id), status="paused", message="Agendamento pausado.")
+
+
+@app.post("/notification-schedules/{schedule_id}/resume", response_model=NotificationActionResponse)
+def resume_notification_schedule(schedule_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationActionResponse:
+    updated = repo._patch_notification_metadata(context, schedule_id, {"enabled": True, "deliveryStatus": "queued"}, "notification_schedule.resumed", "queued")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
+    return NotificationActionResponse(id=str(schedule_id), status="resumed", message="Agendamento reativado.")
+
+
+@app.get("/notification-templates", response_model=list[NotificationTemplate])
+def notification_templates(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[NotificationTemplate]:
+    return [NotificationTemplate.model_validate(item) for item in repo.list_notification_templates(context)]
+
+
+@app.post("/notification-templates/{template_id}/preview", response_model=NotificationTemplatePreviewResponse)
+def preview_notification_template(template_id: str, request: NotificationTemplatePreviewRequest, repo: VulcanRepository = Depends(repository)) -> NotificationTemplatePreviewResponse:
+    preview = repo.preview_notification_template(template_id, request.variables)
+    if not preview:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="template not found")
+    return NotificationTemplatePreviewResponse.model_validate(preview)
+
+
+@app.post("/notification-templates/{template_id}/test", response_model=NotificationSendResponse)
+def test_notification_template(template_id: str, request: NotificationTemplatePreviewRequest, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> NotificationSendResponse:
+    preview = repo.preview_notification_template(template_id, request.variables)
+    template = next((item for item in repo.list_notification_templates(context) if item["id"] == template_id), None)
+    if not preview or not template:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="template not found")
+    send_request = NotificationSendRequest(
+        tenantId=context.tenant_id,
+        channel=template["channel"],
+        notificationType=template["notificationType"],
+        title=preview["title"],
+        message=preview["body"],
+        priority="medio",
+    )
+    delivery = NotificationService().send(send_request.channel, NotificationPayload(title=send_request.title, message=send_request.message, tenant_id=str(send_request.tenant_id)))
+    return repo.create_notification_record(context, send_request, delivery.status, delivery.provider_result)
 
 
 @app.get("/reports/templates", response_model=list[ReportTemplate])
@@ -874,6 +954,14 @@ def list_notification_preferences(
     return [NotificationPreference.model_validate(item) for item in repo.list_notification_preferences(context)]
 
 
+@app.get("/notifications/{notification_id}", response_model=Notification)
+def get_notification(notification_id: UUID, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> Notification:
+    notification = repo.get_notification(context, notification_id)
+    if not notification:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notification not found")
+    return Notification.model_validate(notification)
+
+
 @app.put("/notifications/preferences/{preference_id}", response_model=NotificationPreference)
 def update_notification_preference(
     preference_id: UUID,
@@ -881,7 +969,7 @@ def update_notification_preference(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> NotificationPreference:
-    updated = repo.update_notification_preference(context, preference_id, request.enabled)
+    updated = repo.update_notification_preference(context, preference_id, request.enabled, request.quiet_hours, request.frequency)
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notification preference not found")
     return NotificationPreference.model_validate(updated)

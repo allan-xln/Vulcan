@@ -47,6 +47,28 @@ corepack pnpm test:api
 
 ## Validações Executadas Nesta Rodada
 
+### Rodada atual - 2026-06-15 - Notificacoes
+
+- `PYTHONPATH=backend/api python3 -m py_compile backend/api/app/schemas.py backend/api/app/repository.py backend/api/app/main.py scripts/seed_demo.py`: aprovado.
+- `corepack pnpm test:api`: aprovado, 14 testes.
+- `corepack pnpm --dir frontend/web typecheck`: aprovado.
+- `corepack pnpm --dir frontend/web lint`: aprovado.
+- `corepack pnpm --dir frontend/web build`: aprovado.
+
+O que foi validado nesta rodada:
+
+- schemas expandidos de notificacao;
+- endpoints de summary, tipos, templates, preview, retry, cancelamento, leitura, resolucao e schedules;
+- tela Notificacoes compilando com filtros, historico, canais, templates e acoes;
+- seed demo atualizado com tipos, preferencias, historico e agendamentos.
+
+Pendencias de QA desta rodada:
+
+- rodar `corepack pnpm seed:demo` contra banco acessivel para confirmar insercao completa do novo seed;
+- smoke manual dos endpoints com backend reiniciado;
+- validar envio real WhatsApp/e-mail somente quando credenciais existirem;
+- validar canal Windows/agente quando endpoint de ack local for implementado.
+
 ### Rodada atual - 2026-06-11
 
 - `corepack pnpm lint`: aprovado.

@@ -12,10 +12,12 @@ import {
   BellRing,
   Brain,
   Building2,
+  CalendarClock,
   CheckCircle2,
   Command,
   DatabaseZap,
   Download,
+  FileText,
   Flame,
   Gauge,
   Layers3,
@@ -23,10 +25,12 @@ import {
   Lock,
   Mail,
   MessageCircle,
+  Monitor,
   Network,
   Save,
   RadioTower,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   UserRound,
   X,
@@ -139,15 +143,59 @@ type InsightAskResponse = {
 
 type NotificationItem = {
   id: string;
+  tenantId?: string | null;
   channel: "system" | "push" | "windows" | "whatsapp" | "email";
-  status: "queued" | "sent" | "failed" | "ready" | "mocked" | "missing_credentials" | "disabled";
+  status: "pending" | "queued" | "sending" | "sent" | "delivered" | "failed" | "cancelled" | "skipped" | "retrying" | "ready" | "mocked" | "missing_credentials" | "missing_destination" | "unknown_provider" | "disabled" | "resolved";
   title: string;
   message: string;
   createdAt: string;
   recipient?: string | null;
+  recipientMembershipId?: string | null;
+  priority?: "informativo" | "baixo" | "medio" | "alto" | "critico";
   attempts?: number;
+  maxAttempts?: number;
   error?: string | null;
   notificationType?: string | null;
+  provider?: string | null;
+  providerMessageId?: string | null;
+  scheduledFor?: string | null;
+  sentAt?: string | null;
+  deliveredAt?: string | null;
+  readAt?: string | null;
+  resolvedAt?: string | null;
+  actionUrl?: string | null;
+  requiresAck?: boolean;
+};
+
+type NotificationSummary = {
+  total: number;
+  pending: number;
+  sent: number;
+  failed: number;
+  critical: number;
+  unread: number;
+  whatsappReady: boolean;
+  emailReady: boolean;
+  agentReady: boolean;
+  nextScheduleAt?: string | null;
+  byChannel: Record<string, number>;
+  byStatus: Record<string, number>;
+  byPriority: Record<string, number>;
+};
+
+type NotificationTypeDefinition = {
+  id: string;
+  name: string;
+  description: string;
+  defaultPriority: string;
+  allowedChannels: string[];
+  defaultAudience: string;
+  defaultFrequency: string;
+  template: string;
+  canDisable: boolean;
+  requiresPermission: boolean;
+  critical: boolean;
+  enabled: boolean;
 };
 
 type Device = {
@@ -388,6 +436,18 @@ type ReportTemplate = {
   enabled: boolean;
 };
 
+type NotificationTemplate = {
+  id: string;
+  channel: "system" | "push" | "windows" | "whatsapp" | "email";
+  notificationType: string;
+  title: string;
+  body: string;
+  variables: string[];
+  language: string;
+  version: number;
+  active: boolean;
+};
+
 type AIStatus = {
   provider: string;
   openaiConfigured: boolean;
@@ -490,6 +550,35 @@ const fallbackNotifications: NotificationItem[] = [
     message: "Resumo semanal preparado para gestores com gargalos, oportunidades e recomendações.",
     createdAt: "2026-06-02T20:45:00Z"
   }
+];
+
+const fallbackNotificationSummary: NotificationSummary = {
+  total: fallbackNotifications.length,
+  pending: 2,
+  sent: 1,
+  failed: 0,
+  critical: 1,
+  unread: 3,
+  whatsappReady: false,
+  emailReady: false,
+  agentReady: true,
+  nextScheduleAt: null,
+  byChannel: { windows: 1, whatsapp: 1, email: 1 },
+  byStatus: { mocked: 1, missing_credentials: 2 },
+  byPriority: { alto: 1, medio: 2 }
+};
+
+const fallbackNotificationTypes: NotificationTypeDefinition[] = [
+  { id: "agente_offline", name: "Agente offline", description: "Dispositivo sem sincronizar acima do limite.", defaultPriority: "alto", allowedChannels: ["system", "whatsapp", "email", "windows"], defaultAudience: "supervisor/TI", defaultFrequency: "imediato", template: "{{dispositivo}} ficou offline.", canDisable: true, requiresPermission: true, critical: false, enabled: true },
+  { id: "insight_critico", name: "Insight crítico", description: "Insight de alto impacto gerado pela IA/regras.", defaultPriority: "critico", allowedChannels: ["system", "whatsapp", "email"], defaultAudience: "gestor responsável", defaultFrequency: "imediato", template: "Insight crítico: {{titulo}}.", canDisable: false, requiresPermission: true, critical: true, enabled: true },
+  { id: "relatorio_diario", name: "Relatório diário", description: "Resumo operacional diário.", defaultPriority: "informativo", allowedChannels: ["system", "email", "whatsapp"], defaultAudience: "gestores", defaultFrequency: "diário", template: "Relatório diário de {{empresa}} pronto.", canDisable: true, requiresPermission: true, critical: false, enabled: true },
+  { id: "falha_whatsapp", name: "Falha WhatsApp", description: "Canal WhatsApp sem credenciais ou indisponível.", defaultPriority: "alto", allowedChannels: ["system", "email"], defaultAudience: "admin", defaultFrequency: "imediato", template: "WhatsApp requer atenção: {{erro}}.", canDisable: false, requiresPermission: true, critical: true, enabled: true }
+];
+
+const fallbackNotificationTemplates: NotificationTemplate[] = [
+  { id: "tpl-whatsapp-critical", channel: "whatsapp", notificationType: "insight_critico", title: "Vulcan alerta crítico", body: "Vulcan: {{equipe}} apresentou {{metrica}} acima do esperado. Impacto: {{impacto}}.", variables: ["equipe", "metrica", "impacto"], language: "pt-BR", version: 1, active: true },
+  { id: "tpl-email-daily", channel: "email", notificationType: "relatorio_diario", title: "Vulcan - Relatório diário de {{empresa}}", body: "Resumo executivo, gargalos, insights e ações recomendadas.", variables: ["empresa"], language: "pt-BR", version: 1, active: true },
+  { id: "tpl-system-device", channel: "system", notificationType: "dispositivo_aguardando_adocao", title: "Dispositivo aguardando adoção", body: "{{dispositivo}} precisa ser vinculado.", variables: ["dispositivo"], language: "pt-BR", version: 1, active: true }
 ];
 
 const fallbackDevices: Device[] = [
@@ -1063,6 +1152,11 @@ function formatEventDate(value: string) {
   }).format(date);
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "sem data";
+  return formatEventDate(value);
+}
+
 function percentPt(value: number) {
   return `${Math.round((value || 0) * 100)}%`;
 }
@@ -1120,6 +1214,17 @@ function channelPt(channel: string) {
     email: "e-mail"
   };
   return dictionary[channel] ?? channel;
+}
+
+function priorityPt(priority: string) {
+  const dictionary: Record<string, string> = {
+    informativo: "informativo",
+    baixo: "baixo",
+    medio: "médio",
+    alto: "alto",
+    critico: "crítico"
+  };
+  return dictionary[priority] ?? priority;
 }
 
 function qualityPt(quality?: string | null) {
@@ -1645,6 +1750,9 @@ export default function HomePage() {
   const [metrics, setMetrics] = useState<Metric[]>(fallbackMetrics);
   const [insights, setInsights] = useState<Insight[]>(fallbackInsights);
   const [notifications, setNotifications] = useState<NotificationItem[]>(fallbackNotifications);
+  const [notificationSummary, setNotificationSummary] = useState<NotificationSummary>(fallbackNotificationSummary);
+  const [notificationTypes, setNotificationTypes] = useState<NotificationTypeDefinition[]>(fallbackNotificationTypes);
+  const [notificationTemplates, setNotificationTemplates] = useState<NotificationTemplate[]>(fallbackNotificationTemplates);
   const [devices, setDevices] = useState<Device[]>(fallbackDevices);
   const [operationalMetrics, setOperationalMetrics] = useState<OperationalMetric[]>([]);
   const [operationalIntelligence, setOperationalIntelligence] = useState<OperationalIntelligence>(emptyOperationalIntelligence);
@@ -1760,14 +1868,20 @@ export default function HomePage() {
         nextEmailStatuses,
         nextAIStatus,
         nextSchedules,
-        nextReportTemplates
+        nextReportTemplates,
+        nextNotificationTypes,
+        nextNotificationTemplates,
+        nextNotificationSummary
       ] = await Promise.all([
         fetchProtected<SupabaseStatus>("/supabase/status", token!, fallbackSupabaseStatus),
         fetchProtected<WhatsAppStatus>("/integrations/whatsapp/status", token!, fallbackWhatsAppStatus),
         fetchProtected<EmailProviderStatus[]>("/integrations/email/status", token!, fallbackEmailStatuses),
         fetchProtected<AIStatus>("/ai/status", token!, fallbackAIStatus),
         fetchProtected<NotificationSchedule[]>("/notifications/schedules", token!, fallbackSchedules),
-        fetchProtected<ReportTemplate[]>("/reports/templates", token!, fallbackReportTemplates)
+        fetchProtected<ReportTemplate[]>("/reports/templates", token!, fallbackReportTemplates),
+        fetchProtected<NotificationTypeDefinition[]>("/notification-types", token!, fallbackNotificationTypes),
+        fetchProtected<NotificationTemplate[]>("/notification-templates", token!, fallbackNotificationTemplates),
+        fetchProtected<NotificationSummary>("/notifications/summary", token!, fallbackNotificationSummary)
       ]);
 
       if (cancelled) {
@@ -1780,11 +1894,17 @@ export default function HomePage() {
       setAIStatus(nextAIStatus);
       setSchedules(nextSchedules);
       setReportTemplates(nextReportTemplates);
+      setNotificationTypes(nextNotificationTypes);
+      setNotificationTemplates(nextNotificationTemplates);
+      setNotificationSummary(nextNotificationSummary);
 
       if (nextSupabaseStatus.databaseReachable === false) {
         setMetrics(metricFallback);
         setInsights(insightFallback);
         setNotifications(notificationFallback);
+        setNotificationSummary(fallbackNotificationSummary);
+        setNotificationTypes(fallbackNotificationTypes);
+        setNotificationTemplates(fallbackNotificationTemplates);
         setDevices(deviceFallback);
         setOperationalMetrics([]);
         setOperationalIntelligence(emptyOperationalIntelligence);
@@ -2105,6 +2225,9 @@ export default function HomePage() {
             metrics={metrics}
             insights={insights}
             notifications={notifications}
+            notificationSummary={notificationSummary}
+            notificationTypes={notificationTypes}
+            notificationTemplates={notificationTemplates}
             devices={devices}
             operationalMetrics={operationalMetrics}
             operationalIntelligence={operationalIntelligence}
@@ -2381,6 +2504,9 @@ function DashboardShell({
   metrics,
   insights,
   notifications,
+  notificationSummary,
+  notificationTypes,
+  notificationTemplates,
   devices,
   teams,
   pendingDevices,
@@ -2415,6 +2541,9 @@ function DashboardShell({
   metrics: Metric[];
   insights: Insight[];
   notifications: NotificationItem[];
+  notificationSummary: NotificationSummary;
+  notificationTypes: NotificationTypeDefinition[];
+  notificationTemplates: NotificationTemplate[];
   devices: Device[];
   teams: Team[];
   pendingDevices: Device[];
@@ -2534,7 +2663,20 @@ function DashboardShell({
               onOpenMetrics={onOpenMetrics}
             />
           )}
-          {activeView === "notifications" && <NotificationsView key="notifications" notifications={notifications} liveStatusLabel={liveStatusLabel} schedules={schedules} />}
+          {activeView === "notifications" && (
+            <NotificationsView
+              key="notifications"
+              notifications={notifications}
+              summary={notificationSummary}
+              notificationTypes={notificationTypes}
+              notificationTemplates={notificationTemplates}
+              whatsAppStatus={whatsAppStatus}
+              emailStatuses={emailStatuses}
+              liveStatusLabel={liveStatusLabel}
+              schedules={schedules}
+              token={token}
+            />
+          )}
           {activeView === "settings" && (
             <SettingsView
               key="settings"
@@ -5414,78 +5556,330 @@ function insightIcon(type: string): typeof Gauge {
   return Brain;
 }
 
-function NotificationsView({ notifications, liveStatusLabel = "agora", schedules = [], compact = false }: { notifications: NotificationItem[]; liveStatusLabel?: string; schedules?: NotificationSchedule[]; compact?: boolean }) {
-  const iconByChannel = { system: BellRing, push: BellRing, windows: BellRing, whatsapp: MessageCircle, email: Mail };
+function NotificationsView({
+  notifications,
+  summary,
+  notificationTypes,
+  notificationTemplates,
+  whatsAppStatus,
+  emailStatuses,
+  liveStatusLabel = "agora",
+  schedules = [],
+  compact = false,
+  token
+}: {
+  notifications: NotificationItem[];
+  summary: NotificationSummary;
+  notificationTypes: NotificationTypeDefinition[];
+  notificationTemplates: NotificationTemplate[];
+  whatsAppStatus: WhatsAppStatus;
+  emailStatuses: EmailProviderStatus[];
+  liveStatusLabel?: string;
+  schedules?: NotificationSchedule[];
+  compact?: boolean;
+  token?: string;
+}) {
+  const [items, setItems] = useState(notifications);
+  const [types, setTypes] = useState(notificationTypes);
+  const [channelFilter, setChannelFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(notificationTemplates[0]?.id ?? "");
+  const [templatePreview, setTemplatePreview] = useState<{ title: string; body: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const iconByChannel = { system: BellRing, push: BellRing, windows: Monitor, whatsapp: MessageCircle, email: Mail };
+  const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
+
+  useEffect(() => setItems(notifications), [notifications]);
+  useEffect(() => setTypes(notificationTypes), [notificationTypes]);
+
+  const filtered = items.filter((item) => {
+    if (channelFilter !== "all" && item.channel !== channelFilter) return false;
+    if (statusFilter !== "all" && item.status !== statusFilter) return false;
+    if (priorityFilter !== "all" && (item.priority ?? "medio") !== priorityFilter) return false;
+    return true;
+  });
+  const channels = ["system", "whatsapp", "email", "windows", "push"];
+  const statuses = [...new Set(items.map((item) => item.status))];
+  const priorities = ["informativo", "baixo", "medio", "alto", "critico"];
+  const selectedTemplate = notificationTemplates.find((item) => item.id === selectedTemplateId) ?? notificationTemplates[0];
+
+  async function notificationAction(id: string, action: "retry" | "cancel" | "mark-read" | "resolve") {
+    if (!token) return;
+    setBusy(`${action}-${id}`);
+    try {
+      const response = await fetch(`${API_URL}/notifications/${id}/${action}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "X-Tenant-Id": DEMO_TENANT_ID }
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(payload.detail ?? "Ação recusada pelo backend."));
+      if (action === "retry") {
+        const updated = payload as NotificationItem;
+        setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      } else {
+        setItems((current) => current.map((item) => item.id === id ? { ...item, status: action === "cancel" ? "cancelled" : action === "resolve" ? "resolved" : item.status, readAt: action === "mark-read" ? new Date().toISOString() : item.readAt, resolvedAt: action === "resolve" ? new Date().toISOString() : item.resolvedAt } : item));
+      }
+      setFeedback({ tone: "ok", message: action === "retry" ? "Reenvio processado com status atualizado." : "Ação registrada com auditoria." });
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao executar ação." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function testChannel(channel: NotificationItem["channel"]) {
+    if (!token) return;
+    setBusy(`test-${channel}`);
+    try {
+      const response = await fetch(`${API_URL}/notifications/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Tenant-Id": DEMO_TENANT_ID },
+        body: JSON.stringify({
+          tenantId: DEMO_TENANT_ID,
+          channel,
+          notificationType: channel === "whatsapp" ? "falha_whatsapp" : channel === "email" ? "relatorio_diario" : "alerta_critico",
+          title: "Teste de notificação Vulcan",
+          message: "Mensagem de teste gerada pela central de notificações.",
+          priority: channel === "system" ? "medio" : "alto"
+        })
+      });
+      const payload = (await response.json()) as { status?: string; providerResult?: string; detail?: string };
+      if (!response.ok) throw new Error(String(payload.detail ?? "Teste recusado."));
+      setFeedback({ tone: payload.status === "failed" || payload.status === "missing_credentials" ? "warn" : "ok", message: `${channelPt(channel)}: ${statusPt(payload.status ?? "queued")} | ${payload.providerResult ?? "registrado"}` });
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha no teste." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function previewTemplate() {
+    if (!token || !selectedTemplate) return;
+    setBusy("preview-template");
+    try {
+      const response = await fetch(`${API_URL}/notification-templates/${selectedTemplate.id}/preview`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Tenant-Id": DEMO_TENANT_ID },
+        body: JSON.stringify({ variables: { empresa: "Vulcan Demo", equipe: "Operação", metrica: "ociosidade", impacto: "alto", link_dashboard: "http://localhost:3002" } })
+      });
+      const payload = (await response.json()) as { title: string; body: string; detail?: string };
+      if (!response.ok) throw new Error(String(payload.detail ?? "Preview recusado."));
+      setTemplatePreview({ title: payload.title, body: payload.body });
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao gerar preview." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (compact) {
+    return (
+      <ViewFrame compact>
+        <Panel title="Notificações críticas" icon={BellRing}>
+          <div className="grid gap-3">
+            {items.slice(0, 4).map((item) => <NotificationRow key={item.id} item={item} compact />)}
+          </div>
+        </Panel>
+      </ViewFrame>
+    );
+  }
+
   return (
-    <ViewFrame compact={compact}>
-      {!compact ? (
-        <div className="mb-4">
-          <LiveBadge label="Central de notificações ao vivo" detail={`Última atualização: ${liveStatusLabel}`} />
+    <ViewFrame>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <LiveBadge label="Central de notificações" detail={`Tempo real ativo | última atualização ${liveStatusLabel}`} />
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void testChannel("system")} className="h-10 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400">Testar sistema</button>
+          <button type="button" onClick={() => void testChannel("whatsapp")} className="h-10 border border-orange-400/30 px-4 text-sm text-orange-200 transition hover:border-orange-300/60">Testar WhatsApp</button>
+          <button type="button" onClick={() => void testChannel("email")} className="h-10 border border-orange-400/30 px-4 text-sm text-orange-200 transition hover:border-orange-300/60">Testar e-mail</button>
         </div>
-      ) : null}
-      <Panel title="Canais de notificação" icon={BellRing}>
-        <div className="grid gap-4">
-          {notifications.length ? (
-            notifications.map((item, index) => {
-              const Icon = iconByChannel[item.channel];
-              return (
-                <motion.div
-                  key={item.id}
-                  className="border border-zinc-800 bg-black/45 p-5"
-                  initial={{ x: 22, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: index * 0.08 }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="grid h-11 w-11 place-items-center bg-orange-500 text-black">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium">{item.title}</p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                        {channelPt(item.channel)} | {statusPt(item.status)} | {item.recipient ?? "sem destinatário"}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="mt-4 text-sm leading-6 text-zinc-400">{item.message}</p>
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
-                    <span>Tentativas: {item.attempts ?? 0}</span>
-                    {item.error ? <span className="text-orange-300">Erro: {item.error}</span> : null}
-                    <button className="border border-orange-400/25 px-3 py-2 text-orange-200 transition hover:border-orange-300/60" type="button">
-                      Reenviar
-                    </button>
-                  </div>
-                </motion.div>
-              );
-            })
-          ) : (
-            <EmptyState title="Sem notificações reais" description="Alertas e notificações serão exibidos quando o Vulcan detectar sinais reais do agente." />
-          )}
-        </div>
-      </Panel>
-      {!compact ? (
-        <div className="mt-5">
-          <Panel title="Agendamentos automáticos" icon={Activity}>
-            <div className="grid gap-3 md:grid-cols-3">
-              {schedules.map((schedule) => (
-                <div key={schedule.id} className="border border-zinc-800 bg-black/35 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-zinc-100">{schedule.name}</p>
-                      <p className="mt-1 text-sm text-zinc-500">{schedule.recurrence} | {schedule.timezone}</p>
-                    </div>
-                    <span className="border border-emerald-400/20 px-2 py-1 text-xs text-emerald-200">{schedule.enabled ? "ativo" : "pausado"}</span>
-                  </div>
-                  <p className="mt-3 text-sm text-zinc-400">Horários: {schedule.times.join(", ")}</p>
-                  <p className="mt-2 text-sm text-zinc-400">Destinatários: {schedule.recipients.join(", ")}</p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.14em] text-orange-300">{schedule.channels.map(channelPt).join(" | ")}</p>
-                </div>
-              ))}
+      </div>
+
+      {feedback ? <div className="mb-5"><FeedbackBanner tone={feedback.tone} message={feedback.message} /></div> : null}
+
+      <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Orquestração operacional</Tremor.Text>
+              <Tremor.Title className="mt-2 text-zinc-50">Alertas, envios, preferências e ações em um só lugar.</Tremor.Title>
             </div>
-          </Panel>
+            <div className="flex flex-wrap gap-2">
+              <Tremor.Badge color={whatsAppStatus.connected ? "emerald" : "orange"}>WhatsApp {whatsAppStatus.connected ? "pronto" : "pendente"}</Tremor.Badge>
+              <Tremor.Badge color={emailReady ? "emerald" : "orange"}>E-mail {emailReady ? "pronto" : "pendente"}</Tremor.Badge>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <MetricSignalCard icon={BellRing} label="Pendentes" value={`${summary.pending}`} detail={`${summary.unread} não lidas`} tone={summary.pending ? "warn" : "ok"} />
+            <MetricSignalCard icon={ShieldCheck} label="Críticas" value={`${summary.critical}`} detail="exigem ação ou confirmação" tone={summary.critical ? "critical" : "ok"} />
+            <MetricSignalCard icon={CheckCircle2} label="Enviadas" value={`${summary.sent}`} detail={`${summary.failed} falhas registradas`} tone={summary.failed ? "warn" : "ok"} />
+          </div>
+        </Tremor.Card>
+
+        <Panel title="Canais" icon={RadioTower}>
+          <div className="grid gap-3 md:grid-cols-2">
+            {channels.map((channel) => {
+              const Icon = iconByChannel[channel as NotificationItem["channel"]] ?? BellRing;
+              const count = summary.byChannel[channel] ?? items.filter((item) => item.channel === channel).length;
+              const ready = channel === "whatsapp" ? whatsAppStatus.connected : channel === "email" ? emailReady : channel === "push" ? false : true;
+              return (
+                <button key={channel} type="button" onClick={() => setChannelFilter(channel)} className={`border p-4 text-left transition hover:border-orange-400/50 ${channelFilter === channel ? "border-orange-300/70 bg-orange-950/10" : "border-zinc-800 bg-black/35"}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="grid h-10 w-10 place-items-center bg-orange-500 text-black"><Icon className="h-5 w-5" /></div>
+                    <div>
+                      <p className="font-semibold">{channelPt(channel)}</p>
+                      <p className={ready ? "text-xs text-emerald-300" : "text-xs text-orange-300"}>{ready ? "operacional" : "pendente/configuração"}</p>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm text-zinc-500">{count} registro(s) no escopo</p>
+                </button>
+              );
+            })}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <Panel title="Tipos e preferências" icon={SlidersHorizontal}>
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            <MetricFilterSelect label="Canal" value={channelFilter} onChange={setChannelFilter} options={[["all", "Todos"], ...channels.map((item) => [item, channelPt(item)] as [string, string])]} />
+            <MetricFilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={[["all", "Todos"], ...statuses.map((item) => [item, statusPt(item)] as [string, string])]} />
+            <MetricFilterSelect label="Prioridade" value={priorityFilter} onChange={setPriorityFilter} options={[["all", "Todas"], ...priorities.map((item) => [item, priorityPt(item)] as [string, string])]} />
+          </div>
+          <div className="grid max-h-[560px] gap-3 overflow-y-auto pr-1">
+            {types.map((type, index) => (
+              <motion.div key={type.id} className="border border-zinc-800 bg-black/35 p-4" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.025 }}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-zinc-100">{type.name}</p>
+                    <p className="mt-2 text-sm leading-6 text-zinc-500">{type.description}</p>
+                  </div>
+                  <button type="button" onClick={() => type.canDisable && setTypes((current) => current.map((item) => item.id === type.id ? { ...item, enabled: !item.enabled } : item))} className={`border px-3 py-1 text-xs uppercase tracking-[0.14em] ${type.enabled ? "border-emerald-400/25 text-emerald-200" : "border-zinc-700 text-zinc-500"}`}>
+                    {type.enabled ? "ativo" : "pausado"}
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  <span className="border border-orange-400/20 px-2 py-1 text-orange-200">{priorityPt(type.defaultPriority)}</span>
+                  <span className="border border-zinc-800 px-2 py-1 text-zinc-400">{type.defaultFrequency}</span>
+                  <span className="border border-zinc-800 px-2 py-1 text-zinc-400">{type.defaultAudience}</span>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel title="Histórico e fila" icon={Activity}>
+          <div className="grid max-h-[640px] gap-3 overflow-y-auto pr-1">
+            {filtered.length ? filtered.map((item, index) => (
+              <NotificationRow
+                key={item.id}
+                item={item}
+                index={index}
+                busy={busy}
+                onRetry={() => void notificationAction(item.id, "retry")}
+                onRead={() => void notificationAction(item.id, "mark-read")}
+                onResolve={() => void notificationAction(item.id, "resolve")}
+                onCancel={() => void notificationAction(item.id, "cancel")}
+              />
+            )) : <EmptyState title="Sem notificações no filtro" description="Ajuste canal, status ou prioridade para ver o histórico." />}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        <Panel title="Agendamentos" icon={CalendarClock}>
+          <div className="grid gap-3">
+            {schedules.map((schedule) => (
+              <div key={schedule.id} className="border border-zinc-800 bg-black/35 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-zinc-100">{schedule.name}</p>
+                    <p className="mt-1 text-sm text-zinc-500">{schedule.recurrence} | {schedule.timezone}</p>
+                  </div>
+                  <span className={schedule.enabled ? "border border-emerald-400/20 px-2 py-1 text-xs text-emerald-200" : "border border-zinc-700 px-2 py-1 text-xs text-zinc-500"}>{schedule.enabled ? "ativo" : "pausado"}</span>
+                </div>
+                <p className="mt-3 text-sm text-zinc-400">Horários: {schedule.times.join(", ")}</p>
+                <p className="mt-2 text-sm text-zinc-400">Destinatários: {schedule.recipients.join(", ") || "escopo configurado"}</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.14em] text-orange-300">{schedule.channels.map(channelPt).join(" | ")}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel title="Templates" icon={FileText}>
+          <div className="grid gap-3">
+            <MetricFilterSelect label="Modelo" value={selectedTemplate?.id ?? selectedTemplateId} onChange={setSelectedTemplateId} options={notificationTemplates.map((item) => [item.id, `${channelPt(item.channel)} - ${item.title}`] as [string, string])} />
+            {selectedTemplate ? (
+              <div className="border border-zinc-800 bg-black/35 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-zinc-100">{selectedTemplate.title}</p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.14em] text-orange-300">{channelPt(selectedTemplate.channel)} | {selectedTemplate.notificationType} | v{selectedTemplate.version}</p>
+                  </div>
+                  <span className={selectedTemplate.active ? "text-emerald-300" : "text-zinc-500"}>{selectedTemplate.active ? "ativo" : "inativo"}</span>
+                </div>
+                <p className="mt-4 whitespace-pre-line text-sm leading-6 text-zinc-400">{selectedTemplate.body}</p>
+                <p className="mt-3 text-xs text-zinc-500">Variáveis: {selectedTemplate.variables.join(", ")}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void previewTemplate()} className="h-9 bg-orange-500 px-3 text-xs font-semibold text-black transition hover:bg-orange-400">Gerar preview</button>
+                  <button type="button" onClick={() => void testChannel(selectedTemplate.channel)} className="h-9 border border-orange-400/25 px-3 text-xs text-orange-200 transition hover:border-orange-300/60">Testar canal</button>
+                </div>
+              </div>
+            ) : null}
+            {templatePreview ? (
+              <motion.div className="border border-orange-400/20 bg-orange-950/10 p-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+                <p className="font-semibold text-orange-100">{templatePreview.title}</p>
+                <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-300">{templatePreview.body}</p>
+              </motion.div>
+            ) : null}
+          </div>
+        </Panel>
+      </div>
+
+      <Panel title="Segurança, hierarquia e LGPD" icon={ShieldCheck}>
+        <div className="grid gap-4 md:grid-cols-3">
+          <ConnectionSummary label="Escopo" value="tenant + subárvore" tone="ok" />
+          <ConnectionSummary label="Dados sensíveis" value="sem conteúdo pessoal" tone="ok" />
+          <ConnectionSummary label="Mocks" value="explícitos por status" tone="warn" />
         </div>
-      ) : null}
+        <p className="mt-4 text-sm leading-6 text-zinc-400">Notificações usam o mesmo backend hierárquico do Vulcan. Operador vê alertas pessoais; líderes e gestores veem apenas sua subárvore; admin/diretor recebe visão consolidada. WhatsApp/e-mail exibem `missing_credentials` ou `mocked` quando não há provedor real configurado.</p>
+      </Panel>
     </ViewFrame>
+  );
+}
+
+function NotificationRow({ item, index = 0, compact = false, busy, onRetry, onRead, onResolve, onCancel }: { item: NotificationItem; index?: number; compact?: boolean; busy?: string | null; onRetry?: () => void; onRead?: () => void; onResolve?: () => void; onCancel?: () => void }) {
+  const iconByChannel = { system: BellRing, push: BellRing, windows: Monitor, whatsapp: MessageCircle, email: Mail };
+  const Icon = iconByChannel[item.channel] ?? BellRing;
+  const tone = item.priority === "critico" || item.status === "failed" ? "critical" : ["missing_credentials", "queued", "retrying"].includes(item.status) ? "warn" : "ok";
+  return (
+    <motion.div className={`border p-4 ${tone === "critical" ? "border-rose-400/25 bg-rose-950/10" : tone === "warn" ? "border-orange-400/20 bg-orange-950/10" : "border-zinc-800 bg-black/35"}`} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.035 }}>
+      <div className="flex items-start gap-3">
+        <div className="grid h-10 w-10 shrink-0 place-items-center bg-orange-500 text-black"><Icon className="h-5 w-5" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="font-semibold text-zinc-100">{item.title}</p>
+              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">{channelPt(item.channel)} | {statusPt(item.status)} | {priorityPt(item.priority ?? "medio")} | {item.recipient ?? "escopo permitido"}</p>
+            </div>
+            <span className="text-xs text-zinc-500">{formatDateTime(item.createdAt)}</span>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-zinc-400">{item.message}</p>
+          {!compact ? (
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+              <span className="border border-zinc-800 px-2 py-1 text-zinc-500">Tentativas {item.attempts ?? 0}/{item.maxAttempts ?? 3}</span>
+              {item.error ? <span className="border border-orange-400/25 px-2 py-1 text-orange-200">{item.error}</span> : null}
+              <button disabled={!onRetry || Boolean(busy)} onClick={onRetry} type="button" className="border border-orange-400/25 px-3 py-2 text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Reenviar</button>
+              <button disabled={!onRead || Boolean(busy)} onClick={onRead} type="button" className="border border-zinc-800 px-3 py-2 text-zinc-300 transition hover:border-orange-400/50 disabled:opacity-40">Lida</button>
+              <button disabled={!onResolve || Boolean(busy)} onClick={onResolve} type="button" className="border border-emerald-400/25 px-3 py-2 text-emerald-200 transition hover:border-emerald-300/60 disabled:opacity-40">Resolver</button>
+              <button disabled={!onCancel || Boolean(busy)} onClick={onCancel} type="button" className="border border-zinc-800 px-3 py-2 text-zinc-400 transition hover:border-zinc-500 disabled:opacity-40">Cancelar</button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

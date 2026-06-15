@@ -28,6 +28,7 @@ from app.schemas import (
     DeviceOwnerUpdate,
     MembershipCreate,
     MembershipUpdate,
+    NotificationScheduleCreate,
     NotificationSendRequest,
     NotificationSendResponse,
     TeamCreate,
@@ -39,6 +40,43 @@ from app.security import AuthContext
 
 DEMO_TEST_MEMBERSHIP_ID = UUID("00000000-0000-0000-0000-000000300005")
 DEMO_TENANT_ID = UUID("00000000-0000-0000-0000-000000000301")
+
+
+NOTIFICATION_TYPES: list[dict] = [
+    {"id": "agente_offline", "name": "Agente offline", "description": "Dispositivo ficou sem sincronizar acima do limite.", "defaultPriority": "alto", "allowedChannels": ["system", "whatsapp", "email", "windows"], "defaultAudience": "supervisor_ti", "defaultFrequency": "imediato", "template": "{{dispositivo}} ficou offline há {{periodo}}.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "agente_online", "name": "Agente online novamente", "description": "Dispositivo voltou a sincronizar.", "defaultPriority": "baixo", "allowedChannels": ["system", "windows"], "defaultAudience": "responsavel_dispositivo", "defaultFrequency": "imediato", "template": "{{dispositivo}} voltou a sincronizar.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "fila_offline_alta", "name": "Fila offline alta", "description": "Fila local do agente cresceu e pode atrasar métricas.", "defaultPriority": "alto", "allowedChannels": ["system", "whatsapp", "email", "windows"], "defaultAudience": "admin_ti", "defaultFrequency": "imediato", "template": "{{dispositivo}} acumulou {{valor}} eventos pendentes.", "canDisable": True, "requiresPermission": True, "critical": True},
+    {"id": "falha_sincronizacao", "name": "Falha de sincronização", "description": "Agente ou backend recusou lote de eventos.", "defaultPriority": "alto", "allowedChannels": ["system", "email", "windows"], "defaultAudience": "admin_ti", "defaultFrequency": "imediato", "template": "Falha de sincronização em {{dispositivo}}: {{erro}}.", "canDisable": True, "requiresPermission": True, "critical": True},
+    {"id": "dispositivo_aguardando_adocao", "name": "Dispositivo aguardando adoção", "description": "Novo dispositivo apareceu sem vínculo final.", "defaultPriority": "medio", "allowedChannels": ["system", "email"], "defaultAudience": "admin_operacional", "defaultFrequency": "imediato", "template": "{{dispositivo}} está aguardando adoção no Vulcan.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "coleta_limitada", "name": "Coleta limitada", "description": "Sistema operacional limitou visibilidade do agente.", "defaultPriority": "medio", "allowedChannels": ["system", "windows", "email"], "defaultAudience": "admin_ti", "defaultFrequency": "diario", "template": "{{dispositivo}} está com coleta {{qualidade}}.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "gargalo_operacional", "name": "Gargalo operacional", "description": "Processo ou app concentrou tempo fora do padrão.", "defaultPriority": "alto", "allowedChannels": ["system", "whatsapp", "email"], "defaultAudience": "gestor_subarvore", "defaultFrequency": "imediato", "template": "{{equipe}} tem gargalo em {{metrica}}.", "canDisable": True, "requiresPermission": True, "critical": True},
+    {"id": "ociosidade_elevada", "name": "Ociosidade elevada", "description": "Ociosidade acima do limite configurado.", "defaultPriority": "medio", "allowedChannels": ["system", "email"], "defaultAudience": "supervisor", "defaultFrequency": "a_cada_4_horas", "template": "{{equipe}} apresentou ociosidade de {{valor}}.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "troca_contexto_excessiva", "name": "Troca de contexto excessiva", "description": "Alternância entre apps acima do padrão operacional.", "defaultPriority": "medio", "allowedChannels": ["system", "email"], "defaultAudience": "supervisor", "defaultFrequency": "diario", "template": "{{equipe}} alternou sistemas {{valor}} vezes.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "queda_produtividade", "name": "Queda de produtividade", "description": "Queda relevante contra baseline do período.", "defaultPriority": "alto", "allowedChannels": ["system", "whatsapp", "email"], "defaultAudience": "gerente", "defaultFrequency": "diario", "template": "{{equipe}} caiu {{valor}} contra o período anterior.", "canDisable": True, "requiresPermission": True, "critical": True},
+    {"id": "insight_critico", "name": "Insight crítico", "description": "Insight de alto impacto criado pela IA/regras.", "defaultPriority": "critico", "allowedChannels": ["system", "whatsapp", "email"], "defaultAudience": "gestor_responsavel", "defaultFrequency": "imediato", "template": "Insight crítico: {{titulo}}.", "canDisable": False, "requiresPermission": True, "critical": True},
+    {"id": "insight_executivo", "name": "Insight executivo", "description": "Diagnóstico estratégico para diretoria.", "defaultPriority": "alto", "allowedChannels": ["system", "email", "whatsapp"], "defaultAudience": "diretoria", "defaultFrequency": "diario", "template": "{{empresa}} tem diagnóstico executivo disponível.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "oportunidade_automacao", "name": "Oportunidade de automação", "description": "Processo repetitivo com economia estimada.", "defaultPriority": "alto", "allowedChannels": ["system", "email", "whatsapp"], "defaultAudience": "gestor_area", "defaultFrequency": "diario", "template": "Automação sugerida em {{processo}} com economia de {{economia_estimada}}.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "relatorio_diario", "name": "Relatório diário", "description": "Resumo operacional do dia.", "defaultPriority": "informativo", "allowedChannels": ["system", "email", "whatsapp"], "defaultAudience": "gestores", "defaultFrequency": "diario", "template": "Relatório diário de {{empresa}} pronto.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "relatorio_semanal", "name": "Relatório semanal", "description": "Resumo semanal executivo.", "defaultPriority": "informativo", "allowedChannels": ["system", "email"], "defaultAudience": "diretoria", "defaultFrequency": "semanal", "template": "Relatório semanal de {{empresa}} pronto.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "relatorio_mensal", "name": "Relatório mensal", "description": "Relatório mensal com tendências e ROI.", "defaultPriority": "informativo", "allowedChannels": ["system", "email"], "defaultAudience": "diretoria", "defaultFrequency": "mensal", "template": "Relatório mensal de {{empresa}} pronto.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "falha_whatsapp", "name": "Falha WhatsApp", "description": "Canal WhatsApp está indisponível ou sem credenciais.", "defaultPriority": "alto", "allowedChannels": ["system", "email"], "defaultAudience": "admin", "defaultFrequency": "imediato", "template": "WhatsApp Vulcan requer atenção: {{erro}}.", "canDisable": False, "requiresPermission": True, "critical": True},
+    {"id": "falha_email", "name": "Falha e-mail", "description": "Canal de e-mail falhou ou está sem credenciais.", "defaultPriority": "alto", "allowedChannels": ["system"], "defaultAudience": "admin", "defaultFrequency": "imediato", "template": "E-mail Vulcan requer atenção: {{erro}}.", "canDisable": False, "requiresPermission": True, "critical": True},
+    {"id": "falha_ia", "name": "Falha IA", "description": "Provider de IA indisponível.", "defaultPriority": "alto", "allowedChannels": ["system", "email"], "defaultAudience": "admin", "defaultFrequency": "imediato", "template": "IA indisponível: {{erro}}.", "canDisable": False, "requiresPermission": True, "critical": True},
+    {"id": "seguranca_lgpd", "name": "Segurança/LGPD", "description": "Alerta de privacidade, retenção ou compliance.", "defaultPriority": "critico", "allowedChannels": ["system", "email"], "defaultAudience": "admin_dpo", "defaultFrequency": "imediato", "template": "Alerta LGPD: {{evento}}.", "canDisable": False, "requiresPermission": True, "critical": True},
+    {"id": "usuario_sem_equipe", "name": "Usuário sem equipe", "description": "Colaborador não está vinculado a equipe operacional.", "defaultPriority": "baixo", "allowedChannels": ["system"], "defaultAudience": "admin_operacional", "defaultFrequency": "diario", "template": "{{usuario}} está sem equipe.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "usuario_sem_gestor", "name": "Usuário sem gestor", "description": "Nó da hierarquia ficou sem gestor direto.", "defaultPriority": "medio", "allowedChannels": ["system", "email"], "defaultAudience": "admin_operacional", "defaultFrequency": "diario", "template": "{{usuario}} está sem gestor direto.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "metrica_fora_padrao", "name": "Métrica fora do padrão", "description": "Métrica operacional saiu da faixa configurada.", "defaultPriority": "medio", "allowedChannels": ["system", "email"], "defaultAudience": "gestor_subarvore", "defaultFrequency": "a_cada_2_horas", "template": "{{metrica}} está fora do padrão: {{valor}}.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "acao_pendente", "name": "Ação pendente", "description": "Plano de ação ainda não foi iniciado.", "defaultPriority": "medio", "allowedChannels": ["system", "email"], "defaultAudience": "responsavel_acao", "defaultFrequency": "diario", "template": "Ação pendente: {{acao}}.", "canDisable": True, "requiresPermission": True, "critical": False},
+    {"id": "acao_vencida", "name": "Ação vencida", "description": "Plano de ação passou do prazo.", "defaultPriority": "alto", "allowedChannels": ["system", "whatsapp", "email"], "defaultAudience": "responsavel_gestor", "defaultFrequency": "imediato", "template": "Ação vencida: {{acao}}.", "canDisable": True, "requiresPermission": True, "critical": True},
+]
+
+
+DEFAULT_NOTIFICATION_TEMPLATES: list[dict] = [
+    {"id": "tpl-whatsapp-critical", "channel": "whatsapp", "notificationType": "insight_critico", "title": "Vulcan alerta crítico", "body": "Vulcan: {{equipe}} apresentou {{metrica}} acima do esperado em {{periodo}}. Impacto: {{impacto}}. Acesse {{link_dashboard}}", "variables": ["equipe", "metrica", "periodo", "impacto", "link_dashboard"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-email-daily", "channel": "email", "notificationType": "relatorio_diario", "title": "Vulcan - Relatório operacional diário de {{empresa}}", "body": "Resumo executivo de {{data}}\\n\\nGargalos: {{gargalos}}\\nEconomia estimada: {{economia_estimada}}\\nAções recomendadas: {{acoes}}", "variables": ["empresa", "data", "gargalos", "economia_estimada", "acoes"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-system-device", "channel": "system", "notificationType": "dispositivo_aguardando_adocao", "title": "Dispositivo aguardando adoção", "body": "{{dispositivo}} apareceu no Vulcan e precisa ser vinculado a usuário/equipe.", "variables": ["dispositivo"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-windows-policy", "channel": "windows", "notificationType": "coleta_limitada", "title": "Vulcan precisa de atenção", "body": "Sua coleta está limitada por política do sistema. O Vulcan mede fluxo operacional, não conteúdo pessoal.", "variables": ["usuario"], "language": "pt-BR", "version": 1, "active": True},
+]
 
 
 @dataclass(frozen=True)
@@ -2739,12 +2777,23 @@ class VulcanRepository:
                        n.recipient_membership_id as "recipientMembershipId",
                        coalesce(m.full_name, n.metadata ->> 'recipient', 'Não definido') as recipient,
                        n.channel::text,
-                       n.status::text,
+                       coalesce(n.metadata ->> 'deliveryStatus', n.status::text) as status,
                        n.notification_type as "notificationType",
                        n.title,
                        n.message,
+                       coalesce(n.metadata ->> 'priority', 'medio') as priority,
                        coalesce((n.metadata ->> 'attempts')::int, 0) as attempts,
-                       n.metadata ->> 'error' as error,
+                       coalesce((n.metadata ->> 'maxAttempts')::int, 3) as "maxAttempts",
+                       coalesce(n.metadata ->> 'lastError', n.metadata ->> 'error') as error,
+                       n.provider,
+                       n.provider_message_id as "providerMessageId",
+                       nullif(n.metadata ->> 'scheduledFor', '')::timestamptz as "scheduledFor",
+                       n.sent_at as "sentAt",
+                       nullif(n.metadata ->> 'deliveredAt', '')::timestamptz as "deliveredAt",
+                       nullif(n.metadata ->> 'readAt', '')::timestamptz as "readAt",
+                       nullif(n.metadata ->> 'resolvedAt', '')::timestamptz as "resolvedAt",
+                       n.metadata ->> 'actionUrl' as "actionUrl",
+                       coalesce((n.metadata ->> 'requiresAck')::bool, false) as "requiresAck",
                        n.created_at::text as "createdAt"
                 from public.notifications n
                 left join public.memberships m on m.id = n.recipient_membership_id
@@ -2756,6 +2805,42 @@ class VulcanRepository:
                 params,
             ).fetchall())
 
+    def get_notification(self, context: AuthContext, notification_id: UUID) -> dict | None:
+        return next((item for item in self.list_notifications(context) if str(item["id"]) == str(notification_id)), None)
+
+    def notification_summary(self, context: AuthContext) -> dict:
+        notifications = self.list_notifications(context)
+        statuses = defaultdict(int)
+        channels = defaultdict(int)
+        priorities = defaultdict(int)
+        for item in notifications:
+            statuses[item["status"]] += 1
+            channels[item["channel"]] += 1
+            priorities[item["priority"]] += 1
+        pending_statuses = {"pending", "queued", "sending", "retrying", "missing_credentials"}
+        failed_statuses = {"failed", "missing_credentials"}
+        sent_statuses = {"sent", "delivered", "ready", "mocked"}
+        return {
+            "total": len(notifications),
+            "pending": sum(1 for item in notifications if item["status"] in pending_statuses),
+            "sent": sum(1 for item in notifications if item["status"] in sent_statuses),
+            "failed": sum(1 for item in notifications if item["status"] in failed_statuses),
+            "critical": sum(1 for item in notifications if item["priority"] == "critico"),
+            "unread": sum(1 for item in notifications if not item.get("readAt")),
+            "whatsappReady": any(item["channel"] == "whatsapp" and item["status"] in sent_statuses for item in notifications),
+            "emailReady": any(item["channel"] == "email" and item["status"] in sent_statuses for item in notifications),
+            "agentReady": any(item["channel"] == "windows" for item in notifications),
+            "nextScheduleAt": None,
+            "byChannel": dict(channels),
+            "byStatus": dict(statuses),
+            "byPriority": dict(priorities),
+        }
+
+    def list_notification_types(self, context: AuthContext) -> list[dict]:
+        preferences = self.list_notification_preferences(context)
+        disabled = {item["notificationType"] for item in preferences if not item["enabled"]}
+        return [{**item, "enabled": item["id"] not in disabled} for item in NOTIFICATION_TYPES]
+
     def list_notification_preferences(self, context: AuthContext) -> list[dict]:
         if not self.enabled:
             return []
@@ -2765,13 +2850,163 @@ class VulcanRepository:
             return list(conn.execute(
                 f"""
                 select id, tenant_id as "tenantId", membership_id as "membershipId",
-                       channel::text, notification_type as "notificationType", enabled
+                       channel::text, notification_type as "notificationType", enabled,
+                       quiet_hours as "quietHours",
+                       coalesce(quiet_hours ->> 'frequency', 'imediato') as frequency
                 from public.notification_preferences
                 where {condition}
                 order by notification_type, channel
                 """,
                 params,
             ).fetchall())
+
+    def list_notification_schedules(self, context: AuthContext) -> list[dict]:
+        if self.enabled:
+            with self._connect() as conn:
+                access = self._access(conn, context)
+                condition = "tenant_id = %s"
+                params = (access.tenant_id,)
+                rows = conn.execute(
+                    f"""
+                    select id::text,
+                           metadata ->> 'name' as name,
+                           metadata ->> 'recurrence' as recurrence,
+                           coalesce(metadata ->> 'timezone', 'America/Sao_Paulo') as timezone,
+                           coalesce(metadata -> 'daysOfWeek', '[]'::jsonb) as "daysOfWeek",
+                           coalesce(metadata -> 'times', '[]'::jsonb) as times,
+                           coalesce(metadata ->> 'reportType', notification_type) as "reportType",
+                           coalesce(metadata -> 'recipients', '[]'::jsonb) as recipients,
+                           coalesce(metadata -> 'channels', jsonb_build_array(channel::text)) as channels,
+                           coalesce((metadata ->> 'enabled')::bool, status::text <> 'disabled') as enabled
+                    from public.notifications
+                    where {condition}
+                      and notification_type = 'schedule_config'
+                    order by created_at desc
+                    limit 20
+                    """,
+                    params,
+                ).fetchall()
+                if rows:
+                    return list(rows)
+        return [
+            {"id": "daily-ops", "name": "Resumo operacional diário", "recurrence": "diário", "timezone": "America/Sao_Paulo", "daysOfWeek": ["seg", "ter", "qua", "qui", "sex"], "times": ["08:00"], "reportType": "daily", "recipients": ["diretor", "coordenador", "gerente"], "channels": ["system", "email"], "enabled": True},
+            {"id": "critical-live", "name": "Alertas críticos em tempo real", "recurrence": "Imediatamente", "timezone": "America/Sao_Paulo", "daysOfWeek": [], "times": ["tempo real"], "reportType": "critical", "recipients": ["gestores no escopo"], "channels": ["system", "whatsapp"], "enabled": True},
+            {"id": "weekly-exec", "name": "Relatório executivo semanal", "recurrence": "semanal", "timezone": "America/Sao_Paulo", "daysOfWeek": ["seg"], "times": ["07:30"], "reportType": "weekly", "recipients": ["diretoria"], "channels": ["email"], "enabled": True},
+        ]
+
+    def create_notification_schedule(self, context: AuthContext, request: NotificationScheduleCreate) -> dict:
+        if not self.enabled:
+            return {**request.model_dump(by_alias=True), "id": str(uuid4())}
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            row = conn.execute(
+                """
+                insert into public.notifications (
+                  tenant_id, recipient_membership_id, channel, notification_type,
+                  status, title, message, provider, metadata
+                )
+                values (%s, %s, 'system', 'schedule_config', %s, %s, %s, 'vulcan-scheduler', %s)
+                returning id::text
+                """,
+                (
+                    access.tenant_id,
+                    access.membership_id,
+                    "queued" if request.enabled else "disabled",
+                    request.name,
+                    f"Agendamento {request.recurrence} para {', '.join(request.channels)}.",
+                    Jsonb({**request.model_dump(by_alias=True), "createdBy": context.user_id}),
+                ),
+            ).fetchone()
+            self.write_audit(conn, context, access.tenant_id, "notification_schedule.created", "notification_schedule", row["id"], request.model_dump(by_alias=True))
+            conn.commit()
+        return next((item for item in self.list_notification_schedules(context) if item["id"] == row["id"]), {**request.model_dump(by_alias=True), "id": row["id"]})
+
+    def update_notification_schedule(self, context: AuthContext, schedule_id: UUID, patch: dict) -> dict | None:
+        return self._patch_notification_metadata(context, schedule_id, patch, "notification_schedule.updated")
+
+    def list_notification_templates(self, context: AuthContext) -> list[dict]:
+        return DEFAULT_NOTIFICATION_TEMPLATES
+
+    def preview_notification_template(self, template_id: str, variables: dict) -> dict | None:
+        template = next((item for item in DEFAULT_NOTIFICATION_TEMPLATES if item["id"] == template_id), None)
+        if not template:
+            return None
+        values = {
+            "empresa": "Vulcan Demo",
+            "usuario": "Colaborador",
+            "equipe": "Operação",
+            "departamento": "Operações",
+            "supervisor": "Supervisor",
+            "periodo": "últimas 24 horas",
+            "metrica": "ociosidade",
+            "valor": "32%",
+            "impacto": "alto",
+            "economia_estimada": "R$ 2.900",
+            "link_dashboard": "http://localhost:3002",
+            "link_insight": "http://localhost:3002?view=insights",
+            "link_metricas": "http://localhost:3002?view=metrics",
+            "data": datetime.now(timezone.utc).date().isoformat(),
+            **variables,
+        }
+        def render(text: str) -> str:
+            rendered = text
+            for key, value in values.items():
+                rendered = rendered.replace("{{" + key + "}}", str(value))
+            return rendered
+        return {"title": render(template["title"]), "body": render(template["body"]), "variablesUsed": values}
+
+    def _patch_notification_metadata(self, context: AuthContext, notification_id: UUID, patch: dict, action: str, db_status: str | None = None) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._owner_filter(access, "recipient_membership_id", "tenant_id")
+            status_sql = "status = coalesce(%s, status),"
+            row = conn.execute(
+                f"""
+                update public.notifications
+                set {status_sql}
+                    metadata = metadata || %s,
+                    sent_at = case when %s = 'sent' then coalesce(sent_at, timezone('utc', now())) else sent_at end
+                where id = %s and {condition}
+                returning id::text, tenant_id
+                """,
+                (db_status, Jsonb({**patch, "updatedAt": datetime.now(timezone.utc).isoformat()}), db_status, notification_id, *params),
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return None
+            self.write_audit(conn, context, row["tenant_id"], action, "notification", UUID(row["id"]), patch)
+            conn.commit()
+        return self.get_notification(context, notification_id)
+
+    def retry_notification(self, context: AuthContext, notification_id: UUID) -> dict | None:
+        notification = self.get_notification(context, notification_id)
+        if not notification:
+            return None
+        from app.notifications import NotificationPayload, NotificationService
+        delivery = NotificationService().send(
+            notification["channel"],
+            NotificationPayload(
+                title=notification["title"],
+                message=notification["message"],
+                tenant_id=str(notification["tenantId"]),
+            ),
+        )
+        attempts = int(notification.get("attempts") or 0) + 1
+        db_status = "sent" if delivery.status in {"ready", "sent", "mocked"} else "failed" if delivery.status in {"failed", "missing_credentials", "missing_destination"} else "queued"
+        return self._patch_notification_metadata(
+            context,
+            notification_id,
+            {
+                "attempts": attempts,
+                "deliveryStatus": delivery.status,
+                "lastError": None if db_status in {"sent", "queued"} else delivery.provider_result,
+                "lastProviderResult": delivery.provider_result,
+            },
+            "notification.retry",
+            db_status,
+        )
 
     def list_ai_provider_configs(self, context: AuthContext) -> list[dict]:
         if not self.enabled:
@@ -2900,14 +3135,14 @@ class VulcanRepository:
             access = self._access(conn, context)
             if not access.is_root and request.tenant_id != access.tenant_id:
                 raise ValueError("tenant mismatch")
-            db_status = status if status in {"queued", "sent", "failed", "ready", "mocked", "missing_credentials", "disabled"} else "failed"
+            db_status = "sent" if status in {"ready", "sent", "mocked"} else status if status in {"queued", "failed", "missing_credentials", "disabled"} else "failed"
             row = conn.execute(
                 """
                 insert into public.notifications (
                   tenant_id, recipient_membership_id, channel, notification_type,
-                  status, title, message, provider, provider_message_id, metadata
+                  status, title, message, provider, provider_message_id, sent_at, metadata
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, 'vulcan-notification-service', %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, 'vulcan-notification-service', %s, %s, %s)
                 returning id
                 """,
                 (
@@ -2919,11 +3154,16 @@ class VulcanRepository:
                     request.title,
                     request.message,
                     provider_result,
+                    datetime.now(timezone.utc) if db_status == "sent" else None,
                     Jsonb(
                         {
                             "attempts": 1,
                             "deliveryStatus": status,
-                            "error": provider_result if db_status == "failed" else None,
+                            "priority": request.priority,
+                            "scheduledFor": request.scheduled_for.isoformat() if request.scheduled_for else None,
+                            "actionUrl": request.action_url,
+                            "requiresAck": request.priority in {"alto", "critico"},
+                            "lastError": provider_result if db_status == "failed" else None,
                             "recipient": str(request.recipient_membership_id) if request.recipient_membership_id else None,
                         }
                     ),
@@ -2933,24 +3173,31 @@ class VulcanRepository:
             conn.commit()
             return NotificationSendResponse(id=row["id"], channel=request.channel, status=db_status, providerResult=provider_result)
 
-    def update_notification_preference(self, context: AuthContext, preference_id: UUID, enabled: bool) -> dict | None:
+    def update_notification_preference(self, context: AuthContext, preference_id: UUID, enabled: bool | None, quiet_hours: dict | None = None, frequency: str | None = None) -> dict | None:
         if not self.enabled:
             return None
         with self._connect() as conn:
             access = self._access(conn, context)
             condition, params = self._owner_filter(access, "membership_id")
+            patch = quiet_hours or {}
+            if frequency:
+                patch["frequency"] = frequency
             row = conn.execute(
                 f"""
                 update public.notification_preferences
-                set enabled = %s, updated_at = timezone('utc', now())
+                set enabled = coalesce(%s, enabled),
+                    quiet_hours = quiet_hours || %s,
+                    updated_at = timezone('utc', now())
                 where id = %s and {condition}
                 returning id, tenant_id as "tenantId", membership_id as "membershipId",
-                          channel::text, notification_type as "notificationType", enabled
+                          channel::text, notification_type as "notificationType", enabled,
+                          quiet_hours as "quietHours",
+                          coalesce(quiet_hours ->> 'frequency', 'imediato') as frequency
                 """,
-                (enabled, preference_id, *params),
+                (enabled, Jsonb(patch), preference_id, *params),
             ).fetchone()
             if row:
-                self.write_audit(conn, context, row["tenantId"], "notification_preference.updated", "notification_preference", row["id"], {"enabled": enabled})
+                self.write_audit(conn, context, row["tenantId"], "notification_preference.updated", "notification_preference", row["id"], {"enabled": enabled, **patch})
             conn.commit()
             return dict(row) if row else None
 

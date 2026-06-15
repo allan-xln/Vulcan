@@ -81,7 +81,7 @@ teste / Root Demo
                     └── Operador 3
 ```
 
-O seed cria dispositivos Windows, Linux e macOS, eventos dos ultimos 30 dias, metricas operacionais, insights, notificacoes e auditoria. Leia `docs/DEMO.md`, `docs/DASHBOARD.md`, `docs/METRICS.md`, `docs/INSIGHTS.md`, `docs/HIERARCHY.md` e `docs/QA.md`.
+O seed cria dispositivos Windows, Linux e macOS, eventos dos ultimos 30 dias, metricas operacionais, insights, notificacoes, preferencias, agendamentos e auditoria. Leia `docs/DEMO.md`, `docs/DASHBOARD.md`, `docs/METRICS.md`, `docs/INSIGHTS.md`, `docs/NOTIFICATIONS.md`, `docs/HIERARCHY.md` e `docs/QA.md`.
 
 ## Comando E Metricas
 
@@ -89,6 +89,7 @@ O Vulcan separa acompanhamento rapido de investigacao analitica:
 
 - `Comando`: central executiva enxuta para TV, supervisor e gestao em tempo quase real. Mostra status geral, velocimetro de saude operacional, ate seis KPIs, recomendacao da IA e alertas essenciais.
 - `Metricas`: area profunda para investigar por periodo, equipe, usuario, departamento, cargo, supervisor, dispositivo, sistema operacional, app, categoria, status do agente e tipo de metrica.
+- `Notificacoes`: central para sistema, WhatsApp, e-mail, Windows/agente, tipos, prioridades, retry, templates, agendamentos e historico de entrega.
 
 Itens criticos do `Comando` abrem `Metricas` ja filtrada. Exportacoes CSV e Excel ficam em `Metricas` e respeitam o recorte atual.
 
@@ -97,6 +98,7 @@ Documentacao:
 - `docs/COMMAND_CENTER.md`
 - `docs/METRICS.md`
 - `docs/INSIGHTS.md`
+- `docs/NOTIFICATIONS.md`
 - `docs/DASHBOARD.md`
 - `docs/EXPORTS.md`
 - `docs/API.md`
