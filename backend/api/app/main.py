@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -85,6 +86,7 @@ from app.whatsapp import WhatsAppConnection, WhatsAppNotificationService
 app = FastAPI(title="Vulcan API", version="0.1.0")
 AGENT_GATEWAY_VERSION = "0.1.0"
 settings = get_settings()
+logger = logging.getLogger("vulcan.api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -149,6 +151,7 @@ def agent_enroll(request: AgentEnrollRequest, repo: VulcanRepository = Depends(r
     try:
         return repo.agent_enroll(request)
     except PsycopgError as exc:
+        logger.exception("agent enrollment persistence failed")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent persistence unavailable") from exc
 
 
@@ -158,6 +161,7 @@ def agent_heartbeat(request: AgentHeartbeatRequest, repo: VulcanRepository = Dep
     try:
         return repo.agent_heartbeat(request)
     except PsycopgError as exc:
+        logger.exception("agent heartbeat persistence failed")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent persistence unavailable") from exc
 
 
@@ -167,6 +171,7 @@ def agent_events(request: AgentEventsRequest, repo: VulcanRepository = Depends(r
     try:
         return repo.agent_events(request)
     except PsycopgError as exc:
+        logger.exception("agent events persistence failed")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent persistence unavailable") from exc
 
 
@@ -176,6 +181,7 @@ def agent_sync(request: AgentEventsRequest, repo: VulcanRepository = Depends(rep
     try:
         return repo.agent_events(request)
     except PsycopgError as exc:
+        logger.exception("agent sync persistence failed")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent persistence unavailable") from exc
 
 

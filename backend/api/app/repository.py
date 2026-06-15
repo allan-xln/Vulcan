@@ -62,7 +62,7 @@ class VulcanRepository:
     def _connect(self) -> psycopg.Connection:
         if not self.settings.database_url:
             raise RuntimeError("DATABASE_URL is not configured")
-        return psycopg.connect(self.settings.database_url, row_factory=dict_row)
+        return psycopg.connect(self.settings.database_url, row_factory=dict_row, prepare_threshold=None)
 
     def _access(self, conn: psycopg.Connection, context: AuthContext) -> AccessScope:
         if context.provider == "local":
@@ -1771,26 +1771,27 @@ class VulcanRepository:
                 if not row:
                     duplicate_events += 1
                     continue
-                for metric_key, metric_label, metric_value in self._metrics_for_agent_event(event_type, event):
-                    conn.execute(
-                        """
-                        insert into public.operational_metrics (
-                          tenant_id, membership_id, metric_key, metric_label,
-                          value_numeric, period_start, period_end, metadata
+                if event_membership_id:
+                    for metric_key, metric_label, metric_value in self._metrics_for_agent_event(event_type, event):
+                        conn.execute(
+                            """
+                            insert into public.operational_metrics (
+                              tenant_id, membership_id, metric_key, metric_label,
+                              value_numeric, period_start, period_end, metadata
+                            )
+                            values (%s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                request.tenant_id,
+                                event_membership_id,
+                                metric_key,
+                                metric_label,
+                                metric_value,
+                                event.started_at,
+                                event.ended_at,
+                                Jsonb({"source": "vulcan-agent", "eventId": event.event_id, "category": event.category, "eventType": event_type}),
+                            ),
                         )
-                        values (%s, %s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            request.tenant_id,
-                            event_membership_id,
-                            metric_key,
-                            metric_label,
-                            metric_value,
-                            event.started_at,
-                            event.ended_at,
-                            Jsonb({"source": "vulcan-agent", "eventId": event.event_id, "category": event.category, "eventType": event_type}),
-                        ),
-                    )
                 inserted_events += 1
                 event_type_counts[event_type] += 1
                 stored += 1
