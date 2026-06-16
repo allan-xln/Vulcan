@@ -176,6 +176,38 @@ def test_integration_status_endpoints_are_available() -> None:
     assert len(combined_response.json()) >= 2
 
 
+def test_settings_center_loads_saves_and_validates() -> None:
+    token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    settings_response = client.get("/settings", headers=headers)
+    assert settings_response.status_code == 200
+    payload = settings_response.json()
+    assert payload["summary"]["totalSections"] >= 8
+    assert any(section["id"] == "company" for section in payload["sections"])
+    assert any(field["isSecret"] for section in payload["sections"] for field in section["fields"])
+
+    save_response = client.put(
+        "/settings/company",
+        headers=headers,
+        json={"values": {"displayName": "Vulcan QA", "slug": "vulcan-qa", "timezone": "America/Sao_Paulo", "language": "pt-BR"}},
+    )
+    assert save_response.status_code == 200
+    assert save_response.json()["saved"] is True
+
+    invalid_response = client.put(
+        "/settings/metrics",
+        headers=headers,
+        json={"values": {"weightAgents": 1, "weightFocus": 1, "weightIdle": 1, "weightContext": 1, "weightBottlenecks": 1}},
+    )
+    assert invalid_response.status_code == 400
+    assert "100%" in invalid_response.json()["detail"]
+
+    test_response = client.post("/settings/ai/test", headers=headers)
+    assert test_response.status_code == 200
+    assert test_response.json()["tested"] is True
+
+
 def test_mock_connection_tests_return_clear_status() -> None:
     token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
     headers = {"Authorization": f"Bearer {token}"}

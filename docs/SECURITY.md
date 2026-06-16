@@ -35,6 +35,12 @@ Key secrets:
 - Supabase service-role and secret keys
 - ingestion API keys
 
+The Settings screen returns only secret status (`configurado`, `requer credencial`, `mock explicito`). It never returns actual secret values and `PUT /settings/{section}` rejects `secret` and `readonly` fields.
+
+## Settings Security
+
+Configuration writes are restricted to tenant/admin scope. Operators can read allowed state but cannot mutate tenant settings. Every successful settings write records `settings.updated` in `audit_logs`.
+
 ## AI Safety
 
 GPT must receive only structured operational evidence. It must not receive raw passwords, keystrokes, screenshots, clipboard content, or cross-tenant data.

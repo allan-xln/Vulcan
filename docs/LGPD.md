@@ -38,6 +38,8 @@ Vulcan mede fluxo operacional, nao conteudo pessoal.
 - list of enabled collectors;
 - list of disabled collectors.
 
+Initial controls are available in Configuracoes > LGPD e privacidade and Configuracoes > Politicas de coleta. They persist in `tenant_settings.settings` and are audited on change.
+
 ## Demo Message
 
 Use this wording in sales and onboarding:

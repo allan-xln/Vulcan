@@ -707,6 +707,67 @@ class IntegrationStatus(ApiModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class SettingsField(ApiModel):
+    key: str
+    label: str
+    value: Any = None
+    value_type: Literal["text", "number", "boolean", "select", "multiselect", "json", "secret", "readonly"] = Field(alias="valueType")
+    description: str
+    status: Literal["ok", "attention", "missing", "error", "mock", "readonly", "disabled"] = "ok"
+    required: bool = False
+    is_secret: bool = Field(default=False, alias="isSecret")
+    editable: bool = True
+    options: list[str] = Field(default_factory=list)
+    placeholder: str | None = None
+    unit: str | None = None
+
+
+class SettingsSection(ApiModel):
+    id: str
+    title: str
+    description: str
+    scope: Literal["system", "tenant", "team", "user", "agent"] = "tenant"
+    status: Literal["ok", "attention", "missing", "error", "mock", "readonly", "disabled"] = "ok"
+    can_edit: bool = Field(alias="canEdit")
+    last_updated_at: datetime | None = Field(default=None, alias="lastUpdatedAt")
+    fields: list[SettingsField]
+
+
+class SettingsSummary(ApiModel):
+    tenant_id: UUID = Field(alias="tenantId")
+    environment: str
+    can_edit: bool = Field(alias="canEdit")
+    total_sections: int = Field(alias="totalSections")
+    ok: int
+    attention: int
+    missing: int
+    error: int
+    mock: int
+    last_updated_at: datetime | None = Field(default=None, alias="lastUpdatedAt")
+    critical_pending: list[str] = Field(default_factory=list, alias="criticalPending")
+    statuses: dict[str, str] = Field(default_factory=dict)
+
+
+class SettingsResponse(ApiModel):
+    summary: SettingsSummary
+    sections: list[SettingsSection]
+
+
+class SettingsSectionUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
+class SettingsActionResponse(ApiModel):
+    section: str
+    status: str
+    message: str
+    saved: bool = False
+    tested: bool = False
+    section_data: SettingsSection | None = Field(default=None, alias="sectionData")
+
+
 class WhatsAppStatus(ApiModel):
     root_channel_enabled: bool = Field(alias="rootChannelEnabled")
     root_channel_name: str = Field(alias="rootChannelName")

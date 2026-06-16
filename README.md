@@ -90,6 +90,7 @@ O Vulcan separa acompanhamento rapido de investigacao analitica:
 - `Comando`: central executiva enxuta para TV, supervisor e gestao em tempo quase real. Mostra status geral, velocimetro de saude operacional, ate seis KPIs, recomendacao da IA e alertas essenciais.
 - `Metricas`: area profunda para investigar por periodo, equipe, usuario, departamento, cargo, supervisor, dispositivo, sistema operacional, app, categoria, status do agente e tipo de metrica.
 - `Notificacoes`: central para sistema, WhatsApp, e-mail, Windows/agente, tipos, prioridades, retry, templates, agendamentos e historico de entrega.
+- `Configuracoes`: central real de controle com seções salvas em `tenant_settings`, testes por seção, secrets mascarados, validação de entrada e auditoria.
 
 Itens criticos do `Comando` abrem `Metricas` ja filtrada. Exportacoes CSV e Excel ficam em `Metricas` e respeitam o recorte atual.
 
@@ -99,6 +100,8 @@ Documentacao:
 - `docs/METRICS.md`
 - `docs/INSIGHTS.md`
 - `docs/NOTIFICATIONS.md`
+- `docs/SETTINGS.md`
+- `docs/CONFIGURATION.md`
 - `docs/DASHBOARD.md`
 - `docs/EXPORTS.md`
 - `docs/API.md`

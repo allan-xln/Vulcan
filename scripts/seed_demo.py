@@ -328,6 +328,107 @@ def seed() -> None:
             (DEMO_TENANT_ID, Jsonb({"seed": SEED_TAG, "mode": "commercial-demo", "demoMode": True})),
         )
 
+        settings_defaults = {
+            "company": {
+                "displayName": "Vulcan Demo",
+                "legalName": "Vulcan Demo Ltda",
+                "slug": "vulcan-demo",
+                "timezone": "America/Sao_Paulo",
+                "language": "pt-BR",
+                "currency": "BRL",
+                "technicalOwnerEmail": "teste@vulcan.local",
+            },
+            "agents": {
+                "heartbeatIntervalSeconds": 60,
+                "syncIntervalSeconds": 120,
+                "batchSize": 50,
+                "requestTimeoutSeconds": 30,
+                "queueLimit": 500,
+                "requireAdoption": True,
+                "allowDryAdoption": True,
+            },
+            "collection": {
+                "collectActiveApp": True,
+                "collectWindowTitle": True,
+                "collectIdleTime": True,
+                "collectContextSwitch": True,
+                "collectBrowserUrl": False,
+                "screenshotsEnabled": False,
+                "privacyMode": False,
+                "retentionDays": 90,
+            },
+            "metrics": {
+                "focusTarget": 72,
+                "idleLimitPercent": 30,
+                "contextSwitchLimitPerHour": 40,
+                "hourlyCostBRL": 95,
+                "weightAgents": 20,
+                "weightFocus": 25,
+                "weightIdle": 20,
+                "weightContext": 15,
+                "weightBottlenecks": 20,
+            },
+            "ai": {
+                "mode": "rules_fallback",
+                "operationalProvider": "llama",
+                "executiveProvider": "gpt",
+                "timeoutSeconds": 60,
+                "monthlyBudgetBRL": 500,
+            },
+            "notifications": {
+                "enabled": True,
+                "criticalRealtime": True,
+                "dailySummary": True,
+                "weeklySummary": True,
+                "quietStart": "22:00",
+                "quietEnd": "07:00",
+                "maxAttempts": 3,
+            },
+            "whatsapp": {
+                "defaultRecipients": "diretor, gerente, supervisor",
+                "mockMode": True,
+            },
+            "email": {
+                "provider": "smtp",
+                "fromName": "Vulcan Notifications",
+                "imapReadEnabled": False,
+                "pop3ReadEnabled": False,
+            },
+            "security": {"sessionMinutes": 480},
+            "privacy": {
+                "consentRequired": True,
+                "allowUserPause": False,
+                "dataExportEnabled": True,
+                "anonymizeAfterDays": 365,
+            },
+            "appearance": {
+                "theme": "dark",
+                "glowIntensity": "medio",
+                "density": "confortável",
+                "reducedMotion": False,
+            },
+        }
+        conn.execute(
+            """
+            insert into public.tenant_settings (
+              tenant_id, default_locale, default_timezone, retention_days,
+              allow_self_service_agent_installation, analytics_enabled, ai_explanations_enabled,
+              settings, updated_at
+            )
+            values (%s, 'pt-BR', 'America/Sao_Paulo', 90, true, true, true, %s, timezone('utc', now()))
+            on conflict (tenant_id) do update
+            set default_locale = excluded.default_locale,
+                default_timezone = excluded.default_timezone,
+                retention_days = excluded.retention_days,
+                allow_self_service_agent_installation = excluded.allow_self_service_agent_installation,
+                analytics_enabled = excluded.analytics_enabled,
+                ai_explanations_enabled = excluded.ai_explanations_enabled,
+                settings = coalesce(public.tenant_settings.settings, '{}'::jsonb) || excluded.settings,
+                updated_at = timezone('utc', now())
+            """,
+            (DEMO_TENANT_ID, Jsonb(settings_defaults)),
+        )
+
         conn.execute(
             """
             create table if not exists public.teams (

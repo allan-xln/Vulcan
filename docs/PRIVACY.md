@@ -25,9 +25,11 @@ Recommended defaults for pilots:
 - audit logs: 24 months;
 - AI prompts/responses: disabled by default unless explicitly needed for audit.
 
+The Settings screen exposes privacy controls for consent, user pause, export enablement, anonymization days and collection toggles. Riskier collectors such as browser URL and screenshots remain blocked by backend validation in the MVP.
+
 ## Open Items
 
 - Enforce retention jobs in production.
-- Add tenant-level privacy policy editor.
+- Expand tenant-level privacy policy editor.
 - Add employee consent export.
-- Add per-collector toggles in the admin UI.
+- Connect per-collector toggles to remote agent policy rollout.

@@ -75,6 +75,11 @@ from app.schemas import (
     OperationalMetric,
     ReportTemplate,
     Role,
+    SettingsActionResponse,
+    SettingsResponse,
+    SettingsSection,
+    SettingsSectionUpdate,
+    SettingsSummary,
     SupabaseStatus,
     Tenant,
     Team,
@@ -833,6 +838,58 @@ def integrations_status(context: AuthContext = Authenticated) -> list[Integratio
             for item in email_statuses
         ],
     ]
+
+
+@app.get("/settings", response_model=SettingsResponse)
+def settings_center(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> SettingsResponse:
+    return SettingsResponse.model_validate(repo.get_settings_center(context))
+
+
+@app.get("/settings/summary", response_model=SettingsSummary)
+def settings_summary(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> SettingsSummary:
+    return SettingsSummary.model_validate(repo.get_settings_center(context)["summary"])
+
+
+@app.get("/settings/{section_id}", response_model=SettingsSection)
+def settings_section(section_id: str, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> SettingsSection:
+    response = repo.get_settings_center(context)
+    section = next((item for item in response["sections"] if item["id"] == section_id), None)
+    if not section:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="settings section not found")
+    return SettingsSection.model_validate(section)
+
+
+@app.put("/settings/{section_id}", response_model=SettingsActionResponse)
+def update_settings_section(
+    section_id: str,
+    request: SettingsSectionUpdate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> SettingsActionResponse:
+    try:
+        response = repo.update_settings_section(context, section_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    section = next((item for item in response["sections"] if item["id"] == section_id), None)
+    return SettingsActionResponse(section=section_id, status=section["status"] if section else "ok", message="Configuração salva e auditada.", saved=True, sectionData=section)
+
+
+@app.post("/settings/{section_id}/test", response_model=SettingsActionResponse)
+def test_settings_section(section_id: str, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> SettingsActionResponse:
+    try:
+        return SettingsActionResponse.model_validate(repo.test_settings_section(context, section_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/settings/{section_id}/reset", response_model=SettingsActionResponse)
+def reset_settings_section(section_id: str, context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> SettingsActionResponse:
+    try:
+        response = repo.update_settings_section(context, section_id, SettingsSectionUpdate(values={}))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    section = next((item for item in response["sections"] if item["id"] == section_id), None)
+    return SettingsActionResponse(section=section_id, status=section["status"] if section else "ok", message="Seção restaurada para defaults conhecidos.", saved=True, sectionData=section)
 
 
 @app.get("/notifications/schedules", response_model=list[NotificationSchedule])

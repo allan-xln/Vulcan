@@ -458,6 +458,61 @@ type AIStatus = {
   routePolicy: string;
 };
 
+type SettingsField = {
+  key: string;
+  label: string;
+  value: string | number | boolean | null;
+  valueType: "text" | "number" | "boolean" | "select" | "multiselect" | "json" | "secret" | "readonly";
+  description: string;
+  status: "ok" | "attention" | "missing" | "error" | "mock" | "readonly" | "disabled";
+  required: boolean;
+  isSecret: boolean;
+  editable: boolean;
+  options: string[];
+  placeholder?: string | null;
+  unit?: string | null;
+};
+
+type SettingsSectionData = {
+  id: string;
+  title: string;
+  description: string;
+  scope: "system" | "tenant" | "team" | "user" | "agent";
+  status: "ok" | "attention" | "missing" | "error" | "mock" | "readonly" | "disabled";
+  canEdit: boolean;
+  lastUpdatedAt?: string | null;
+  fields: SettingsField[];
+};
+
+type SettingsSummaryData = {
+  tenantId: string;
+  environment: string;
+  canEdit: boolean;
+  totalSections: number;
+  ok: number;
+  attention: number;
+  missing: number;
+  error: number;
+  mock: number;
+  lastUpdatedAt?: string | null;
+  criticalPending: string[];
+  statuses: Record<string, string>;
+};
+
+type SettingsResponseData = {
+  summary: SettingsSummaryData;
+  sections: SettingsSectionData[];
+};
+
+type SettingsActionResponseData = {
+  section: string;
+  status: string;
+  message: string;
+  saved: boolean;
+  tested: boolean;
+  sectionData?: SettingsSectionData | null;
+};
+
 const fallbackMetrics: Metric[] = [
   { id: "active-users", label: "Usuários ativos", value: "148", trend: "+12% vs ontem", tone: "positive" },
   { id: "events", label: "Eventos processados", value: "42,8 mil", trend: "+8,4% em 24h", tone: "neutral" },
@@ -684,6 +739,24 @@ const fallbackAIStatus: AIStatus = {
   complexModel: "GPT executivo pendente",
   operationalModel: "Llama operacional pendente",
   routePolicy: "operacional -> Llama | executivo -> GPT"
+};
+
+const fallbackSettingsCenter: SettingsResponseData = {
+  summary: {
+    tenantId: DEMO_TENANT_ID,
+    environment: "local",
+    canEdit: false,
+    totalSections: 0,
+    ok: 0,
+    attention: 0,
+    missing: 0,
+    error: 0,
+    mock: 0,
+    lastUpdatedAt: null,
+    criticalPending: ["Backend de configurações indisponível"],
+    statuses: {}
+  },
+  sections: []
 };
 
 const fallbackSchedules: NotificationSchedule[] = [
@@ -1200,7 +1273,11 @@ function scopePt(scope: string) {
     self: "próprio",
     subtree: "subárvore",
     tenant: "empresa",
-    global: "global"
+    global: "global",
+    system: "sistema",
+    team: "equipe",
+    user: "usuário",
+    agent: "agente"
   };
   return dictionary[scope] ?? scope;
 }
@@ -1765,6 +1842,7 @@ export default function HomePage() {
   const [whatsAppStatus, setWhatsAppStatus] = useState<WhatsAppStatus>(fallbackWhatsAppStatus);
   const [emailStatuses, setEmailStatuses] = useState<EmailProviderStatus[]>(fallbackEmailStatuses);
   const [aiStatus, setAIStatus] = useState<AIStatus>(fallbackAIStatus);
+  const [settingsCenter, setSettingsCenter] = useState<SettingsResponseData>(fallbackSettingsCenter);
   const [schedules, setSchedules] = useState<NotificationSchedule[]>(fallbackSchedules);
   const [reportTemplates, setReportTemplates] = useState<ReportTemplate[]>(fallbackReportTemplates);
   const [lastRefreshAt, setLastRefreshAt] = useState<Date | null>(null);
@@ -1871,7 +1949,8 @@ export default function HomePage() {
         nextReportTemplates,
         nextNotificationTypes,
         nextNotificationTemplates,
-        nextNotificationSummary
+        nextNotificationSummary,
+        nextSettingsCenter
       ] = await Promise.all([
         fetchProtected<SupabaseStatus>("/supabase/status", token!, fallbackSupabaseStatus),
         fetchProtected<WhatsAppStatus>("/integrations/whatsapp/status", token!, fallbackWhatsAppStatus),
@@ -1881,7 +1960,8 @@ export default function HomePage() {
         fetchProtected<ReportTemplate[]>("/reports/templates", token!, fallbackReportTemplates),
         fetchProtected<NotificationTypeDefinition[]>("/notification-types", token!, fallbackNotificationTypes),
         fetchProtected<NotificationTemplate[]>("/notification-templates", token!, fallbackNotificationTemplates),
-        fetchProtected<NotificationSummary>("/notifications/summary", token!, fallbackNotificationSummary)
+        fetchProtected<NotificationSummary>("/notifications/summary", token!, fallbackNotificationSummary),
+        fetchProtected<SettingsResponseData>("/settings", token!, fallbackSettingsCenter)
       ]);
 
       if (cancelled) {
@@ -1897,6 +1977,7 @@ export default function HomePage() {
       setNotificationTypes(nextNotificationTypes);
       setNotificationTemplates(nextNotificationTemplates);
       setNotificationSummary(nextNotificationSummary);
+      setSettingsCenter(nextSettingsCenter);
 
       if (nextSupabaseStatus.databaseReachable === false) {
         setMetrics(metricFallback);
@@ -1905,6 +1986,7 @@ export default function HomePage() {
         setNotificationSummary(fallbackNotificationSummary);
         setNotificationTypes(fallbackNotificationTypes);
         setNotificationTemplates(fallbackNotificationTemplates);
+        setSettingsCenter(nextSettingsCenter);
         setDevices(deviceFallback);
         setOperationalMetrics([]);
         setOperationalIntelligence(emptyOperationalIntelligence);
@@ -2240,6 +2322,8 @@ export default function HomePage() {
             whatsAppStatus={whatsAppStatus}
             emailStatuses={emailStatuses}
             aiStatus={aiStatus}
+            settingsCenter={settingsCenter}
+            onSettingsCenterChange={setSettingsCenter}
             schedules={schedules}
             reportTemplates={reportTemplates}
             highImpact={highImpact}
@@ -2519,6 +2603,8 @@ function DashboardShell({
   whatsAppStatus,
   emailStatuses,
   aiStatus,
+  settingsCenter,
+  onSettingsCenterChange,
   schedules,
   reportTemplates,
   highImpact,
@@ -2556,6 +2642,8 @@ function DashboardShell({
   whatsAppStatus: WhatsAppStatus;
   emailStatuses: EmailProviderStatus[];
   aiStatus: AIStatus;
+  settingsCenter: SettingsResponseData;
+  onSettingsCenterChange: (next: SettingsResponseData) => void;
   schedules: NotificationSchedule[];
   reportTemplates: ReportTemplate[];
   highImpact: number;
@@ -2680,9 +2768,17 @@ function DashboardShell({
           {activeView === "settings" && (
             <SettingsView
               key="settings"
+              settingsCenter={settingsCenter}
+              onSettingsCenterChange={onSettingsCenterChange}
               supabaseStatus={supabaseStatus}
+              aiStatus={aiStatus}
               whatsAppStatus={whatsAppStatus}
               emailStatuses={emailStatuses}
+              devices={devices}
+              pendingDevices={pendingDevices}
+              teams={teams}
+              hierarchy={hierarchy}
+              notifications={notifications}
               schedules={schedules}
               reportTemplates={reportTemplates}
               token={token}
@@ -5884,278 +5980,278 @@ function NotificationRow({ item, index = 0, compact = false, busy, onRetry, onRe
 }
 
 function SettingsView({
+  settingsCenter,
+  onSettingsCenterChange,
   supabaseStatus,
+  aiStatus,
   whatsAppStatus,
   emailStatuses,
+  devices,
+  pendingDevices,
+  teams,
+  hierarchy,
+  notifications,
   schedules,
   reportTemplates,
   token
 }: {
+  settingsCenter: SettingsResponseData;
+  onSettingsCenterChange: (next: SettingsResponseData) => void;
   supabaseStatus: SupabaseStatus;
+  aiStatus: AIStatus;
   whatsAppStatus: WhatsAppStatus;
   emailStatuses: EmailProviderStatus[];
+  devices: Device[];
+  pendingDevices: Device[];
+  teams: Team[];
+  hierarchy: HierarchyNode[];
+  notifications: NotificationItem[];
   schedules: NotificationSchedule[];
   reportTemplates: ReportTemplate[];
   token: string;
 }) {
-  const smtpStatus = emailStatuses.find((item) => item.provider === "smtp") ?? fallbackEmailStatuses[0];
-  const gmailStatus = emailStatuses.find((item) => item.provider === "gmail");
-  const outlookStatus = emailStatuses.find((item) => item.provider === "outlook");
-  const imapStatus = emailStatuses.find((item) => item.provider === "imap");
-  const pop3Status = emailStatuses.find((item) => item.provider === "pop3");
+  const [selectedSectionId, setSelectedSectionId] = useState(settingsCenter.sections[0]?.id ?? "");
+  const [query, setQuery] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, Record<string, string | number | boolean | null>>>({});
   const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const smtpStatus = emailStatuses.find((item) => item.provider === "smtp") ?? fallbackEmailStatuses[0];
+  const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
+  const offlineAgents = devices.filter((device) => device.status === "offline").length;
+  const queueIssues = devices.filter((device) => Number(device.queueDepth ?? 0) > 50).length;
+  const failedNotifications = notifications.filter((item) => ["failed", "missing_credentials"].includes(item.status)).length;
+
+  useEffect(() => {
+    const nextDrafts: Record<string, Record<string, string | number | boolean | null>> = {};
+    settingsCenter.sections.forEach((section) => {
+      nextDrafts[section.id] = Object.fromEntries(section.fields.map((field) => [field.key, field.value]));
+    });
+    setDrafts(nextDrafts);
+    if (!selectedSectionId && settingsCenter.sections[0]) setSelectedSectionId(settingsCenter.sections[0].id);
+  }, [settingsCenter, selectedSectionId]);
+
+  const filteredSections = settingsCenter.sections.filter((section) => {
+    const haystack = `${section.title} ${section.description} ${section.fields.map((field) => `${field.label} ${field.description}`).join(" ")}`.toLowerCase();
+    return haystack.includes(query.trim().toLowerCase());
+  });
+  const selectedSection = settingsCenter.sections.find((section) => section.id === selectedSectionId) ?? filteredSections[0] ?? settingsCenter.sections[0] ?? null;
+  const selectedDraft = selectedSection ? drafts[selectedSection.id] ?? {} : {};
+
+  async function refreshSettings() {
+    const next = await fetchProtected<SettingsResponseData>("/settings", token, settingsCenter);
+    onSettingsCenterChange(next);
+  }
+
+  async function saveSection(section: SettingsSectionData) {
+    setBusy(`save-${section.id}`);
+    setFeedback(null);
+    try {
+      const values = Object.fromEntries(
+        section.fields
+          .filter((field) => field.editable && field.valueType !== "readonly" && field.valueType !== "secret")
+          .map((field) => [field.key, selectedDraft[field.key]])
+      );
+      const response = await fetch(`${API_URL}/settings/${section.id}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Tenant-Id": DEMO_TENANT_ID },
+        body: JSON.stringify({ values })
+      });
+      const payload = (await response.json()) as SettingsActionResponseData & { detail?: string };
+      if (!response.ok) throw new Error(String(payload.detail ?? "Configuração recusada pelo backend."));
+      await refreshSettings();
+      setFeedback({ tone: "ok", message: payload.message });
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao salvar configuração." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function testSection(section: SettingsSectionData) {
+    setBusy(`test-${section.id}`);
+    setFeedback(null);
+    try {
+      const response = await fetch(`${API_URL}/settings/${section.id}/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "X-Tenant-Id": DEMO_TENANT_ID }
+      });
+      const payload = (await response.json()) as SettingsActionResponseData & { detail?: string };
+      if (!response.ok) throw new Error(String(payload.detail ?? "Teste recusado pelo backend."));
+      setFeedback({ tone: payload.status === "ok" ? "ok" : "warn", message: payload.message });
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao testar configuração." });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function testIntegration(kind: "whatsapp" | "email", provider?: string, destination?: string | null) {
-    setFeedback({ tone: "warn", message: "Testando conexão..." });
+    setBusy(`integration-${kind}`);
     try {
       const response = await fetch(`${API_URL}/integrations/${kind}/test`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-Tenant-Id": DEMO_TENANT_ID
-        },
-        body: JSON.stringify({
-          tenantId: DEMO_TENANT_ID,
-          provider,
-          destination: destination || undefined,
-          message: "Mensagem de teste enviada pela central de configurações do Vulcan."
-        })
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Tenant-Id": DEMO_TENANT_ID },
+        body: JSON.stringify({ tenantId: DEMO_TENANT_ID, provider, destination: destination || undefined, message: "Mensagem de teste enviada pela central de configurações do Vulcan." })
       });
-      const payload = (await response.json()) as { ok?: boolean; status?: string; message?: string; providerResult?: string };
-      setFeedback({
-        tone: payload.ok ? "ok" : "warn",
-        message: `${kind === "whatsapp" ? "WhatsApp" : "E-mail"}: ${payload.message ?? statusPt(payload.status ?? "pendente")}`
-      });
-    } catch {
-      setFeedback({ tone: "warn", message: "Não foi possível chamar o backend local. Verifique se a API está rodando em http://localhost:3001." });
+      const payload = (await response.json()) as { ok?: boolean; status?: string; message?: string; detail?: string };
+      if (!response.ok) throw new Error(String(payload.detail ?? "Teste recusado."));
+      setFeedback({ tone: payload.ok ? "ok" : "warn", message: `${kind === "whatsapp" ? "WhatsApp" : "E-mail"}: ${payload.message ?? statusPt(payload.status ?? "pendente")}` });
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao testar integração." });
+    } finally {
+      setBusy(null);
     }
   }
 
   return (
     <ViewFrame>
       <div className="grid gap-5">
-        <Panel title="Configurações guiadas" icon={CheckCircle2}>
-          <div className="grid gap-3 md:grid-cols-4">
-            <ConnectionSummary label="Tempo real" value="ativo" tone="ok" />
-            <ConnectionSummary label="Supabase" value={supabaseStatus.configured ? "conectado" : "pendente"} tone={supabaseStatus.configured ? "ok" : "warn"} />
-            <ConnectionSummary label="WhatsApp raiz" value={whatsAppStatus.connected ? "conectado" : "pendente"} tone={whatsAppStatus.connected ? "ok" : "warn"} />
-            <ConnectionSummary label="E-mail" value={smtpStatus.configured ? "pronto" : "pendente"} tone={smtpStatus.configured ? "ok" : "warn"} />
-          </div>
-          {feedback ? <FeedbackBanner tone={feedback.tone} message={feedback.message} /> : null}
-        </Panel>
-
-        <div className="grid gap-5 xl:grid-cols-2">
-          <ConfigSection
-            title="Geral"
-            description="Defina nome, idioma, fuso horário e comportamento padrão da plataforma."
-            status="pronto"
-            fields={[
-              ["Nome do produto", "Vulcan"],
-              ["Idioma", "Português do Brasil"],
-              ["Fuso horário", "America/Sao_Paulo"]
-            ]}
-          />
-          <ConfigSection
-            title="Empresa"
-            description="Cadastre dados básicos da empresa, unidade operacional e responsáveis."
-            status="pendente"
-            fields={[
-              ["Nome da empresa", "Ex.: LanFuture"],
-              ["Documento", "CNPJ ou identificação interna"],
-              ["Responsável", "Nome do gestor principal"]
-            ]}
-          />
-          <ConfigSection
-            title="Usuários e hierarquia"
-            description="Monte a árvore de cargos sem limite de níveis e defina quem recebe cada alerta."
-            status="ativo"
-            fields={[
-              ["Cargo", "Supervisor, Gerente, Diretor..."],
-              ["Gestor direto", "Selecione o responsável"],
-              ["Preferências", "WhatsApp, e-mail, sistema"]
-            ]}
-          />
-          <ConfigSection
-            title="Agentes"
-            description="Instale agentes, acompanhe status e garanta sincronização operacional em tempo real."
-            status="sincronizando"
-            fields={[
-              ["Token de instalação", "vulcan-local-enrollment-token"],
-              ["Backend", "http://localhost:3001"],
-              ["Modo de coleta", "Aplicativo ativo e duração"]
-            ]}
-          />
-        </div>
-
-        <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-          <Panel title="Supabase" icon={DatabaseZap}>
-            <div className="grid gap-3 md:grid-cols-2">
-              <ConnectionSummary label="Projeto" value={supabaseStatus.projectRef ?? "não definido"} tone={supabaseStatus.projectRef ? "ok" : "warn"} />
-              <ConnectionSummary label="Auth" value={supabaseStatus.authProvider} tone="ok" />
-              <ConnectionSummary label="REST" value={supabaseStatus.restReachable === null ? "não testado" : supabaseStatus.restReachable ? "alcançável" : "bloqueado"} tone={supabaseStatus.restReachable ? "ok" : "warn"} />
-              <ConnectionSummary label="Banco" value={supabaseStatus.databaseReachable === null ? supabaseStatus.databaseUrlConfigured ? "configurado" : "pendente" : supabaseStatus.databaseReachable ? "alcançável" : "bloqueado"} tone={supabaseStatus.databaseReachable === false ? "warn" : supabaseStatus.databaseUrlConfigured ? "ok" : "warn"} />
-            </div>
-            <ActionRow primary="Testar conexão" secondary="Salvar configuração" />
-          </Panel>
-
-          <Panel title="Inteligência Artificial" icon={Brain}>
-            <div className="grid gap-3 md:grid-cols-2">
-              <ConfigField label="Modelo operacional" placeholder="Llama via Ollama, Groq, Together ou OpenRouter" />
-              <ConfigField label="Modelo executivo" placeholder="GPT para Copilot, relatórios e recomendações" />
-              <ConfigField label="Política de roteamento" placeholder="Métricas -> Llama | Estratégia -> GPT" />
-              <ConfigField label="Chaves" placeholder="OPENAI_API_KEY e LLAMA_API_KEY no .env" />
-            </div>
-            <ActionRow primary="Testar IA" secondary="Salvar configuração" />
-          </Panel>
-        </div>
-
-        <div className="grid gap-5 xl:grid-cols-2">
-          <Panel title="WhatsApp" icon={MessageCircle}>
-            <div className="mb-4 grid gap-3 md:grid-cols-2">
-              <ConnectionSummary label="Canal Oficial Vulcan" value={whatsAppStatus.rootChannelName} tone="ok" />
-              <ConnectionSummary label="Número raiz" value={whatsAppStatus.rootChannelNumber ?? "pendente"} tone={whatsAppStatus.rootChannelNumber ? "ok" : "warn"} />
-              <ConnectionSummary label="Provedor" value={whatsAppStatus.provider} tone="ok" />
-              <ConnectionSummary label="Status" value={statusPt(whatsAppStatus.status)} tone={whatsAppStatus.connected ? "ok" : "warn"} />
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <ConfigField label="Provedor" placeholder="lanchat ou whatsapp-business-api" />
-              <ConfigField label="Token" placeholder="WHATSAPP_ACCESS_TOKEN" secret />
-              <ConfigField label="ID do número" placeholder="WHATSAPP_PHONE_NUMBER_ID" />
-              <ConfigField label="ID da conta Business" placeholder="WHATSAPP_BUSINESS_ACCOUNT_ID" />
-              <ConfigField label="Webhook Verify Token" placeholder="WHATSAPP_WEBHOOK_VERIFY_TOKEN" secret />
-              <ConfigField label="Número padrão de envio" placeholder="5541984166423" />
-            </div>
-            {whatsAppStatus.qrRequired ? (
-              <div className="mt-4 border border-dashed border-orange-400/25 bg-black/35 p-4">
-                <p className="font-medium text-orange-200">QR Code necessário</p>
-                <p className="mt-2 text-sm text-zinc-400">A sessão local está preparada para QR no padrão de sessão inspirado no LanChat.</p>
+        <div className="grid gap-5 xl:grid-cols-[1fr_0.72fr]">
+          <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <Tremor.Text className="text-xs uppercase tracking-[0.22em] text-orange-200">Central de controle</Tremor.Text>
+                <Tremor.Title className="mt-2 text-zinc-50">Configurações reais, testáveis e auditadas do Vulcan.</Tremor.Title>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">Campos editáveis salvam em `tenant_settings`; secrets aparecem apenas como status; integrações sem credencial ficam marcadas como pendentes ou mock explícito.</p>
               </div>
-            ) : null}
-            <ActionRow
-              primary="Testar conexão"
-              secondary="Enviar mensagem teste"
-              tertiary="Salvar configuração"
-              onPrimary={() => testIntegration("whatsapp", whatsAppStatus.provider, whatsAppStatus.rootChannelNumber)}
-              onSecondary={() => testIntegration("whatsapp", whatsAppStatus.provider, whatsAppStatus.rootChannelNumber)}
-              onTertiary={() => setFeedback({ tone: "warn", message: "As configurações sensíveis do WhatsApp devem ser salvas no .env ou no cofre seguro do tenant antes de produção." })}
+              <Tremor.Badge color={settingsCenter.summary.canEdit ? "emerald" : "orange"}>{settingsCenter.summary.canEdit ? "admin: edição liberada" : "somente leitura"}</Tremor.Badge>
+            </div>
+            <div className="mt-5 grid gap-3 md:grid-cols-5">
+              <MetricSignalCard icon={CheckCircle2} label="OK" value={`${settingsCenter.summary.ok}`} detail="seções prontas" tone="ok" />
+              <MetricSignalCard icon={ShieldCheck} label="Atenção" value={`${settingsCenter.summary.attention}`} detail="requer revisão" tone={settingsCenter.summary.attention ? "warn" : "ok"} />
+              <MetricSignalCard icon={Lock} label="Credenciais" value={`${settingsCenter.summary.missing}`} detail="faltando ou pendente" tone={settingsCenter.summary.missing ? "warn" : "ok"} />
+              <MetricSignalCard icon={RadioTower} label="Agentes" value={`${devices.length - offlineAgents}/${devices.length || 0}`} detail={`${pendingDevices.length} pendente(s) de adoção`} tone={offlineAgents || queueIssues ? "warn" : "ok"} />
+              <MetricSignalCard icon={BellRing} label="Notificações" value={`${failedNotifications}`} detail="falhas/credenciais" tone={failedNotifications ? "warn" : "ok"} />
+            </div>
+          </Tremor.Card>
+
+          <Panel title="Diagnóstico rápido" icon={DatabaseZap}>
+            <div className="grid gap-3">
+              <ConnectionSummary label="Supabase REST" value={supabaseStatus.restReachable === false ? "bloqueado" : supabaseStatus.restReachable ? "alcançável" : "não testado"} tone={supabaseStatus.restReachable === false ? "warn" : "ok"} />
+              <ConnectionSummary label="Banco" value={supabaseStatus.databaseReachable === false ? "bloqueado" : supabaseStatus.databaseUrlConfigured ? "configurado" : "pendente"} tone={supabaseStatus.databaseReachable === false || !supabaseStatus.databaseUrlConfigured ? "warn" : "ok"} />
+              <ConnectionSummary label="GPT" value={aiStatus.openaiConfigured ? "configurado" : "fallback explícito"} tone={aiStatus.openaiConfigured ? "ok" : "warn"} />
+              <ConnectionSummary label="WhatsApp" value={whatsAppStatus.connected ? "conectado" : statusPt(whatsAppStatus.status)} tone={whatsAppStatus.connected ? "ok" : "warn"} />
+              <ConnectionSummary label="SMTP" value={smtpStatus.configured ? "configurado" : "requer credencial"} tone={smtpStatus.configured ? "ok" : "warn"} />
+            </div>
+          </Panel>
+        </div>
+
+        {feedback ? <FeedbackBanner tone={feedback.tone} message={feedback.message} /> : null}
+
+        <div className="grid gap-5 xl:grid-cols-[330px_1fr]">
+          <Panel title="Seções" icon={Layers3}>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar configuração..."
+              className="mb-4 h-11 w-full border border-zinc-800 bg-black/45 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-orange-400/55"
             />
+            <div className="grid max-h-[720px] gap-2 overflow-y-auto pr-1">
+              {(filteredSections.length ? filteredSections : settingsCenter.sections).map((section) => {
+                const Icon = settingsIcon(section.id);
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => setSelectedSectionId(section.id)}
+                    className={`border p-3 text-left transition hover:border-orange-400/45 ${selectedSection?.id === section.id ? "border-orange-300/60 bg-orange-950/10" : "border-zinc-800 bg-black/35"}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="grid h-9 w-9 shrink-0 place-items-center bg-orange-500 text-black"><Icon className="h-4 w-4" /></div>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-zinc-100">{section.title}</p>
+                        <p className="mt-1 text-xs text-zinc-500">{settingsStatusPt(section.status)} | {scopePt(section.scope)}</p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </Panel>
 
-          <Panel title="E-mail" icon={Mail}>
-            <div className="grid gap-3">
-              {[smtpStatus, gmailStatus, outlookStatus, imapStatus, pop3Status].filter(Boolean).map((status) => (
-                <div key={status!.provider} className="border border-zinc-800 bg-black/35 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-semibold text-zinc-100">{status!.provider.toUpperCase()}</p>
-                    <span className={status!.configured ? "text-emerald-300" : "text-orange-300"}>{statusPt(status!.status)}</span>
-                  </div>
-                  <p className="mt-2 text-sm text-zinc-400">{status!.message}</p>
-                  {status!.requiredItems.length ? <p className="mt-2 text-xs text-zinc-500">Faltam: {status!.requiredItems.join(", ")}</p> : null}
+          {selectedSection ? (
+            <Panel title={selectedSection.title} icon={settingsIcon(selectedSection.id)}>
+              <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="max-w-3xl text-sm leading-6 text-zinc-400">{selectedSection.description}</p>
+                  <p className="mt-2 text-xs uppercase tracking-[0.16em] text-zinc-500">Escopo: {scopePt(selectedSection.scope)} | Última alteração: {formatDateTime(selectedSection.lastUpdatedAt)}</p>
                 </div>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <ConfigField label="Host SMTP" placeholder="smtp.seudominio.com" />
-              <ConfigField label="Porta" placeholder="587" />
-              <ConfigField label="Usuário" placeholder="notificacoes@empresa.com" />
-              <ConfigField label="Senha" placeholder="senha ou app password" secret />
-              <ConfigField label="Remetente" placeholder="Vulcan <notificacoes@empresa.com>" />
-              <ConfigField label="TLS/SSL" placeholder="TLS ativo" />
-              <ConfigField label="Client ID do Google" placeholder="GMAIL_CLIENT_ID" />
-              <ConfigField label="Tenant ID do Outlook" placeholder="OUTLOOK_TENANT_ID" />
-              <ConfigField label="Host IMAP" placeholder="imap.seudominio.com" />
-              <ConfigField label="Host POP3" placeholder="pop.seudominio.com" />
-            </div>
-            <ActionRow
-              primary="Testar conexão"
-              secondary="Enviar e-mail teste"
-              tertiary="Salvar configuração"
-              onPrimary={() => testIntegration("email", smtpStatus.provider)}
-              onSecondary={() => testIntegration("email", smtpStatus.provider)}
-              onTertiary={() => setFeedback({ tone: "warn", message: "As credenciais de e-mail devem ser salvas em ambiente seguro. A tela já mostra exatamente quais campos faltam." })}
-            />
-          </Panel>
+                <Tremor.Badge color={settingsToneColor(selectedSection.status)}>{settingsStatusPt(selectedSection.status)}</Tremor.Badge>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                {selectedSection.fields.map((field) => (
+                  <SettingsFieldControl
+                    key={field.key}
+                    field={field}
+                    value={selectedDraft[field.key]}
+                    onChange={(value) => {
+                      setDrafts((current) => ({
+                        ...current,
+                        [selectedSection.id]: { ...(current[selectedSection.id] ?? {}), [field.key]: value }
+                      }));
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button type="button" onClick={() => void testSection(selectedSection)} disabled={Boolean(busy)} className="inline-flex h-11 items-center gap-2 border border-zinc-800 bg-black/45 px-4 text-sm text-zinc-200 transition hover:border-orange-400/45 disabled:opacity-40">
+                  <Zap className="h-4 w-4 text-orange-300" />
+                  Testar seção
+                </button>
+                {selectedSection.canEdit ? (
+                  <button type="button" onClick={() => void saveSection(selectedSection)} disabled={Boolean(busy)} className="inline-flex h-11 items-center gap-2 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-40">
+                    <Save className="h-4 w-4" />
+                    Salvar e auditar
+                  </button>
+                ) : null}
+                {selectedSection.id === "whatsapp" ? (
+                  <button type="button" onClick={() => void testIntegration("whatsapp", whatsAppStatus.provider, whatsAppStatus.rootChannelNumber)} disabled={Boolean(busy)} className="inline-flex h-11 items-center gap-2 border border-orange-400/25 px-4 text-sm text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">
+                    <MessageCircle className="h-4 w-4" />
+                    Testar WhatsApp
+                  </button>
+                ) : null}
+                {selectedSection.id === "email" ? (
+                  <button type="button" onClick={() => void testIntegration("email", smtpStatus.provider)} disabled={Boolean(busy)} className="inline-flex h-11 items-center gap-2 border border-orange-400/25 px-4 text-sm text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">
+                    <Mail className="h-4 w-4" />
+                    Testar e-mail
+                  </button>
+                ) : null}
+              </div>
+            </Panel>
+          ) : (
+            <EmptyState title="Configurações indisponíveis" description="O backend ainda não retornou seções de configuração para este usuário." />
+          )}
         </div>
 
-        <div className="grid gap-5 xl:grid-cols-2">
-          <Panel title="Notificações e recorrências" icon={BellRing}>
+        <div className="grid gap-5 xl:grid-cols-3">
+          <Panel title="Usuários, equipes e hierarquia" icon={Network}>
             <div className="grid gap-3">
-              {schedules.map((schedule) => (
-                <div key={schedule.id} className="border border-zinc-800 bg-black/35 p-4">
-                  <p className="font-semibold text-zinc-100">{schedule.name}</p>
-                  <p className="mt-2 text-sm text-zinc-400">{schedule.recurrence} | {schedule.times.join(", ")} | {schedule.timezone}</p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.14em] text-orange-300">{schedule.channels.map(channelPt).join(" | ")}</p>
-                </div>
-              ))}
+              <ConnectionSummary label="Pessoas no escopo" value={`${hierarchy.length}`} tone={hierarchy.length ? "ok" : "warn"} />
+              <ConnectionSummary label="Equipes" value={`${teams.length}`} tone={teams.length ? "ok" : "warn"} />
+              <ConnectionSummary label="Dispositivos" value={`${devices.length}`} tone={devices.length ? "ok" : "warn"} />
             </div>
-            <ActionRow primary="Novo agendamento" secondary="Testar notificação" tertiary="Salvar regras" />
+            <p className="mt-4 text-sm leading-6 text-zinc-400">CRUD avançado continua na tela Hierarquia para evitar duplicidade. Configurações controla políticas, permissões e defaults do tenant.</p>
           </Panel>
 
-          <Panel title="Motor de relatórios automáticos" icon={Sparkles}>
+          <Panel title="Relatórios e exportações" icon={Download}>
             <div className="grid gap-3">
-              {reportTemplates.map((template) => (
-                <div key={template.id} className="border border-zinc-800 bg-black/35 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="font-semibold text-zinc-100">{template.name}</p>
-                    <span className="text-xs text-orange-300">{template.cadence}</span>
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-zinc-400">{template.description}</p>
-                </div>
+              {reportTemplates.slice(0, 3).map((template) => (
+                <ConnectionSummary key={template.id} label={template.name} value={template.enabled ? template.cadence : "pausado"} tone={template.enabled ? "ok" : "warn"} />
               ))}
             </div>
-            <ActionRow primary="Gerar prévia" secondary="Agendar relatório" tertiary="Salvar modelo" />
+            <p className="mt-4 text-sm leading-6 text-zinc-400">CSV/Excel ficam em Métricas; agendamentos e templates ficam em Notificações. Configurações mostra status e defaults.</p>
+          </Panel>
+
+          <Panel title="Agendamentos ativos" icon={BellRing}>
+            <div className="grid gap-3">
+              {schedules.slice(0, 3).map((schedule) => (
+                <ConnectionSummary key={schedule.id} label={schedule.name} value={`${schedule.recurrence} | ${schedule.channels.map(channelPt).join(", ")}`} tone={schedule.enabled ? "ok" : "warn"} />
+              ))}
+            </div>
           </Panel>
         </div>
-
-        <div className="grid gap-5 xl:grid-cols-2">
-          <ConfigSection
-            title="Segurança"
-            description="Controle fallback local, isolamento por tenant, auditoria e permissões hierárquicas."
-            status="atenção"
-            fields={[
-              ["Login local", "admin/admin somente desenvolvimento"],
-              ["RLS", "habilitado no Supabase"],
-              ["Auditoria", "eventos críticos registrados"]
-            ]}
-          />
-          <ConfigSection
-            title="Integrações"
-            description="Centralize provedores externos sem travar o Vulcan em um único fornecedor."
-            status="preparado"
-            fields={[
-              ["WhatsApp", "Canal raiz + conexões por tenant futuras"],
-              ["E-mail", "SMTP, Gmail, Outlook, IMAP e POP3"],
-              ["Push", "FCM/VAPID preparado"]
-            ]}
-          />
-        </div>
-
-        <Panel title="LGPD e privacidade operacional" icon={ShieldCheck}>
-          <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-            <div className="border border-emerald-400/20 bg-emerald-950/10 p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-emerald-200">Mensagem central</p>
-              <p className="mt-3 text-2xl font-semibold text-zinc-50">O Vulcan mede fluxo operacional, não conteúdo pessoal.</p>
-              <p className="mt-3 text-sm leading-6 text-zinc-400">
-                A coleta é orientada por política corporativa, consentimento e transparência. O objetivo é revelar gargalos, filas, ociosidade e oportunidades de automação sem capturar conteúdo privado.
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {[
-                ["Coleta", "app ativo, duração, troca de contexto, status do agente e métricas agregadas"],
-                ["Não coleta", "senhas, teclas digitadas, áudio, webcam, prints contínuos ou mensagens privadas"],
-                ["Controles", "retenção, auditoria, permissões por hierarquia e isolamento por tenant"],
-                ["Confiança", "colaborador sabe o que é medido e gestores enxergam apenas o escopo autorizado"]
-              ].map(([title, text]) => (
-                <div key={title} className="border border-zinc-800 bg-black/35 p-4">
-                  <p className="font-semibold text-zinc-100">{title}</p>
-                  <p className="mt-2 text-sm leading-6 text-zinc-400">{text}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-          <ActionRow primary="Revisar política" secondary="Exportar dados" tertiary="Registrar consentimento" />
-        </Panel>
       </div>
     </ViewFrame>
   );
@@ -6171,6 +6267,121 @@ function ConnectionSummary({ label, value, tone }: { label: string; value: strin
       </div>
     </Tremor.Card>
   );
+}
+
+function SettingsFieldControl({
+  field,
+  value,
+  onChange
+}: {
+  field: SettingsField;
+  value: string | number | boolean | null | undefined;
+  onChange: (value: string | number | boolean | null) => void;
+}) {
+  const disabled = !field.editable || field.valueType === "readonly" || field.valueType === "secret";
+  const statusColor = field.status === "ok" ? "emerald" : field.status === "error" ? "rose" : field.status === "missing" ? "orange" : "zinc";
+  return (
+    <motion.div
+      className={`border p-4 ${disabled ? "border-zinc-800 bg-black/30" : "border-zinc-800 bg-black/45"}`}
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: disabled ? 0 : -2 }}
+    >
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-zinc-100">{field.label}</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">{field.description}</p>
+        </div>
+        <Tremor.Badge color={statusColor} size="xs">{settingsStatusPt(field.status)}</Tremor.Badge>
+      </div>
+
+      {field.valueType === "boolean" ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(!Boolean(value))}
+          className={`inline-flex h-10 items-center gap-3 border px-3 text-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${Boolean(value) ? "border-emerald-400/30 text-emerald-200" : "border-zinc-700 text-zinc-400"}`}
+        >
+          <span className={`h-3 w-3 ${Boolean(value) ? "bg-emerald-300" : "bg-zinc-600"}`} />
+          {Boolean(value) ? "Ativo" : "Inativo"}
+        </button>
+      ) : field.valueType === "select" ? (
+        <select
+          disabled={disabled}
+          value={String(value ?? "")}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-11 w-full border border-zinc-800 bg-black/55 px-3 text-sm text-zinc-100 outline-none transition focus:border-orange-400/55 disabled:cursor-not-allowed disabled:opacity-55"
+        >
+          {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      ) : field.valueType === "number" ? (
+        <div className="flex items-center gap-2">
+          <input
+            disabled={disabled}
+            type="number"
+            value={value === null || value === undefined ? "" : Number(value)}
+            onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value))}
+            className="h-11 min-w-0 flex-1 border border-zinc-800 bg-black/55 px-3 text-sm text-zinc-100 outline-none transition focus:border-orange-400/55 disabled:cursor-not-allowed disabled:opacity-55"
+          />
+          {field.unit ? <span className="border border-zinc-800 px-3 py-3 text-xs text-zinc-500">{field.unit}</span> : null}
+        </div>
+      ) : field.valueType === "secret" ? (
+        <div className="border border-dashed border-orange-400/25 bg-orange-950/10 p-3">
+          <p className="text-sm text-orange-100">{String(value ?? "requer credencial")}</p>
+          <p className="mt-1 text-xs text-zinc-500">Secret protegido: configure por `.env` ou cofre seguro. O valor real nunca volta para o navegador.</p>
+        </div>
+      ) : field.valueType === "readonly" ? (
+        <div className="border border-zinc-800 bg-zinc-950/60 p-3 text-sm text-zinc-200">{String(value ?? "não informado")}</div>
+      ) : (
+        <input
+          disabled={disabled}
+          value={String(value ?? "")}
+          placeholder={field.placeholder ?? undefined}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-11 w-full border border-zinc-800 bg-black/55 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-orange-400/55 disabled:cursor-not-allowed disabled:opacity-55"
+        />
+      )}
+
+      {field.required ? <p className="mt-2 text-xs text-zinc-600">Obrigatório para produção/piloto.</p> : null}
+    </motion.div>
+  );
+}
+
+function settingsStatusPt(status: string) {
+  const map: Record<string, string> = {
+    ok: "OK",
+    attention: "atenção",
+    missing: "requer credencial",
+    error: "erro",
+    mock: "mock explícito",
+    readonly: "somente leitura",
+    disabled: "desativado"
+  };
+  return map[status] ?? status;
+}
+
+function settingsToneColor(status: string): "emerald" | "orange" | "rose" | "zinc" {
+  if (status === "ok") return "emerald";
+  if (status === "error") return "rose";
+  if (status === "missing" || status === "attention" || status === "mock") return "orange";
+  return "zinc";
+}
+
+function settingsIcon(sectionId: string): typeof Gauge {
+  const map: Record<string, typeof Gauge> = {
+    company: Building2,
+    agents: RadioTower,
+    collection: ShieldCheck,
+    metrics: Gauge,
+    ai: Brain,
+    notifications: BellRing,
+    whatsapp: MessageCircle,
+    email: Mail,
+    security: Lock,
+    privacy: ShieldCheck,
+    appearance: Layers3
+  };
+  return map[sectionId] ?? Layers3;
 }
 
 function FeedbackBanner({ tone, message }: { tone: "ok" | "warn"; message: string }) {

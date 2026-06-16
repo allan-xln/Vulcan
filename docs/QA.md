@@ -69,6 +69,35 @@ Pendencias de QA desta rodada:
 - validar envio real WhatsApp/e-mail somente quando credenciais existirem;
 - validar canal Windows/agente quando endpoint de ack local for implementado.
 
+### Rodada atual - 2026-06-15 - Configuracoes
+
+- `PYTHONPATH=backend/api python3 -m py_compile backend/api/app/schemas.py backend/api/app/repository.py backend/api/app/main.py scripts/seed_demo.py`: aprovado.
+- `corepack pnpm test:api`: aprovado, 15 testes.
+- `corepack pnpm lint`: aprovado.
+- `corepack pnpm typecheck`: aprovado.
+- `corepack pnpm build`: aprovado.
+- `corepack pnpm supabase:validate`: aprovado.
+- `corepack pnpm seed:demo`: aprovado, com concorrencia do agente real prolongando locks de `activity_events`.
+- `corepack pnpm demo:validate`: aprovado.
+- `corepack pnpm verify:phase2`: aprovado.
+
+Smoke real:
+
+- `GET /settings`: aprovado, 11 secoes.
+- `GET /settings/summary`: aprovado.
+- `POST /settings/metrics/test`: aprovado.
+- `PUT /settings/company`: aprovado, salva e audita.
+- `PUT /settings/metrics` com pesos invalidos: reprovado corretamente com `400`.
+- `PUT /settings/company` como `operador1`: bloqueado corretamente com `400 sem permissao para alterar configuracoes`.
+- `GET /audit-logs`: aprovado e contem `settings.updated`.
+
+Correcoes feitas:
+
+- Configuracoes passou a usar `tenant_settings.settings`.
+- Secrets aparecem apenas como status.
+- Campos readonly/secret nao sao aceitos em `PUT`.
+- Auditoria legada foi normalizada com `coalesce(resource_type, entity_table, 'unknown')`, evitando 500 em logs antigos.
+
 ### Rodada atual - 2026-06-11
 
 - `corepack pnpm lint`: aprovado.

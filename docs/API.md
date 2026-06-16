@@ -59,6 +59,12 @@ Base service: `backend/api`
 - `GET /integrations/email/status`
 - `POST /integrations/email/test`
 - `GET /integrations/status`
+- `GET /settings`
+- `GET /settings/summary`
+- `GET /settings/{section_id}`
+- `PUT /settings/{section_id}`
+- `POST /settings/{section_id}/test`
+- `POST /settings/{section_id}/reset`
 - `GET /ai/status`
 - `POST /ai/analyze`
 - `POST /ai/insights/generate`
@@ -180,6 +186,23 @@ Mais detalhes: `docs/INSIGHTS.md`.
 `GET /notifications/schedules` le agendamentos persistidos em `notifications` com `notification_type='schedule_config'`; se nao houver registros, devolve defaults comerciais. Endpoints `POST/PUT/DELETE/pause/resume` persistem a configuracao no mesmo modelo de compatibilidade.
 
 Mais detalhes: `docs/NOTIFICATIONS.md`, `docs/WHATSAPP.md`, `docs/EMAIL.md` e `docs/AGENT_NOTIFICATIONS.md`.
+
+## Configuracoes
+
+`GET /settings` retorna a central completa de configuracoes com summary, secoes, campos, escopo, status, editabilidade e mascaramento de secrets.
+
+`PUT /settings/{section_id}` salva apenas campos conhecidos/editaveis da secao. Campos `secret` e `readonly` sao recusados pelo backend. Alteracoes persistem em `tenant_settings.settings` e geram `audit_logs`.
+
+`POST /settings/{section_id}/test` valida a secao e retorna `ok`, `attention`, `missing`, `mock` ou `error` sem alterar dados.
+
+Validacoes importantes:
+
+- pesos de Metricas precisam somar 100%;
+- screenshots e URL do navegador sao recusados por padrao;
+- operador sem escopo de tenant nao altera configuracoes;
+- secrets nunca voltam para o frontend.
+
+Mais detalhes: `docs/SETTINGS.md` e `docs/CONFIGURATION.md`.
 
 ## Metricas Detalhadas E Exportacao
 

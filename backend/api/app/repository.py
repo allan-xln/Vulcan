@@ -31,6 +31,7 @@ from app.schemas import (
     NotificationScheduleCreate,
     NotificationSendRequest,
     NotificationSendResponse,
+    SettingsSectionUpdate,
     TeamCreate,
     TeamMemberCreate,
     TeamUpdate,
@@ -77,6 +78,185 @@ DEFAULT_NOTIFICATION_TEMPLATES: list[dict] = [
     {"id": "tpl-system-device", "channel": "system", "notificationType": "dispositivo_aguardando_adocao", "title": "Dispositivo aguardando adoção", "body": "{{dispositivo}} apareceu no Vulcan e precisa ser vinculado a usuário/equipe.", "variables": ["dispositivo"], "language": "pt-BR", "version": 1, "active": True},
     {"id": "tpl-windows-policy", "channel": "windows", "notificationType": "coleta_limitada", "title": "Vulcan precisa de atenção", "body": "Sua coleta está limitada por política do sistema. O Vulcan mede fluxo operacional, não conteúdo pessoal.", "variables": ["usuario"], "language": "pt-BR", "version": 1, "active": True},
 ]
+
+
+SETTINGS_SECTION_DEFINITIONS: list[dict] = [
+    {
+        "id": "company",
+        "title": "Empresa",
+        "description": "Dados que aparecem em dashboards, relatórios e notificações.",
+        "scope": "tenant",
+        "fields": [
+            {"key": "displayName", "label": "Nome exibido", "valueType": "text", "description": "Nome comercial da empresa dentro do Vulcan.", "required": True},
+            {"key": "legalName", "label": "Razão social", "valueType": "text", "description": "Nome legal para relatórios e auditoria.", "required": False},
+            {"key": "slug", "label": "Slug", "valueType": "text", "description": "Identificador único usado em integrações e URLs.", "required": True},
+            {"key": "timezone", "label": "Fuso horário", "valueType": "select", "description": "Base de datas para métricas, relatórios e agendamentos.", "required": True, "options": ["America/Sao_Paulo", "America/Manaus", "America/Fortaleza", "UTC"]},
+            {"key": "language", "label": "Idioma padrão", "valueType": "select", "description": "Idioma padrão da experiência.", "required": True, "options": ["pt-BR", "en-US"]},
+            {"key": "currency", "label": "Moeda", "valueType": "select", "description": "Moeda usada no cálculo de economia estimada.", "required": True, "options": ["BRL", "USD", "EUR"]},
+            {"key": "technicalOwnerEmail", "label": "Responsável técnico", "valueType": "text", "description": "E-mail para alertas de infraestrutura.", "required": False},
+        ],
+    },
+    {
+        "id": "agents",
+        "title": "Agentes e dispositivos",
+        "description": "Controla heartbeat, sync, lote, timeout e adoção de dispositivos.",
+        "scope": "agent",
+        "fields": [
+            {"key": "heartbeatIntervalSeconds", "label": "Heartbeat", "valueType": "number", "description": "Intervalo em segundos entre sinais de vida do agente.", "required": True, "unit": "s"},
+            {"key": "syncIntervalSeconds", "label": "Sincronização", "valueType": "number", "description": "Intervalo em segundos entre envios de eventos.", "required": True, "unit": "s"},
+            {"key": "batchSize", "label": "Tamanho do lote", "valueType": "number", "description": "Quantidade máxima de eventos por sync.", "required": True},
+            {"key": "requestTimeoutSeconds", "label": "Timeout", "valueType": "number", "description": "Tempo máximo de chamada do agente para a API.", "required": True, "unit": "s"},
+            {"key": "queueLimit", "label": "Limite de fila offline", "valueType": "number", "description": "Dispara alerta quando a fila local ultrapassar esse limite.", "required": True},
+            {"key": "requireAdoption", "label": "Exigir adoção", "valueType": "boolean", "description": "Dispositivos novos ficam pendentes até vínculo por admin.", "required": True},
+            {"key": "allowDryAdoption", "label": "Permitir adoção seca", "valueType": "boolean", "description": "Admin pode adotar e completar dados depois.", "required": False},
+        ],
+    },
+    {
+        "id": "collection",
+        "title": "Políticas de coleta",
+        "description": "Define exatamente o que o agente pode medir, com padrão LGPD seguro.",
+        "scope": "tenant",
+        "fields": [
+            {"key": "collectActiveApp", "label": "App ativo", "valueType": "boolean", "description": "Coleta o aplicativo ativo para medir fluxo operacional.", "required": True},
+            {"key": "collectWindowTitle", "label": "Título da janela", "valueType": "boolean", "description": "Coleta título da janela quando permitido por política.", "required": False},
+            {"key": "collectIdleTime", "label": "Tempo ocioso", "valueType": "boolean", "description": "Mede ociosidade operacional sem capturar conteúdo.", "required": True},
+            {"key": "collectContextSwitch", "label": "Troca de contexto", "valueType": "boolean", "description": "Mede alternância entre sistemas.", "required": True},
+            {"key": "collectBrowserUrl", "label": "URL do navegador", "valueType": "boolean", "description": "Desativado por padrão; exige política específica.", "required": False},
+            {"key": "screenshotsEnabled", "label": "Screenshots", "valueType": "boolean", "description": "Fora do MVP e deve permanecer desativado.", "required": False},
+            {"key": "privacyMode", "label": "Modo privacidade", "valueType": "boolean", "description": "Reduz granularidade e privilegia métricas agregadas.", "required": False},
+            {"key": "retentionDays", "label": "Retenção", "valueType": "number", "description": "Dias de retenção de dados operacionais.", "required": True, "unit": "dias"},
+        ],
+    },
+    {
+        "id": "metrics",
+        "title": "Métricas",
+        "description": "Regras de cálculo para foco, ociosidade, economia e saúde operacional.",
+        "scope": "tenant",
+        "fields": [
+            {"key": "focusTarget", "label": "Meta de foco", "valueType": "number", "description": "Score desejado de foco operacional.", "required": True},
+            {"key": "idleLimitPercent", "label": "Limite de ociosidade", "valueType": "number", "description": "Percentual que dispara atenção.", "required": True, "unit": "%"},
+            {"key": "contextSwitchLimitPerHour", "label": "Trocas por hora", "valueType": "number", "description": "Limite de alternância por hora.", "required": True},
+            {"key": "hourlyCostBRL", "label": "Valor/hora", "valueType": "number", "description": "Base para economia/perda estimada.", "required": True, "unit": "R$"},
+            {"key": "weightAgents", "label": "Peso agentes", "valueType": "number", "description": "Peso no índice de saúde operacional.", "required": True, "unit": "%"},
+            {"key": "weightFocus", "label": "Peso foco", "valueType": "number", "description": "Peso no índice de saúde operacional.", "required": True, "unit": "%"},
+            {"key": "weightIdle", "label": "Peso ociosidade", "valueType": "number", "description": "Peso no índice de saúde operacional.", "required": True, "unit": "%"},
+            {"key": "weightContext", "label": "Peso contexto", "valueType": "number", "description": "Peso no índice de saúde operacional.", "required": True, "unit": "%"},
+            {"key": "weightBottlenecks", "label": "Peso gargalos", "valueType": "number", "description": "Peso no índice de saúde operacional.", "required": True, "unit": "%"},
+        ],
+    },
+    {
+        "id": "ai",
+        "title": "Insights e IA",
+        "description": "Roteamento GPT/Llama, fallback explícito, timeout e limites de custo.",
+        "scope": "tenant",
+        "fields": [
+            {"key": "mode", "label": "Modo", "valueType": "select", "description": "Define se a IA usa produção ou fallback explícito.", "required": True, "options": ["rules_fallback", "hybrid", "production"]},
+            {"key": "operationalProvider", "label": "Provider operacional", "valueType": "select", "description": "Provider para análises recorrentes baratas.", "required": True, "options": ["llama", "ollama", "groq", "openrouter", "rules"]},
+            {"key": "executiveProvider", "label": "Provider executivo", "valueType": "select", "description": "Provider para análises premium.", "required": True, "options": ["gpt", "openai", "rules"]},
+            {"key": "timeoutSeconds", "label": "Timeout IA", "valueType": "number", "description": "Tempo máximo por chamada de IA.", "required": True, "unit": "s"},
+            {"key": "monthlyBudgetBRL", "label": "Limite mensal", "valueType": "number", "description": "Controle simples de custo mensal.", "required": False, "unit": "R$"},
+            {"key": "openaiApiKey", "label": "OpenAI API key", "valueType": "secret", "description": "Secret deve ficar no ambiente/cofre. O frontend vê apenas status.", "editable": False, "isSecret": True},
+            {"key": "llamaApiKey", "label": "Llama/OpenRouter/Groq key", "valueType": "secret", "description": "Secret deve ficar no ambiente/cofre. O frontend vê apenas status.", "editable": False, "isSecret": True},
+        ],
+    },
+    {
+        "id": "notifications",
+        "title": "Notificações",
+        "description": "Regras globais de prioridade, resumos, janela silenciosa e retry.",
+        "scope": "tenant",
+        "fields": [
+            {"key": "enabled", "label": "Notificações ativas", "valueType": "boolean", "description": "Liga/desliga orquestração de notificações do tenant.", "required": True},
+            {"key": "criticalRealtime", "label": "Críticos em tempo real", "valueType": "boolean", "description": "Permite envio imediato de eventos críticos.", "required": True},
+            {"key": "dailySummary", "label": "Resumo diário", "valueType": "boolean", "description": "Ativa resumo diário para gestores.", "required": False},
+            {"key": "weeklySummary", "label": "Resumo semanal", "valueType": "boolean", "description": "Ativa resumo semanal executivo.", "required": False},
+            {"key": "quietStart", "label": "Silêncio início", "valueType": "text", "description": "Início da janela silenciosa.", "required": False},
+            {"key": "quietEnd", "label": "Silêncio fim", "valueType": "text", "description": "Fim da janela silenciosa.", "required": False},
+            {"key": "maxAttempts", "label": "Tentativas", "valueType": "number", "description": "Máximo de tentativas por notificação.", "required": True},
+        ],
+    },
+    {
+        "id": "whatsapp",
+        "title": "WhatsApp",
+        "description": "Status do canal raiz e provider de envio. Secrets ficam fora do frontend.",
+        "scope": "system",
+        "fields": [
+            {"key": "rootEnabled", "label": "Canal raiz", "valueType": "readonly", "description": "Ligado por env ROOT_WHATSAPP_ENABLED.", "editable": False},
+            {"key": "rootNumber", "label": "Número raiz", "valueType": "readonly", "description": "Número central configurado por env.", "editable": False},
+            {"key": "provider", "label": "Provider", "valueType": "readonly", "description": "Provider atual de WhatsApp.", "editable": False},
+            {"key": "accessToken", "label": "Token WhatsApp", "valueType": "secret", "description": "Secret fica no ambiente/cofre seguro.", "editable": False, "isSecret": True},
+            {"key": "defaultRecipients", "label": "Destinatários padrão", "valueType": "text", "description": "Papéis que recebem alertas críticos por padrão.", "required": False},
+            {"key": "mockMode", "label": "Modo mock explícito", "valueType": "boolean", "description": "Permite simulação sem fingir entrega real.", "required": True},
+        ],
+    },
+    {
+        "id": "email",
+        "title": "E-mail",
+        "description": "SMTP/OAuth para envio; IMAP/POP3 somente leitura/consulta.",
+        "scope": "tenant",
+        "fields": [
+            {"key": "provider", "label": "Provider", "valueType": "select", "description": "Canal principal de envio.", "required": True, "options": ["smtp", "gmail", "outlook", "resend", "sendgrid"]},
+            {"key": "fromName", "label": "Nome do remetente", "valueType": "text", "description": "Nome exibido nos e-mails.", "required": False},
+            {"key": "smtpConfigured", "label": "SMTP", "valueType": "readonly", "description": "Status do SMTP por env/cofre.", "editable": False},
+            {"key": "smtpPassword", "label": "Senha SMTP", "valueType": "secret", "description": "Secret fica no ambiente/cofre seguro.", "editable": False, "isSecret": True},
+            {"key": "imapReadEnabled", "label": "Leitura IMAP", "valueType": "boolean", "description": "Consulta futura de caixa, não envio.", "required": False},
+            {"key": "pop3ReadEnabled", "label": "Leitura POP3", "valueType": "boolean", "description": "Consulta futura de caixa, não envio.", "required": False},
+        ],
+    },
+    {
+        "id": "security",
+        "title": "Segurança",
+        "description": "Auth, RLS, CORS, tokens de agente, auditoria e fallback local.",
+        "scope": "system",
+        "fields": [
+            {"key": "authProvider", "label": "Auth provider", "valueType": "readonly", "description": "Provider ativo de autenticação.", "editable": False},
+            {"key": "localFallback", "label": "Login local dev", "valueType": "readonly", "description": "Fallback local deve ficar fora de produção.", "editable": False},
+            {"key": "rlsStatus", "label": "RLS", "valueType": "readonly", "description": "Status de políticas Supabase.", "editable": False},
+            {"key": "corsMode", "label": "CORS", "valueType": "readonly", "description": "Origens permitidas por env.", "editable": False},
+            {"key": "auditEnabled", "label": "Auditoria", "valueType": "readonly", "description": "Alterações críticas geram audit_log.", "editable": False},
+            {"key": "sessionMinutes", "label": "Expiração de sessão", "valueType": "number", "description": "Duração de sessão planejada para clientes.", "required": False, "unit": "min"},
+        ],
+    },
+    {
+        "id": "privacy",
+        "title": "LGPD e privacidade",
+        "description": "Retenção, transparência, consentimento e limites de coleta.",
+        "scope": "tenant",
+        "fields": [
+            {"key": "privacyStatement", "label": "Mensagem central", "valueType": "readonly", "description": "O Vulcan mede fluxo operacional, não conteúdo pessoal.", "editable": False},
+            {"key": "consentRequired", "label": "Exigir consentimento", "valueType": "boolean", "description": "Exibe política de coleta ao colaborador.", "required": True},
+            {"key": "allowUserPause", "label": "Permitir pausa", "valueType": "boolean", "description": "Permite pausa controlada pelo colaborador quando política permitir.", "required": False},
+            {"key": "dataExportEnabled", "label": "Exportação de dados", "valueType": "boolean", "description": "Permite exportação LGPD por admin.", "required": True},
+            {"key": "anonymizeAfterDays", "label": "Anonimizar após", "valueType": "number", "description": "Dias para anonimização/compactação.", "required": False, "unit": "dias"},
+        ],
+    },
+    {
+        "id": "appearance",
+        "title": "Aparência",
+        "description": "Densidade, movimento e acabamento visual sem quebrar a UI.",
+        "scope": "user",
+        "fields": [
+            {"key": "theme", "label": "Tema", "valueType": "select", "description": "Tema padrão do produto.", "required": True, "options": ["dark"]},
+            {"key": "glowIntensity", "label": "Intensidade de glow", "valueType": "select", "description": "Controla brilho sem prejudicar leitura.", "required": True, "options": ["baixo", "medio", "alto"]},
+            {"key": "density", "label": "Densidade", "valueType": "select", "description": "Ajusta espaçamento para operação diária.", "required": True, "options": ["confortável", "compacto"]},
+            {"key": "reducedMotion", "label": "Movimento reduzido", "valueType": "boolean", "description": "Respeita prefers-reduced-motion e reduz animações.", "required": False},
+        ],
+    },
+]
+
+
+DEFAULT_SETTINGS_VALUES: dict[str, dict] = {
+    "company": {"displayName": "Vulcan Demo", "legalName": "Vulcan Demo", "slug": "vulcan-demo", "timezone": "America/Sao_Paulo", "language": "pt-BR", "currency": "BRL", "technicalOwnerEmail": "teste@vulcan.local"},
+    "agents": {"heartbeatIntervalSeconds": 60, "syncIntervalSeconds": 120, "batchSize": 50, "requestTimeoutSeconds": 30, "queueLimit": 500, "requireAdoption": True, "allowDryAdoption": True},
+    "collection": {"collectActiveApp": True, "collectWindowTitle": True, "collectIdleTime": True, "collectContextSwitch": True, "collectBrowserUrl": False, "screenshotsEnabled": False, "privacyMode": False, "retentionDays": 90},
+    "metrics": {"focusTarget": 72, "idleLimitPercent": 30, "contextSwitchLimitPerHour": 40, "hourlyCostBRL": 95, "weightAgents": 20, "weightFocus": 25, "weightIdle": 20, "weightContext": 15, "weightBottlenecks": 20},
+    "ai": {"mode": "rules_fallback", "operationalProvider": "llama", "executiveProvider": "gpt", "timeoutSeconds": 60, "monthlyBudgetBRL": 500},
+    "notifications": {"enabled": True, "criticalRealtime": True, "dailySummary": True, "weeklySummary": True, "quietStart": "22:00", "quietEnd": "07:00", "maxAttempts": 3},
+    "whatsapp": {"defaultRecipients": "diretor, gerente, supervisor", "mockMode": True},
+    "email": {"provider": "smtp", "fromName": "Vulcan Notifications", "imapReadEnabled": False, "pop3ReadEnabled": False},
+    "security": {"sessionMinutes": 480},
+    "privacy": {"consentRequired": True, "allowUserPause": False, "dataExportEnabled": True, "anonymizeAfterDays": 365},
+    "appearance": {"theme": "dark", "glowIntensity": "medio", "density": "confortável", "reducedMotion": False},
+}
 
 
 @dataclass(frozen=True)
@@ -385,6 +565,302 @@ class VulcanRepository:
                     (access.tenant_id,),
                 ).fetchall()
             return list(rows)
+
+    def _can_edit_settings(self, access: AccessScope, context: AuthContext) -> bool:
+        return access.is_root or access.scope in {"tenant", "global"} or context.role in {"tenant_admin", "owner", "root"}
+
+    def _field_definition(self, section_id: str, key: str) -> dict | None:
+        section = next((item for item in SETTINGS_SECTION_DEFINITIONS if item["id"] == section_id), None)
+        if not section:
+            return None
+        return next((field for field in section["fields"] if field["key"] == key), None)
+
+    def _env_status_value(self, section_id: str, key: str, tenant_row: dict | None = None) -> tuple[object, str]:
+        settings = self.settings
+        if section_id == "ai" and key == "openaiApiKey":
+            return ("configurado" if settings.openai_configured else "requer credencial", "ok" if settings.openai_configured else "missing")
+        if section_id == "ai" and key == "llamaApiKey":
+            configured = bool(settings.llama_base_url)
+            return ("configurado" if configured else "requer credencial", "ok" if configured else "missing")
+        if section_id == "whatsapp" and key == "rootEnabled":
+            return ("ativo" if settings.root_whatsapp_enabled else "desativado", "ok" if settings.root_whatsapp_enabled else "missing")
+        if section_id == "whatsapp" and key == "rootNumber":
+            return (settings.root_whatsapp_number or "requer configuração", "ok" if settings.root_whatsapp_number else "missing")
+        if section_id == "whatsapp" and key == "provider":
+            return (settings.root_whatsapp_provider or settings.whatsapp_provider or "não definido", "ok" if (settings.root_whatsapp_provider or settings.whatsapp_provider) else "missing")
+        if section_id == "whatsapp" and key == "accessToken":
+            configured = bool(settings.whatsapp_access_token and settings.whatsapp_phone_number_id)
+            return ("configurado" if configured else "requer credencial", "ok" if configured else "missing")
+        if section_id == "email" and key == "smtpConfigured":
+            configured = bool(settings.smtp_host and settings.smtp_user and settings.smtp_pass and settings.email_from)
+            return ("configurado" if configured else "requer credencial", "ok" if configured else "missing")
+        if section_id == "email" and key == "smtpPassword":
+            return ("configurado" if settings.smtp_pass else "requer credencial", "ok" if settings.smtp_pass else "missing")
+        if section_id == "security" and key == "authProvider":
+            return (settings.auth_provider, "ok" if settings.auth_provider == "supabase" else "attention")
+        if section_id == "security" and key == "localFallback":
+            enabled = settings.local_test_auth_enabled or settings.mock_auth or settings.auth_provider == "local"
+            return ("ativo" if enabled else "inativo", "attention" if enabled and settings.environment == "production" else "ok")
+        if section_id == "security" and key == "rlsStatus":
+            return ("habilitado", "ok")
+        if section_id == "security" and key == "corsMode":
+            return ("restrito por env" if settings.environment == "production" else "local flexível", "ok" if settings.environment != "production" or settings.api_allowed_origin_regex is None else "attention")
+        if section_id == "security" and key == "auditEnabled":
+            return ("ativo", "ok")
+        if section_id == "privacy" and key == "privacyStatement":
+            return ("O Vulcan mede fluxo operacional, não conteúdo pessoal.", "ok")
+        return (None, "ok")
+
+    def _validate_settings_values(self, section_id: str, values: dict) -> dict:
+        if section_id not in {item["id"] for item in SETTINGS_SECTION_DEFINITIONS}:
+            raise ValueError("seção de configuração desconhecida")
+        cleaned: dict = {}
+        for key, value in values.items():
+            definition = self._field_definition(section_id, key)
+            if not definition:
+                raise ValueError(f"campo desconhecido: {key}")
+            if definition.get("isSecret") or definition.get("editable") is False or definition.get("valueType") == "readonly":
+                raise ValueError(f"campo somente leitura ou sensível: {key}")
+            value_type = definition.get("valueType")
+            if value_type == "number":
+                try:
+                    number = float(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{definition['label']} deve ser número") from exc
+                if number < 0:
+                    raise ValueError(f"{definition['label']} não pode ser negativo")
+                cleaned[key] = int(number) if number.is_integer() else number
+            elif value_type == "boolean":
+                if isinstance(value, bool):
+                    cleaned[key] = value
+                elif isinstance(value, str) and value.lower() in {"true", "false"}:
+                    cleaned[key] = value.lower() == "true"
+                else:
+                    raise ValueError(f"{definition['label']} deve ser verdadeiro/falso")
+            elif value_type == "select":
+                options = definition.get("options") or []
+                if options and value not in options:
+                    raise ValueError(f"{definition['label']} deve ser uma opção válida")
+                cleaned[key] = value
+            else:
+                text = "" if value is None else str(value).strip()
+                if definition.get("required") and not text:
+                    raise ValueError(f"{definition['label']} é obrigatório")
+                cleaned[key] = text
+
+        if section_id == "company":
+            slug = cleaned.get("slug")
+            if slug and not all(char.isalnum() or char in {"-", "_"} for char in slug):
+                raise ValueError("Slug deve conter apenas letras, números, hífen ou underscore")
+            email = cleaned.get("technicalOwnerEmail")
+            if email and "@" not in email:
+                raise ValueError("Responsável técnico deve ser um e-mail válido")
+        if section_id == "agents":
+            if "heartbeatIntervalSeconds" in cleaned and not 10 <= cleaned["heartbeatIntervalSeconds"] <= 3600:
+                raise ValueError("Heartbeat deve ficar entre 10 e 3600 segundos")
+            if "syncIntervalSeconds" in cleaned and not 10 <= cleaned["syncIntervalSeconds"] <= 3600:
+                raise ValueError("Sync deve ficar entre 10 e 3600 segundos")
+            if "batchSize" in cleaned and not 1 <= cleaned["batchSize"] <= 1000:
+                raise ValueError("Tamanho do lote deve ficar entre 1 e 1000")
+        if section_id == "collection":
+            if cleaned.get("screenshotsEnabled"):
+                raise ValueError("Screenshots contínuos estão fora do MVP e devem permanecer desativados")
+            if cleaned.get("collectBrowserUrl"):
+                raise ValueError("Coleta de URL está desativada por padrão e exige política específica fora do MVP")
+        if section_id == "metrics":
+            weights = ["weightAgents", "weightFocus", "weightIdle", "weightContext", "weightBottlenecks"]
+            merged = {**DEFAULT_SETTINGS_VALUES["metrics"], **cleaned}
+            total = sum(float(merged.get(item, 0)) for item in weights)
+            if round(total, 2) != 100:
+                raise ValueError("Pesos da Saúde Operacional precisam somar 100%")
+        return cleaned
+
+    def _settings_rows(self, conn: psycopg.Connection, access: AccessScope) -> dict:
+        row = conn.execute(
+            """
+            select t.id as "tenantId", t.display_name as "displayName", t.legal_name as "legalName",
+                   t.slug, t.region, t.plan, t.status,
+                   coalesce(ts.default_locale, 'pt-BR') as "language",
+                   coalesce(ts.default_timezone, 'America/Sao_Paulo') as "timezone",
+                   coalesce(ts.retention_days, 90) as "retentionDays",
+                   coalesce(ts.analytics_enabled, true) as "analyticsEnabled",
+                   coalesce(ts.ai_explanations_enabled, true) as "aiExplanationsEnabled",
+                   coalesce(ts.settings, '{}'::jsonb) as settings,
+                   ts.updated_at as "lastUpdatedAt"
+            from public.tenants t
+            left join public.tenant_settings ts on ts.tenant_id = t.id
+            where t.id = %s
+            """,
+            (access.tenant_id,),
+        ).fetchone()
+        return dict(row) if row else {}
+
+    def _build_settings_response(self, context: AuthContext, tenant_row: dict, can_edit: bool) -> dict:
+        persisted = tenant_row.get("settings") or {}
+        sections: list[dict] = []
+        last_updated = tenant_row.get("lastUpdatedAt")
+        company_overrides = {
+            "displayName": tenant_row.get("displayName") or DEFAULT_SETTINGS_VALUES["company"]["displayName"],
+            "legalName": tenant_row.get("legalName") or DEFAULT_SETTINGS_VALUES["company"]["legalName"],
+            "slug": tenant_row.get("slug") or DEFAULT_SETTINGS_VALUES["company"]["slug"],
+            "timezone": tenant_row.get("timezone") or DEFAULT_SETTINGS_VALUES["company"]["timezone"],
+            "language": tenant_row.get("language") or DEFAULT_SETTINGS_VALUES["company"]["language"],
+            "retentionDays": tenant_row.get("retentionDays") or DEFAULT_SETTINGS_VALUES["collection"]["retentionDays"],
+        }
+        for definition in SETTINGS_SECTION_DEFINITIONS:
+            section_id = definition["id"]
+            default_values = DEFAULT_SETTINGS_VALUES.get(section_id, {})
+            values = {**default_values, **(persisted.get(section_id) or {})}
+            if section_id == "company":
+                values.update({k: v for k, v in company_overrides.items() if k in {"displayName", "legalName", "slug", "timezone", "language"}})
+            if section_id == "collection":
+                values["retentionDays"] = company_overrides["retentionDays"]
+
+            section_status = "ok"
+            fields: list[dict] = []
+            for field_def in definition["fields"]:
+                key = field_def["key"]
+                value = values.get(key)
+                field_status = "ok"
+                computed, computed_status = self._env_status_value(section_id, key, tenant_row)
+                if computed is not None:
+                    value = computed
+                    field_status = computed_status
+                if field_def.get("required") and (value is None or value == ""):
+                    field_status = "missing"
+                if field_def.get("isSecret") and field_status == "ok":
+                    value = "configurado"
+                editable = bool(field_def.get("editable", True)) and can_edit
+                fields.append({
+                    **field_def,
+                    "value": value,
+                    "status": field_status,
+                    "editable": editable,
+                    "required": bool(field_def.get("required", False)),
+                    "isSecret": bool(field_def.get("isSecret", False)),
+                    "options": field_def.get("options", []),
+                })
+                if field_status in {"error", "missing"}:
+                    section_status = field_status
+                elif field_status in {"attention", "mock"} and section_status == "ok":
+                    section_status = field_status
+            sections.append({
+                "id": section_id,
+                "title": definition["title"],
+                "description": definition["description"],
+                "scope": definition.get("scope", "tenant"),
+                "status": section_status,
+                "canEdit": can_edit and any(field["editable"] for field in fields),
+                "lastUpdatedAt": last_updated,
+                "fields": fields,
+            })
+        counters = defaultdict(int)
+        for section in sections:
+            counters[section["status"]] += 1
+        critical_pending = [section["title"] for section in sections if section["status"] in {"missing", "error"}]
+        statuses = {section["id"]: section["status"] for section in sections}
+        return {
+            "summary": {
+                "tenantId": tenant_row.get("tenantId", DEMO_TENANT_ID),
+                "environment": self.settings.environment,
+                "canEdit": can_edit,
+                "totalSections": len(sections),
+                "ok": counters["ok"],
+                "attention": counters["attention"],
+                "missing": counters["missing"],
+                "error": counters["error"],
+                "mock": counters["mock"],
+                "lastUpdatedAt": last_updated,
+                "criticalPending": critical_pending,
+                "statuses": statuses,
+            },
+            "sections": sections,
+        }
+
+    def get_settings_center(self, context: AuthContext) -> dict:
+        if not self.enabled:
+            can_edit = context.role in {"tenant_admin", "owner", "root"}
+            return self._build_settings_response(context, {"tenantId": DEMO_TENANT_ID, "settings": {}, "lastUpdatedAt": None}, can_edit)
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            tenant_row = self._settings_rows(conn, access)
+            return self._build_settings_response(context, tenant_row, self._can_edit_settings(access, context))
+
+    def update_settings_section(self, context: AuthContext, section_id: str, request: SettingsSectionUpdate) -> dict:
+        cleaned = self._validate_settings_values(section_id, request.values)
+        if not self.enabled:
+            can_edit = context.role in {"tenant_admin", "owner", "root"}
+            if not can_edit:
+                raise ValueError("sem permissão para alterar configurações")
+            return self._build_settings_response(context, {"tenantId": DEMO_TENANT_ID, "settings": {section_id: cleaned}, "lastUpdatedAt": datetime.now(timezone.utc)}, can_edit)
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            if not self._can_edit_settings(access, context):
+                raise ValueError("sem permissão para alterar configurações")
+            row = self._settings_rows(conn, access)
+            current_settings = row.get("settings") or {}
+            merged_section = {**DEFAULT_SETTINGS_VALUES.get(section_id, {}), **(current_settings.get(section_id) or {}), **cleaned}
+            current_settings[section_id] = merged_section
+
+            if section_id == "company":
+                conn.execute(
+                    """
+                    update public.tenants
+                    set display_name = coalesce(%s, display_name),
+                        legal_name = coalesce(%s, legal_name),
+                        slug = coalesce(%s, slug),
+                        updated_at = timezone('utc', now())
+                    where id = %s
+                    """,
+                    (
+                        cleaned.get("displayName"),
+                        cleaned.get("legalName"),
+                        cleaned.get("slug"),
+                        access.tenant_id,
+                    ),
+                )
+            conn.execute(
+                """
+                insert into public.tenant_settings (
+                  tenant_id, default_locale, default_timezone, retention_days,
+                  analytics_enabled, ai_explanations_enabled, settings, updated_at
+                )
+                values (%s, %s, %s, %s, true, true, %s, timezone('utc', now()))
+                on conflict (tenant_id) do update
+                set default_locale = excluded.default_locale,
+                    default_timezone = excluded.default_timezone,
+                    retention_days = excluded.retention_days,
+                    settings = excluded.settings,
+                    updated_at = timezone('utc', now())
+                """,
+                (
+                    access.tenant_id,
+                    current_settings.get("company", {}).get("language", row.get("language") or "pt-BR"),
+                    current_settings.get("company", {}).get("timezone", row.get("timezone") or "America/Sao_Paulo"),
+                    current_settings.get("collection", {}).get("retentionDays", row.get("retentionDays") or 90),
+                    Jsonb(current_settings),
+                ),
+            )
+            self.write_audit(conn, context, access.tenant_id, "settings.updated", "tenant_settings", access.tenant_id, {"section": section_id, "changedKeys": sorted(cleaned.keys())})
+            conn.commit()
+            tenant_row = self._settings_rows(conn, access)
+            return self._build_settings_response(context, tenant_row, True)
+
+    def test_settings_section(self, context: AuthContext, section_id: str) -> dict:
+        response = self.get_settings_center(context)
+        section = next((item for item in response["sections"] if item["id"] == section_id), None)
+        if not section:
+            raise ValueError("seção de configuração desconhecida")
+        if section["status"] in {"missing", "error"}:
+            message = f"{section['title']} requer ajuste antes de produção."
+            status = section["status"]
+        elif section["status"] in {"attention", "mock"}:
+            message = f"{section['title']} está utilizável, mas possui atenção/mock explícito."
+            status = section["status"]
+        else:
+            message = f"{section['title']} validado com sucesso."
+            status = "ok"
+        return {"section": section_id, "status": status, "message": message, "saved": False, "tested": True, "sectionData": section}
 
     def list_departments(self, context: AuthContext) -> list[dict]:
         if not self.enabled:
@@ -3036,7 +3512,9 @@ class VulcanRepository:
             return list(conn.execute(
                 f"""
                 select id, tenant_id as "tenantId", actor_user_id as "actorUserId",
-                       action, resource_type as "resourceType", resource_id as "resourceId",
+                       action,
+                       coalesce(resource_type, entity_table, 'unknown') as "resourceType",
+                       resource_id as "resourceId",
                        created_at as "createdAt"
                 from public.audit_logs
                 where {condition}
