@@ -66,6 +66,10 @@ avoid_port_conflict EVOLUTION_PORT 8080 vulcan-evolution-api
 avoid_port_conflict BACKEND_PORT 3001 vulcan-backend
 avoid_port_conflict FRONTEND_PORT 3002 vulcan-frontend
 
+EVOLUTION_PORT_VALUE="$(env_value EVOLUTION_PORT 8080)"
+set_env_value EVOLUTION_REQUEST_ORIGIN "http://localhost:${EVOLUTION_PORT_VALUE}"
+set_env_value EVOLUTION_CORS_ORIGIN "http://localhost:${EVOLUTION_PORT_VALUE},http://127.0.0.1:${EVOLUTION_PORT_VALUE}"
+
 echo "Subindo banco e Evolution..."
 compose up -d --build db evolution-db evolution-redis evolution
 

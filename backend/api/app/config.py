@@ -83,6 +83,7 @@ class Settings:
     evolution_instance_name: str
     evolution_webhook_url: str | None
     evolution_webhook_token: str | None
+    evolution_request_origin: str | None
     evolution_request_timeout_seconds: int
     evolution_max_retries: int
     evolution_retry_backoff_seconds: int
@@ -256,6 +257,7 @@ def get_settings() -> Settings:
             "http://host.docker.internal:3001/integrations/whatsapp/evolution/webhook",
         ) or None,
         evolution_webhook_token=configured("EVOLUTION_WEBHOOK_TOKEN") or None,
+        evolution_request_origin=getenv("EVOLUTION_REQUEST_ORIGIN") or None,
         evolution_request_timeout_seconds=int(getenv("EVOLUTION_REQUEST_TIMEOUT_SECONDS", "30")),
         evolution_max_retries=max(1, int(getenv("EVOLUTION_MAX_RETRIES", "3"))),
         evolution_retry_backoff_seconds=max(1, int(getenv("EVOLUTION_RETRY_BACKOFF_SECONDS", "5"))),

@@ -100,6 +100,8 @@ class EvolutionWhatsAppProvider:
         attempts = self.settings.evolution_max_retries if safe_retry else 1
         url = f"{self.settings.evolution_base_url.rstrip('/')}{path}"
         headers = {"Accept": "application/json"}
+        if self.settings.evolution_request_origin:
+            headers["Origin"] = self.settings.evolution_request_origin
         if path != "/":
             headers["apikey"] = self.settings.evolution_api_key or ""
 
