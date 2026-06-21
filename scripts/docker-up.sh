@@ -69,6 +69,9 @@ avoid_port_conflict FRONTEND_PORT 3002 vulcan-frontend
 echo "Subindo banco e Evolution..."
 compose up -d --build db evolution-db evolution-redis evolution
 
+echo "Construindo imagem do backend/migrations..."
+compose build backend migrate
+
 echo "Aplicando migrations e seed demo dentro do Docker..."
 compose run --rm migrate
 
