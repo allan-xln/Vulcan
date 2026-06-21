@@ -31,6 +31,20 @@ FRONTEND_PORT=3002 corepack pnpm dev
 Para subir Vulcan + Evolution/Baileys + worker de WhatsApp com os scripts operacionais:
 
 ```bash
+./scripts/docker-up.sh
+```
+
+Esse comando sobe tudo em Docker: Postgres, Evolution, Redis, backend, worker e frontend. Documentacao completa: `docs/DOCKER.md`.
+
+Para conectar o celular no WhatsApp mestre:
+
+```bash
+./scripts/docker-whatsapp-qr.sh 55DDDNUMERO
+```
+
+Fluxo sem Docker para desenvolvimento direto:
+
+```bash
 ./scripts/start-all.sh
 ./scripts/status-all.sh
 ./scripts/logs-all.sh

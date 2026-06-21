@@ -44,6 +44,19 @@ O compose sobe:
 
 ## Subir Local
 
+Runtime Docker completo recomendado:
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
+
+./scripts/docker-up.sh
+./scripts/docker-whatsapp-qr.sh 55DDDNUMERO
+```
+
+O comando sobe Vulcan, backend, frontend, worker, banco, Redis e Evolution. Detalhes: `docs/DOCKER.md`.
+
+Runtime Evolution isolado:
+
 ```bash
 cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/infra/evolution
 

@@ -1,0 +1,267 @@
+name: vulcan
+
+x-vulcan-env: &vulcan-env
+  env_file:
+    - ./docker/.env
+  environment:
+    NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-local}
+    AUTH_PROVIDER: ${AUTH_PROVIDER:-supabase}
+    MOCK_AUTH: ${MOCK_AUTH:-false}
+    MOCK_DATA: ${MOCK_DATA:-false}
+    LOCAL_ADMIN_USERNAME: ${LOCAL_ADMIN_USERNAME:-admin}
+    LOCAL_ADMIN_PASSWORD: ${LOCAL_ADMIN_PASSWORD:-admin}
+    LOCAL_TEST_AUTH_ENABLED: ${LOCAL_TEST_AUTH_ENABLED:-true}
+    LOCAL_TEST_USERNAME: ${LOCAL_TEST_USERNAME:-teste}
+    LOCAL_TEST_PASSWORD: ${LOCAL_TEST_PASSWORD:-teste}
+    SUPABASE_DEMO_ADMIN_EMAIL: ${SUPABASE_DEMO_ADMIN_EMAIL:-admin@vulcan.local}
+    SUPABASE_DEMO_ADMIN_PASSWORD: ${SUPABASE_DEMO_ADMIN_PASSWORD:-VulcanAdmin123!}
+    DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/vulcan
+    DIRECT_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/vulcan
+    API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS:-http://localhost:3002,http://127.0.0.1:3002}
+    API_ALLOWED_ORIGIN_REGEX: ${API_ALLOWED_ORIGIN_REGEX:-^https?://(localhost|127\\.0\\.0\\.1):[0-9]+$}
+    EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
+    EMAIL_DELIVERY_MODE: ${EMAIL_DELIVERY_MODE:-mock}
+    ROOT_WHATSAPP_ENABLED: ${ROOT_WHATSAPP_ENABLED:-false}
+    ROOT_WHATSAPP_PROVIDER: ${ROOT_WHATSAPP_PROVIDER:-evolution}
+    ROOT_WHATSAPP_NUMBER: ${ROOT_WHATSAPP_NUMBER:-}
+    ROOT_WHATSAPP_NAME: ${ROOT_WHATSAPP_NAME:-Vulcan Notifications}
+    ROOT_WHATSAPP_MOCK_MODE: ${ROOT_WHATSAPP_MOCK_MODE:-false}
+    WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-evolution}
+    WHATSAPP_DEFAULT_COUNTRY: ${WHATSAPP_DEFAULT_COUNTRY:-BR}
+    WHATSAPP_REQUIRE_OPT_IN: ${WHATSAPP_REQUIRE_OPT_IN:-true}
+    WHATSAPP_ENABLE_UNOFFICIAL_PROVIDER: ${WHATSAPP_ENABLE_UNOFFICIAL_PROVIDER:-true}
+    WHATSAPP_EMAIL_FALLBACK_ENABLED: ${WHATSAPP_EMAIL_FALLBACK_ENABLED:-true}
+    WHATSAPP_IN_APP_FALLBACK_ENABLED: ${WHATSAPP_IN_APP_FALLBACK_ENABLED:-true}
+    WHATSAPP_WORKER_POLL_SECONDS: ${WHATSAPP_WORKER_POLL_SECONDS:-10}
+    EVOLUTION_ENABLED: ${EVOLUTION_ENABLED:-true}
+    EVOLUTION_BASE_URL: ${EVOLUTION_BASE_URL:-http://evolution:8080}
+    EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+    EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-vulcan-root}
+    EVOLUTION_WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL:-http://backend:3001/integrations/whatsapp/evolution/webhook}
+    EVOLUTION_WEBHOOK_TOKEN: ${EVOLUTION_WEBHOOK_TOKEN}
+    EVOLUTION_REQUEST_TIMEOUT_SECONDS: ${EVOLUTION_REQUEST_TIMEOUT_SECONDS:-30}
+    EVOLUTION_MAX_RETRIES: ${EVOLUTION_MAX_RETRIES:-3}
+    EVOLUTION_RETRY_BACKOFF_SECONDS: ${EVOLUTION_RETRY_BACKOFF_SECONDS:-5}
+    VULCAN_ALLOW_RUNTIME_INTEGRATION_CONFIG: ${VULCAN_ALLOW_RUNTIME_INTEGRATION_CONFIG:-true}
+    VULCAN_RUNTIME_CONFIG_FILE: /app/.runtime/integration-secrets.json
+    AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-vulcan-local-enrollment-token}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
+    AI_COMPLEX_MODEL: ${AI_COMPLEX_MODEL:-gpt-5.5}
+    AI_OPERATIONAL_MODEL: ${AI_OPERATIONAL_MODEL:-llama-4-maverick}
+    LLAMA_PROVIDER: ${LLAMA_PROVIDER:-openai-compatible}
+    LLAMA_BASE_URL: ${LLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+    LLAMA_MODEL: ${LLAMA_MODEL:-llama-4-maverick}
+    LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vulcan-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: vulcan
+    ports:
+      - "${VULCAN_BIND_HOST:-127.0.0.1}:${VULCAN_DB_PORT:-55432}:5432"
+    volumes:
+      - vulcan_postgres:/var/lib/postgresql/data
+      - ./database/supabase/local/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vulcan"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  evolution-db:
+    image: postgres:15-alpine
+    container_name: vulcan-evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${EVOLUTION_POSTGRES_DATABASE:-evolution}
+      POSTGRES_USER: ${EVOLUTION_POSTGRES_USERNAME:-evolution}
+      POSTGRES_PASSWORD: ${EVOLUTION_POSTGRES_PASSWORD}
+    command: ["postgres", "-c", "max_connections=200"]
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${EVOLUTION_POSTGRES_USERNAME:-evolution} -d ${EVOLUTION_POSTGRES_DATABASE:-evolution}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  evolution-redis:
+    image: redis:7.4-alpine
+    container_name: vulcan-evolution-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - evolution_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: vulcan-evolution-api
+    restart: unless-stopped
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    ports:
+      - "${VULCAN_BIND_HOST:-127.0.0.1}:${EVOLUTION_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SERVER_NAME: vulcan-evolution
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      SERVER_URL: http://localhost:${EVOLUTION_PORT:-8080}
+      SERVER_DISABLE_DOCS: "false"
+      SERVER_DISABLE_MANAGER: "false"
+      CORS_ORIGIN: http://localhost:${EVOLUTION_PORT:-8080},http://127.0.0.1:${EVOLUTION_PORT:-8080}
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${EVOLUTION_POSTGRES_USERNAME:-evolution}:${EVOLUTION_POSTGRES_PASSWORD}@evolution-db:5432/${EVOLUTION_POSTGRES_DATABASE:-evolution}?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: vulcan-evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_IS_ON_WHATSAPP: "true"
+      DATABASE_SAVE_IS_ON_WHATSAPP_DAYS: "7"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/0
+      CACHE_REDIS_PREFIX_KEY: vulcan-evolution
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      CONFIG_SESSION_PHONE_CLIENT: Vulcan
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: "30"
+      LANGUAGE: pt-BR
+      DEL_INSTANCE: "false"
+      TELEMETRY_ENABLED: "false"
+      LOG_LEVEL: ERROR,WARN,INFO,LOG,WEBHOOKS
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_REQUEST_TIMEOUT_MS: "30000"
+      WEBHOOK_RETRY_MAX_ATTEMPTS: "5"
+      WEBHOOK_RETRY_INITIAL_DELAY_SECONDS: "5"
+      WEBHOOK_RETRY_USE_EXPONENTIAL_BACKOFF: "true"
+      WEBHOOK_RETRY_MAX_DELAY_SECONDS: "300"
+      WEBHOOK_RETRY_JITTER_FACTOR: "0.2"
+    volumes:
+      - evolution_instances:/evolution/instances
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:8080/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 45s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/api/Dockerfile
+    image: vulcan-backend:local
+    restart: "no"
+    <<: *vulcan-env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["bash", "-lc", "/app/scripts/apply-supabase-migrations.sh && python /app/scripts/seed_demo.py"]
+
+  backend:
+    image: vulcan-backend:local
+    build:
+      context: .
+      dockerfile: backend/api/Dockerfile
+    container_name: vulcan-backend
+    restart: unless-stopped
+    <<: *vulcan-env
+    depends_on:
+      db:
+        condition: service_healthy
+      evolution:
+        condition: service_healthy
+    ports:
+      - "${VULCAN_BIND_HOST:-127.0.0.1}:${BACKEND_PORT:-3001}:3001"
+    volumes:
+      - vulcan_runtime:/app/.runtime
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3001/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  whatsapp-worker:
+    image: vulcan-backend:local
+    container_name: vulcan-whatsapp-worker
+    restart: unless-stopped
+    <<: *vulcan-env
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - vulcan_runtime:/app/.runtime
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "app.whatsapp_worker"]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+        NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-local}
+        NEXT_PUBLIC_LOCAL_TEST_AUTH: ${NEXT_PUBLIC_LOCAL_TEST_AUTH:-true}
+        NEXT_PUBLIC_MOCK_AUTH: ${NEXT_PUBLIC_MOCK_AUTH:-false}
+        NEXT_PUBLIC_DEMO_TENANT_ID: ${NEXT_PUBLIC_DEMO_TENANT_ID:-00000000-0000-0000-0000-000000000301}
+        NEXT_PUBLIC_DEMO_ADMIN_EMAIL: ${NEXT_PUBLIC_DEMO_ADMIN_EMAIL:-admin@vulcan.local}
+        NEXT_PUBLIC_DEMO_ADMIN_PASSWORD: ${NEXT_PUBLIC_DEMO_ADMIN_PASSWORD:-VulcanAdmin123!}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://your-project.supabase.co}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-replace-me}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-replace-me}
+    container_name: vulcan-frontend
+    restart: unless-stopped
+    env_file:
+      - ./docker/.env
+    environment:
+      FRONTEND_PORT: ${FRONTEND_PORT:-3002}
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${VULCAN_BIND_HOST:-127.0.0.1}:${FRONTEND_PORT:-3002}:3002"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:3002/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+volumes:
+  vulcan_postgres:
+  vulcan_runtime:
+  evolution_instances:
+  evolution_postgres:
+  evolution_redis:

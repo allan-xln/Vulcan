@@ -34,6 +34,27 @@ Para subir a pilha local completa com Evolution/Baileys e worker WhatsApp:
 
 ```bash
 cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
+./scripts/docker-up.sh
+```
+
+Esse é o caminho recomendado quando tudo deve rodar em Docker. URLs:
+
+- Frontend: `http://localhost:3002`
+- Backend: `http://localhost:3001`
+- Evolution: `http://localhost:8080`
+
+Conectar o WhatsApp mestre pelo celular:
+
+```bash
+./scripts/docker-whatsapp-qr.sh 55DDDNUMERO
+```
+
+O QR também aparece em `Configurações -> WhatsApp`.
+
+Fluxo local sem Docker, para desenvolvimento direto na máquina:
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 ./scripts/start-all.sh
 ./scripts/status-all.sh
 ./scripts/logs-all.sh
@@ -119,6 +140,7 @@ Documentacao:
 - `docs/SETTINGS.md`
 - `docs/CONFIGURATION.md`
 - `docs/DASHBOARD.md`
+- `docs/DOCKER.md`
 - `docs/EXPORTS.md`
 - `docs/WHATSAPP_EVOLUTION.md`
 - `docs/WHATSAPP_ROOT_CHANNEL.md`

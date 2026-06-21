@@ -89,6 +89,8 @@ Checklist Evolution:
 
 ### Rodada atual - 2026-06-21 - WhatsApp Evolution/Baileys
 
+- `bash -n scripts/docker-*.sh`: aprovado.
+- `docker compose --env-file docker/.env -f docker-compose.yml config --quiet`: aprovado.
 - `PYTHONPATH=backend/api .venv/bin/python -m pytest backend/api/tests/test_api.py -q`: aprovado, 17 testes.
 - `corepack pnpm lint`: aprovado.
 - `corepack pnpm typecheck`: aprovado.
@@ -127,6 +129,7 @@ Smoke WhatsApp:
 Bloqueio de ambiente:
 
 - `infra/evolution/scripts/start.sh` criou `infra/evolution/.env` com `0600`, mas nao conseguiu subir containers porque o usuario atual nao tem acesso a `/var/run/docker.sock`.
+- `./scripts/docker-up.sh` tambem depende do mesmo acesso Docker; a configuracao Docker completa foi validada estaticamente, mas os containers nao puderam ser iniciados nesta sessao.
 - `systemctl --user status vulcan-evolution.service` falhou com `Failed to connect to bus: Connection refused`; autostart deve ser instalado em sessao/systemd valida ou via `sudo` no host.
 
 ### Rodada atual - 2026-06-15 - Notificacoes
