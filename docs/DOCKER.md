@@ -32,13 +32,14 @@ URLs:
 
 - Frontend: `http://localhost:3002`
 - Backend: `http://localhost:3001`
-- Evolution: `http://localhost:8080`
+- Evolution: interna no Docker, sem porta pública para usuário final
 - Postgres Docker do Vulcan: `localhost:55432`
 
 Login:
 
 ```text
-teste / teste
+Cliente demo: teste / teste
+Owner local: admin / admin
 ```
 
 ## Status, Logs E Parada
@@ -82,14 +83,16 @@ Abra o QR e escaneie no celular:
 xdg-open .runtime/evolution-qr.png
 ```
 
-Também é possível pela interface:
+Também é possível pela interface owner:
 
 1. abra `http://localhost:3002`;
-2. entre com `teste / teste`;
+2. entre com `admin / admin`;
 3. vá em `Configurações -> WhatsApp`;
 4. confirme `Número mestre do Vulcan`;
 5. clique em `Ver QR`;
 6. escaneie pelo WhatsApp do celular.
+
+Usuários de tenant, como `teste / teste`, veem apenas o canal WhatsApp gerenciado pela Vulcan. Eles não acessam QR, URL Evolution, API key, fila técnica ou logs técnicos.
 
 Depois de escanear:
 

@@ -257,8 +257,13 @@ def test_root_whatsapp_channel_contracts_are_available() -> None:
 def test_evolution_whatsapp_contracts_are_available_and_protected() -> None:
     token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
     headers = {"Authorization": f"Bearer {token}"}
+    tenant_token = client.post("/auth/login", json={"username": "teste", "password": "teste"}).json()["accessToken"]
+    tenant_headers = {"Authorization": f"Bearer {tenant_token}"}
 
     status_response = client.get("/integrations/whatsapp/evolution/status", headers=headers)
+    tenant_status_response = client.get("/integrations/whatsapp/evolution/status", headers=tenant_headers)
+    tenant_public_status_response = client.get("/integrations/whatsapp/status", headers=tenant_headers)
+    tenant_queue_response = client.get("/integrations/whatsapp/root/queue", headers=tenant_headers)
     qr_response = client.get("/integrations/whatsapp/evolution/qr", headers=headers)
     send_test_response = client.post(
         "/integrations/whatsapp/evolution/send-test",
@@ -304,6 +309,12 @@ def test_evolution_whatsapp_contracts_are_available_and_protected() -> None:
     }
     assert "apiKeyConfigured" in status_payload
     assert "mockMode" in status_payload
+    assert tenant_status_response.status_code == 403
+    assert tenant_public_status_response.status_code == 200
+    assert tenant_public_status_response.json()["provider"] == "vulcan_managed"
+    assert tenant_public_status_response.json()["qrCode"] is None
+    assert tenant_public_status_response.json()["logs"] == []
+    assert tenant_queue_response.status_code == 403
     assert qr_response.status_code == 200
     assert "status" in qr_response.json()
     assert send_test_response.status_code == 200

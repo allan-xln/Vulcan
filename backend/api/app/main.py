@@ -824,18 +824,22 @@ def whatsapp_status(context: AuthContext = Authenticated) -> WhatsAppStatus:
     settings = get_settings()
     connection = WhatsAppConnection(settings)
     session = connection.session(context.tenant_id)
+    system_owner = context.role in {"owner", "root"}
+    root_number = settings.root_whatsapp_number
+    if not system_owner:
+        root_number = mask_phone_for_tenant(root_number)
     return WhatsAppStatus(
         rootChannelEnabled=settings.root_whatsapp_enabled,
         rootChannelName=settings.root_whatsapp_name,
-        rootChannelNumber=settings.root_whatsapp_number,
-        provider=session.provider,
+        rootChannelNumber=root_number,
+        provider=session.provider if system_owner else "vulcan_managed",
         connected=session.connected,
         status=session.status,
-        qrRequired=session.qr_required,
-        qrCode=session.qr_code,
+        qrRequired=session.qr_required if system_owner else False,
+        qrCode=session.qr_code if system_owner else None,
         lastConnectionAt=session.last_connection_at,
         lastSyncAt=session.last_sync_at,
-        logs=session.logs,
+        logs=session.logs if system_owner else [],
     )
 
 
@@ -846,7 +850,7 @@ def whatsapp_test(
     repo: VulcanRepository = Depends(repository),
 ) -> ConnectionTestResponse:
     repo.assert_can_manage_integrations(context)
-    if request.tenant_id != context.tenant_id and context.role != "root":
+    if request.tenant_id != context.tenant_id and context.role not in {"owner", "root"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant mismatch")
     service = WhatsAppNotificationService()
     delivery = service.send_alert(
@@ -856,6 +860,22 @@ def whatsapp_test(
         to=request.destination,
     )
     return ConnectionTestResponse(ok=delivery.ok, status=delivery.status, providerResult=delivery.provider_result, message=delivery.message)
+
+
+def require_system_integration_owner(repo: VulcanRepository, context: AuthContext) -> None:
+    try:
+        repo.assert_can_manage_system_integrations(context)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+def mask_phone_for_tenant(value: str | None) -> str | None:
+    digits = "".join(char for char in str(value or "") if char.isdigit())
+    if not digits:
+        return None
+    if len(digits) <= 4:
+        return digits
+    return f"{digits[:4]}*****{digits[-4:]}"
 
 
 def _evolution_status_payload(include_qr: bool = False) -> EvolutionStatus:
@@ -889,7 +909,7 @@ def evolution_status(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> EvolutionStatus:
-    repo.assert_can_manage_integrations(context)
+    require_system_integration_owner(repo, context)
     return _evolution_status_payload()
 
 
@@ -899,7 +919,7 @@ def evolution_configure(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> EvolutionStatus:
-    repo.assert_can_manage_integrations(context)
+    require_system_integration_owner(repo, context)
     settings = get_settings()
     if not settings.allow_runtime_integration_config:
         raise HTTPException(
@@ -930,7 +950,7 @@ def evolution_test(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> EvolutionActionResponse:
-    repo.assert_can_manage_integrations(context)
+    require_system_integration_owner(repo, context)
     delivery = WhatsAppConnection(get_settings()).test_connection(context.tenant_id)
     return EvolutionActionResponse(ok=delivery.ok, status=delivery.status, message=delivery.message)
 
@@ -940,7 +960,7 @@ def evolution_qr(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> EvolutionActionResponse:
-    repo.assert_can_manage_integrations(context)
+    require_system_integration_owner(repo, context)
     settings = get_settings()
     if settings.root_whatsapp_provider != "evolution" or settings.root_whatsapp_mock_mode:
         return EvolutionActionResponse(ok=False, status="disabled", message="Ative Evolution com mock desligado para gerar QR Code.")
@@ -959,7 +979,7 @@ def evolution_reconnect(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> EvolutionActionResponse:
-    repo.assert_can_manage_integrations(context)
+    require_system_integration_owner(repo, context)
     result = EvolutionWhatsAppProvider(get_settings()).reconnect()
     status_payload = _evolution_status_payload(include_qr=True)
     return EvolutionActionResponse(
@@ -976,6 +996,7 @@ def evolution_send_test(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> ConnectionTestResponse:
+    require_system_integration_owner(repo, context)
     return whatsapp_test(request, context, repo)
 
 
@@ -1018,6 +1039,7 @@ def root_whatsapp_queue(
     repo: VulcanRepository = Depends(repository),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> list[RootWhatsAppQueueItem]:
+    require_system_integration_owner(repo, context)
     return [RootWhatsAppQueueItem.model_validate(item) for item in repo.list_root_whatsapp_queue(context, limit=limit)]
 
 
@@ -1027,6 +1049,7 @@ def root_whatsapp_logs(
     repo: VulcanRepository = Depends(repository),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> list[RootWhatsAppLog]:
+    require_system_integration_owner(repo, context)
     return [RootWhatsAppLog.model_validate(item) for item in repo.list_root_whatsapp_logs(context, limit=limit)]
 
 
@@ -1036,6 +1059,7 @@ def root_whatsapp_retry_queue_item(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> RootWhatsAppQueueItem:
+    require_system_integration_owner(repo, context)
     item = repo.retry_root_whatsapp_queue_item(context, queue_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="queue item not found")
@@ -1075,6 +1099,7 @@ def root_whatsapp_process_queue(
     repo: VulcanRepository = Depends(repository),
     limit: int = Query(default=25, ge=1, le=100),
 ) -> RootWhatsAppSendResponse:
+    require_system_integration_owner(repo, context)
     items = repo.dispatch_root_whatsapp_queue(context, limit=limit)
     mode = WhatsAppConnection(get_settings()).session(context.tenant_id).status
     return RootWhatsAppSendResponse.model_validate(repo.summarize_root_whatsapp_result(items, [], mode))

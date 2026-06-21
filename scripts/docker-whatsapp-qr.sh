@@ -13,7 +13,11 @@ command -v jq >/dev/null 2>&1 || {
 
 MASTER_NUMBER="${1:-}"
 BACKEND_PORT="$(sed -n 's/^BACKEND_PORT=//p' "$DOCKER_ENV_FILE" | head -n1)"
+OWNER_USERNAME="$(sed -n 's/^LOCAL_ADMIN_USERNAME=//p' "$DOCKER_ENV_FILE" | head -n1)"
+OWNER_PASSWORD="$(sed -n 's/^LOCAL_ADMIN_PASSWORD=//p' "$DOCKER_ENV_FILE" | head -n1)"
 BACKEND_PORT="${BACKEND_PORT:-3001}"
+OWNER_USERNAME="${OWNER_USERNAME:-admin}"
+OWNER_PASSWORD="${OWNER_PASSWORD:-admin}"
 API_URL="http://127.0.0.1:$BACKEND_PORT"
 TENANT_ID="00000000-0000-0000-0000-000000000301"
 
@@ -26,7 +30,7 @@ if [ -n "$MASTER_NUMBER" ]; then
   MASTER_NUMBER="$digits"
 fi
 
-token="$(curl -fsS -X POST "$API_URL/auth/login" -H 'Content-Type: application/json' -d '{"username":"teste","password":"teste"}' | jq -r '.accessToken')"
+token="$(curl -fsS -X POST "$API_URL/auth/login" -H 'Content-Type: application/json' -d "{\"username\":\"$OWNER_USERNAME\",\"password\":\"$OWNER_PASSWORD\"}" | jq -r '.accessToken')"
 
 if [ -n "$MASTER_NUMBER" ]; then
   curl -fsS -X PUT "$API_URL/integrations/whatsapp/evolution/config" \
@@ -60,7 +64,7 @@ echo "Status: $status"
 
 if [ -z "$qr" ]; then
   echo
-  echo "Nenhum QR retornado. Veja o painel em http://localhost:3002 -> Configurações -> WhatsApp."
+  echo "Nenhum QR retornado. Entre como dono em http://localhost:3002 -> Configurações -> WhatsApp."
   exit 0
 fi
 
@@ -86,4 +90,4 @@ echo
 echo "Abra o QR no navegador/visualizador e escaneie com o WhatsApp do celular:"
 echo "  xdg-open $QR_FILE"
 echo
-echo "Ou use a tela: http://localhost:3002 -> Configurações -> WhatsApp -> Ver QR"
+echo "Ou use a tela como dono: http://localhost:3002 -> Configurações -> WhatsApp -> Ver QR"

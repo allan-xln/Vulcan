@@ -16,7 +16,7 @@ ROOT_WHATSAPP_NAME=Vulcan Notifications
 ROOT_WHATSAPP_MOCK_MODE=false
 ```
 
-O numero deve estar em E.164 somente com digitos, por exemplo `55DDDNUMERO`. O backend valida o numero quando o canal esta ativo. A tela `Configuracoes -> WhatsApp` mostra `Numero mestre do Vulcan` e nao marca conectado se a Evolution estiver desconectada.
+O numero deve estar em E.164 somente com digitos, por exemplo `55DDDNUMERO`. O backend valida o numero quando o canal esta ativo. Para usuarios de tenant, a tela `Configuracoes -> WhatsApp` mostra apenas o canal gerenciado e o numero mascarado. QR, URL Evolution, API key, fila e logs tecnicos ficam restritos ao owner.
 
 ## Destinatarios
 
@@ -116,13 +116,15 @@ cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 
 Na UI:
 
-1. Entrar como `teste / teste`.
+1. Entrar como owner local `admin / admin`.
 2. Abrir `Configuracoes -> WhatsApp`.
-3. Salvar numero mestre, provider e API key.
+3. Salvar numero mestre e provider.
 4. Ver QR e conectar.
 5. Enviar teste para um numero autorizado.
 6. Abrir `Notificacoes`.
 7. Processar/reabrir fila se necessario.
+
+Para clientes/tenants, entrar como `teste / teste` mostra somente status comercial, preferencias e historico de notificacoes do proprio escopo.
 
 Via API:
 

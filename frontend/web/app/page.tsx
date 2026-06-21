@@ -1913,6 +1913,7 @@ export default function HomePage() {
   const [authLoading, setAuthLoading] = useState(SUPABASE_AUTH_READY);
   const [authMode, setAuthMode] = useState<"supabase" | "local" | null>(null);
   const [identity, setIdentity] = useState("operador Vulcan");
+  const [currentRole, setCurrentRole] = useState("guest");
   const [view, setView] = useState<ViewKey>("dashboard");
   const [metricsIntent, setMetricsIntent] = useState<MetricsIntent | null>(null);
   const [loginError, setLoginError] = useState("");
@@ -1975,6 +1976,7 @@ export default function HomePage() {
         setSession(data.session);
         setToken(data.session.access_token);
         setIdentity(data.session.user.email ?? "usuário Supabase");
+        setCurrentRole("supabase_user");
         setAuthMode("supabase");
       }
       setAuthLoading(false);
@@ -1990,6 +1992,7 @@ export default function HomePage() {
       setSession(nextSession);
       setToken(nextSession?.access_token ?? null);
       setIdentity(nextSession?.user.email ?? "operador Vulcan");
+      setCurrentRole(nextSession ? "supabase_user" : "guest");
       setAuthMode(nextSession ? "supabase" : null);
     });
 
@@ -2159,6 +2162,7 @@ export default function HomePage() {
       setSession(data.session);
       setToken(data.session.access_token);
       setIdentity(data.session.user.email ?? username);
+      setCurrentRole("supabase_user");
       setAuthMode("supabase");
       return;
     }
@@ -2180,10 +2184,11 @@ export default function HomePage() {
         return;
       }
 
-      const data = (await response.json()) as { accessToken: string; user?: { name?: string; email?: string } };
+      const data = (await response.json()) as { accessToken: string; user?: { name?: string; email?: string; role?: string } };
       setToken(data.accessToken);
       setAuthMode("local");
       setIdentity(data.user?.name ?? data.user?.email ?? username);
+      setCurrentRole(data.user?.role ?? "user");
       if (username.toLowerCase() === "teste") {
         setMetrics(liveTestMetrics);
         setInsights([]);
@@ -2202,6 +2207,7 @@ export default function HomePage() {
         setToken(username === "teste" ? "dev-vulcan-test-token" : "dev-vulcan-admin-token");
         setAuthMode("local");
         setIdentity(username === "teste" ? "teste" : "admin local de demonstração");
+        setCurrentRole(username === "teste" ? "tenant_admin" : "owner");
         if (username === "teste") {
           setMetrics(liveTestMetrics);
           setInsights([]);
@@ -2229,6 +2235,7 @@ export default function HomePage() {
     setToken(null);
     setAuthMode(null);
     setIdentity("operador Vulcan");
+    setCurrentRole("guest");
   }
 
   async function handleDeviceOwnerChange(deviceId: string, ownerMembershipId: string | null) {
@@ -2401,6 +2408,7 @@ export default function HomePage() {
             onLogout={handleLogout}
             identity={identity}
             authMode={authMode ?? "local"}
+            userRole={currentRole}
             metrics={metrics}
             insights={insights}
             notifications={notifications}
@@ -2682,6 +2690,7 @@ function DashboardShell({
   onLogout,
   identity,
   authMode,
+  userRole,
   metrics,
   insights,
   notifications,
@@ -2721,6 +2730,7 @@ function DashboardShell({
   onLogout: () => void;
   identity: string;
   authMode: "supabase" | "local";
+  userRole: string;
   metrics: Metric[];
   insights: Insight[];
   notifications: NotificationItem[];
@@ -2860,6 +2870,7 @@ function DashboardShell({
               liveStatusLabel={liveStatusLabel}
               schedules={schedules}
               token={token}
+              userRole={userRole}
             />
           )}
           {activeView === "settings" && (
@@ -2879,6 +2890,7 @@ function DashboardShell({
               schedules={schedules}
               reportTemplates={reportTemplates}
               token={token}
+              userRole={userRole}
             />
           )}
         </AnimatePresence>
@@ -5786,7 +5798,8 @@ function NotificationsView({
   liveStatusLabel = "agora",
   schedules = [],
   compact = false,
-  token
+  token,
+  userRole = "user"
 }: {
   notifications: NotificationItem[];
   summary: NotificationSummary;
@@ -5798,6 +5811,7 @@ function NotificationsView({
   schedules?: NotificationSchedule[];
   compact?: boolean;
   token?: string;
+  userRole?: string;
 }) {
   const [items, setItems] = useState(notifications);
   const [types, setTypes] = useState(notificationTypes);
@@ -5812,13 +5826,16 @@ function NotificationsView({
   const [rootLogs, setRootLogs] = useState<RootWhatsAppLog[]>([]);
   const iconByChannel = { system: BellRing, push: BellRing, windows: Monitor, whatsapp: MessageCircle, email: Mail };
   const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
+  const isSystemOwner = userRole === "owner" || userRole === "root";
 
   useEffect(() => setItems(notifications), [notifications]);
   useEffect(() => setTypes(notificationTypes), [notificationTypes]);
   useEffect(() => {
-    void refreshRootWhatsappQueue();
+    if (isSystemOwner) {
+      void refreshRootWhatsappQueue();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, isSystemOwner]);
 
   const filtered = items.filter((item) => {
     if (channelFilter !== "all" && item.channel !== channelFilter) return false;
@@ -5848,7 +5865,7 @@ function NotificationsView({
   }
 
   async function refreshRootWhatsappQueue() {
-    if (!token) return;
+    if (!token || !isSystemOwner) return;
     try {
       const [queuePayload, logsPayload] = await Promise.all([
         rootRequest<RootWhatsAppQueueItem[]>("/integrations/whatsapp/root/queue?limit=8"),
@@ -5863,6 +5880,7 @@ function NotificationsView({
   }
 
   async function processRootWhatsappQueue() {
+    if (!isSystemOwner) return;
     setBusy("root-process-queue");
     try {
       const payload = await rootRequest<{ queued: number; sent: number; failed: number; mode: string }>("/integrations/whatsapp/root/process-queue?limit=25", { method: "POST" });
@@ -5876,6 +5894,7 @@ function NotificationsView({
   }
 
   async function retryRootWhatsappItem(id: string) {
+    if (!isSystemOwner) return;
     setBusy(`root-retry-${id}`);
     try {
       const updated = await rootRequest<RootWhatsAppQueueItem>(`/integrations/whatsapp/root/queue/${id}/retry`, { method: "POST" });
@@ -6022,31 +6041,47 @@ function NotificationsView({
               );
             })}
           </div>
-          <div className="mt-4 border border-zinc-800 bg-black/35 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="font-semibold text-zinc-100">Canal WhatsApp raiz</p>
-                <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">{statusPt(whatsAppStatus.status)} | {rootQueueIssues.length} atenção</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => void processRootWhatsappQueue()} disabled={Boolean(busy)} className="h-9 border border-orange-400/25 px-3 text-xs text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Processar</button>
-                <button type="button" onClick={() => void refreshRootWhatsappQueue()} disabled={Boolean(busy)} className="h-9 border border-zinc-800 px-3 text-xs text-zinc-300 transition hover:border-orange-400/50 disabled:opacity-40">Atualizar</button>
-              </div>
-            </div>
-            <div className="mt-3 grid gap-2">
-              {rootQueue.slice(0, 4).map((item) => (
-                <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border border-zinc-800 bg-zinc-950/55 px-3 py-2">
-                  <div>
-                    <p className="text-sm text-zinc-200">{item.title}</p>
-                    <p className="text-xs text-zinc-500">{maskPhone(item.destination)} | {statusPt(item.status)} | {item.attempts}/{item.maxAttempts}</p>
-                  </div>
-                  <button type="button" onClick={() => void retryRootWhatsappItem(item.id)} disabled={Boolean(busy)} className="border border-orange-400/25 px-2 py-1 text-xs text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Reabrir</button>
+          {isSystemOwner ? (
+            <div className="mt-4 border border-zinc-800 bg-black/35 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-zinc-100">Operação WhatsApp raiz</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">{statusPt(whatsAppStatus.status)} | {rootQueueIssues.length} atenção</p>
                 </div>
-              ))}
-              {!rootQueue.length ? <p className="text-sm text-zinc-500">Sem envios WhatsApp pendentes no escopo atual.</p> : null}
-              {rootLogs[0] ? <p className="text-xs text-zinc-600">Último log: {statusPt(rootLogs[0].status)} em {formatDateTime(rootLogs[0].createdAt)}</p> : null}
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void processRootWhatsappQueue()} disabled={Boolean(busy)} className="h-9 border border-orange-400/25 px-3 text-xs text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Processar</button>
+                  <button type="button" onClick={() => void refreshRootWhatsappQueue()} disabled={Boolean(busy)} className="h-9 border border-zinc-800 px-3 text-xs text-zinc-300 transition hover:border-orange-400/50 disabled:opacity-40">Atualizar</button>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {rootQueue.slice(0, 4).map((item) => (
+                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border border-zinc-800 bg-zinc-950/55 px-3 py-2">
+                    <div>
+                      <p className="text-sm text-zinc-200">{item.title}</p>
+                      <p className="text-xs text-zinc-500">{maskPhone(item.destination)} | {statusPt(item.status)} | {item.attempts}/{item.maxAttempts}</p>
+                    </div>
+                    <button type="button" onClick={() => void retryRootWhatsappItem(item.id)} disabled={Boolean(busy)} className="border border-orange-400/25 px-2 py-1 text-xs text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Reabrir</button>
+                  </div>
+                ))}
+                {!rootQueue.length ? <p className="text-sm text-zinc-500">Sem envios WhatsApp pendentes no escopo atual.</p> : null}
+                {rootLogs[0] ? <p className="text-xs text-zinc-600">Último log: {statusPt(rootLogs[0].status)} em {formatDateTime(rootLogs[0].createdAt)}</p> : null}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="mt-4 border border-zinc-800 bg-black/35 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-zinc-100">Canal WhatsApp gerenciado pela Vulcan</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">{statusPt(whatsAppStatus.status)} | fallback e-mail/interno preparado</p>
+                </div>
+                <Tremor.Badge color={whatsAppStatus.connected ? "emerald" : "orange"}>{whatsAppStatus.connected ? "operacional" : "pendente"}</Tremor.Badge>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <ConnectionSummary label="Emissor" value={maskPhone(whatsAppStatus.rootChannelNumber)} tone={whatsAppStatus.rootChannelNumber ? "ok" : "warn"} />
+                <ConnectionSummary label="Proteção" value="tenant + hierarquia" tone="ok" />
+              </div>
+            </div>
+          )}
         </Panel>
       </div>
 
@@ -6206,7 +6241,8 @@ function SettingsView({
   notifications,
   schedules,
   reportTemplates,
-  token
+  token,
+  userRole
 }: {
   settingsCenter: SettingsResponseData;
   onSettingsCenterChange: (next: SettingsResponseData) => void;
@@ -6222,6 +6258,7 @@ function SettingsView({
   schedules: NotificationSchedule[];
   reportTemplates: ReportTemplate[];
   token: string;
+  userRole: string;
 }) {
   const [selectedSectionId, setSelectedSectionId] = useState(settingsCenter.sections[0]?.id ?? "");
   const [query, setQuery] = useState("");
@@ -6233,6 +6270,7 @@ function SettingsView({
   const offlineAgents = devices.filter((device) => device.status === "offline").length;
   const queueIssues = devices.filter((device) => Number(device.queueDepth ?? 0) > 50).length;
   const failedNotifications = notifications.filter((item) => ["failed", "missing_credentials"].includes(item.status)).length;
+  const isSystemOwner = userRole === "owner" || userRole === "root";
 
   useEffect(() => {
     const nextDrafts: Record<string, Record<string, string | number | boolean | null>> = {};
@@ -6419,7 +6457,7 @@ function SettingsView({
                     Salvar e auditar
                   </button>
                 ) : null}
-                {selectedSection.id === "whatsapp" ? (
+                {selectedSection.id === "whatsapp" && isSystemOwner ? (
                   <button type="button" onClick={() => void testIntegration("whatsapp", whatsAppStatus.provider, whatsAppStatus.rootChannelNumber)} disabled={Boolean(busy)} className="inline-flex h-11 items-center gap-2 border border-orange-400/25 px-4 text-sm text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">
                     <MessageCircle className="h-4 w-4" />
                     Testar WhatsApp
@@ -6434,7 +6472,11 @@ function SettingsView({
               </div>
 
               {selectedSection.id === "whatsapp" ? (
+                isSystemOwner ? (
                 <EvolutionWhatsAppPanel token={token} initialWhatsAppStatus={whatsAppStatus} />
+                ) : (
+                  <ManagedWhatsAppPanel status={whatsAppStatus} />
+                )
               ) : null}
             </Panel>
           ) : (
@@ -6471,6 +6513,29 @@ function SettingsView({
         </div>
       </div>
     </ViewFrame>
+  );
+}
+
+function ManagedWhatsAppPanel({ status }: { status: WhatsAppStatus }) {
+  return (
+    <div className="mt-6 border-t border-zinc-800 pt-6">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-zinc-100">Canal WhatsApp gerenciado pela Vulcan</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">As mensagens automáticas usam o emissor mestre da Vulcan e respeitam destinatários, opt-in, tenant e hierarquia.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Tremor.Badge color={status.connected ? "emerald" : "orange"}>{status.connected ? "operacional" : statusPt(status.status)}</Tremor.Badge>
+          <Tremor.Badge color={status.rootChannelNumber ? "emerald" : "orange"}>{status.rootChannelNumber ? "número configurado" : "número pendente"}</Tremor.Badge>
+        </div>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <ConnectionSummary label="Número mestre" value={maskPhone(status.rootChannelNumber)} tone={status.rootChannelNumber ? "ok" : "warn"} />
+        <ConnectionSummary label="Escopo" value="tenant + subárvore" tone="ok" />
+        <ConnectionSummary label="Opt-in" value={status.rootChannelEnabled ? "obrigatório" : "pendente"} tone={status.rootChannelEnabled ? "ok" : "warn"} />
+        <ConnectionSummary label="Fallback" value="e-mail/in-app" tone="ok" />
+      </div>
+    </div>
   );
 }
 

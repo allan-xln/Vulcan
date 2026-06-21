@@ -35,6 +35,7 @@ Para subir Vulcan + Evolution/Baileys + worker de WhatsApp com os scripts operac
 ```
 
 Esse comando sobe tudo em Docker: Postgres, Evolution, Redis, backend, worker e frontend. Documentacao completa: `docs/DOCKER.md`.
+No stack completo, a Evolution fica interna no Docker e nao publica porta para usuario final.
 
 Para conectar o celular no WhatsApp mestre:
 
@@ -220,7 +221,7 @@ cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/infra/evolution
 ./scripts/status.sh
 ```
 
-Depois abra `Configuracoes -> WhatsApp`, salve URL/API key/instancia/numero mestre e clique em `Ver QR`.
+No runtime Docker completo, use `./scripts/docker-whatsapp-qr.sh 55DDDNUMERO`. Pela UI, entre como owner (`admin/admin` no local), abra `Configuracoes -> WhatsApp` e clique em `Ver QR`. Usuarios de tenant nao veem URL, API key, QR, fila ou logs tecnicos.
 
 Autostart:
 

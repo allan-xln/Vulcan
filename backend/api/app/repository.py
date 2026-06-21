@@ -602,6 +602,17 @@ class VulcanRepository:
             if not self._can_edit_settings(access, context):
                 raise ValueError("integration management requires tenant admin scope")
 
+    def assert_can_manage_system_integrations(self, context: AuthContext) -> None:
+        if context.role in {"owner", "root"}:
+            return
+        if not self.enabled:
+            raise ValueError("system integration management requires owner scope")
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            if access.is_root:
+                return
+        raise ValueError("system integration management requires owner scope")
+
     def _field_definition(self, section_id: str, key: str) -> dict | None:
         section = next((item for item in SETTINGS_SECTION_DEFINITIONS if item["id"] == section_id), None)
         if not section:
@@ -745,6 +756,16 @@ class VulcanRepository:
         persisted = tenant_row.get("settings") or {}
         sections: list[dict] = []
         last_updated = tenant_row.get("lastUpdatedAt")
+        system_owner = context.role in {"owner", "root"}
+        owner_only_whatsapp_fields = {"evolutionUrl", "evolutionInstance", "accessToken", "unofficialMode"}
+
+        def mask_phone(value: object) -> object:
+            digits = "".join(char for char in str(value or "") if char.isdigit())
+            if not digits:
+                return value
+            if len(digits) <= 4:
+                return digits
+            return f"{digits[:4]}*****{digits[-4:]}"
         company_overrides = {
             "displayName": tenant_row.get("displayName") or DEFAULT_SETTINGS_VALUES["company"]["displayName"],
             "legalName": tenant_row.get("legalName") or DEFAULT_SETTINGS_VALUES["company"]["legalName"],
@@ -766,12 +787,19 @@ class VulcanRepository:
             fields: list[dict] = []
             for field_def in definition["fields"]:
                 key = field_def["key"]
+                if section_id == "whatsapp" and key in owner_only_whatsapp_fields and not system_owner:
+                    continue
                 value = values.get(key)
                 field_status = "ok"
                 computed, computed_status = self._env_status_value(section_id, key, tenant_row)
                 if computed is not None:
                     value = computed
                     field_status = computed_status
+                if section_id == "whatsapp" and key == "rootNumber" and not system_owner:
+                    value = mask_phone(value)
+                if section_id == "whatsapp" and key == "provider" and not system_owner:
+                    value = "gerenciado pela Vulcan"
+                    field_status = "ok"
                 if field_def.get("required") and (value is None or value == ""):
                     field_status = "missing"
                 if field_def.get("isSecret") and field_status == "ok":

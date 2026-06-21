@@ -41,7 +41,7 @@ Esse é o caminho recomendado quando tudo deve rodar em Docker. URLs:
 
 - Frontend: `http://localhost:3002`
 - Backend: `http://localhost:3001`
-- Evolution: `http://localhost:8080`
+- Evolution: interna no Docker, sem porta pública para usuário final
 
 Conectar o WhatsApp mestre pelo celular:
 
@@ -49,7 +49,7 @@ Conectar o WhatsApp mestre pelo celular:
 ./scripts/docker-whatsapp-qr.sh 55DDDNUMERO
 ```
 
-O QR também aparece em `Configurações -> WhatsApp`.
+O QR também aparece em `Configurações -> WhatsApp` somente para o usuário owner.
 
 Fluxo local sem Docker, para desenvolvimento direto na máquina:
 
@@ -127,7 +127,7 @@ O Vulcan separa acompanhamento rapido de investigacao analitica:
 - `Metricas`: area profunda para investigar por periodo, equipe, usuario, departamento, cargo, supervisor, dispositivo, sistema operacional, app, categoria, status do agente e tipo de metrica.
 - `Notificacoes`: central para sistema, WhatsApp, e-mail, Windows/agente, tipos, prioridades, retry, templates, agendamentos e historico de entrega.
 - `Configuracoes`: central real de controle com seções salvas em `tenant_settings`, testes por seção, secrets mascarados, validação de entrada e auditoria.
-- `Configuracoes -> WhatsApp`: Canal WhatsApp Raiz com mock explicito, Evolution/Baileys nao oficial, QR Code, fila, logs, retry e caminho futuro para Meta Cloud API.
+- `Configuracoes -> WhatsApp`: cliente vê o Canal WhatsApp Raiz gerenciado pela Vulcan; owner vê Evolution/Baileys, QR Code, fila, logs, retry e caminho futuro para Meta Cloud API.
 
 Itens criticos do `Comando` abrem `Metricas` ja filtrada. Exportacoes CSV e Excel ficam em `Metricas` e respeitam o recorte atual.
 
@@ -200,7 +200,7 @@ cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 ./scripts/install-evolution-autostart.sh
 ```
 
-Na UI, abra `Configuracoes -> WhatsApp`, salve numero mestre, URL, API key e instancia, clique em `Ver QR` e conecte o WhatsApp mestre.
+Na UI, entre como owner (`admin/admin` no local), abra `Configuracoes -> WhatsApp`, salve numero mestre e conecte o WhatsApp mestre por QR. Clientes/tenants não veem URL, API key, QR, fila ou logs técnicos.
 
 Docs:
 

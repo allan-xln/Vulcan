@@ -267,7 +267,7 @@ def require_auth(
             user_id="11111111-1111-1111-1111-111111111111",
             email="admin@vulcan.local",
             tenant_id=tenant_id,
-            role="tenant_admin",
+            role="owner",
             provider="local",
         )
 

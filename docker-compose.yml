@@ -39,7 +39,7 @@ x-vulcan-env: &vulcan-env
     EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-vulcan-root}
     EVOLUTION_WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL:-http://backend:3001/integrations/whatsapp/evolution/webhook}
     EVOLUTION_WEBHOOK_TOKEN: ${EVOLUTION_WEBHOOK_TOKEN}
-    EVOLUTION_REQUEST_ORIGIN: ${EVOLUTION_REQUEST_ORIGIN:-http://localhost:${EVOLUTION_PORT:-8080}}
+    EVOLUTION_REQUEST_ORIGIN: ${EVOLUTION_REQUEST_ORIGIN:-http://evolution:8080}
     EVOLUTION_REQUEST_TIMEOUT_SECONDS: ${EVOLUTION_REQUEST_TIMEOUT_SECONDS:-30}
     EVOLUTION_MAX_RETRIES: ${EVOLUTION_MAX_RETRIES:-3}
     EVOLUTION_RETRY_BACKOFF_SECONDS: ${EVOLUTION_RETRY_BACKOFF_SECONDS:-5}
@@ -114,18 +114,18 @@ services:
         condition: service_healthy
       evolution-redis:
         condition: service_healthy
-    ports:
-      - "${VULCAN_BIND_HOST:-127.0.0.1}:${EVOLUTION_PORT:-8080}:8080"
+    expose:
+      - "8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       SERVER_NAME: vulcan-evolution
       SERVER_TYPE: http
       SERVER_PORT: 8080
-      SERVER_URL: http://localhost:${EVOLUTION_PORT:-8080}
-      SERVER_DISABLE_DOCS: "false"
-      SERVER_DISABLE_MANAGER: "false"
-      CORS_ORIGIN: ${EVOLUTION_CORS_ORIGIN:-http://localhost:${EVOLUTION_PORT:-8080},http://127.0.0.1:${EVOLUTION_PORT:-8080}}
+      SERVER_URL: http://evolution:8080
+      SERVER_DISABLE_DOCS: "true"
+      SERVER_DISABLE_MANAGER: "true"
+      CORS_ORIGIN: ${EVOLUTION_CORS_ORIGIN:-http://evolution:8080,http://vulcan-backend:3001}
       DATABASE_PROVIDER: postgresql
       DATABASE_CONNECTION_URI: postgresql://${EVOLUTION_POSTGRES_USERNAME:-evolution}:${EVOLUTION_POSTGRES_PASSWORD}@evolution-db:5432/${EVOLUTION_POSTGRES_DATABASE:-evolution}?schema=public
       DATABASE_CONNECTION_CLIENT_NAME: vulcan-evolution
@@ -165,7 +165,7 @@ services:
       test:
         - CMD-SHELL
         - >-
-          node -e "fetch('http://127.0.0.1:8080/',{headers:{Origin:process.env.SERVER_URL||'http://localhost:8080'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+          node -e "fetch('http://127.0.0.1:8080/',{headers:{Origin:process.env.SERVER_URL||'http://evolution:8080'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
       interval: 15s
       timeout: 8s
       retries: 20

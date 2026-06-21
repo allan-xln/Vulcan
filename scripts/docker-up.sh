@@ -62,13 +62,11 @@ avoid_port_conflict() {
 }
 
 avoid_port_conflict VULCAN_DB_PORT 55432 vulcan-db
-avoid_port_conflict EVOLUTION_PORT 8080 vulcan-evolution-api
 avoid_port_conflict BACKEND_PORT 3001 vulcan-backend
 avoid_port_conflict FRONTEND_PORT 3002 vulcan-frontend
 
-EVOLUTION_PORT_VALUE="$(env_value EVOLUTION_PORT 8080)"
-set_env_value EVOLUTION_REQUEST_ORIGIN "http://localhost:${EVOLUTION_PORT_VALUE}"
-set_env_value EVOLUTION_CORS_ORIGIN "http://localhost:${EVOLUTION_PORT_VALUE},http://127.0.0.1:${EVOLUTION_PORT_VALUE}"
+set_env_value EVOLUTION_REQUEST_ORIGIN "http://evolution:8080"
+set_env_value EVOLUTION_CORS_ORIGIN "http://evolution:8080,http://vulcan-backend:3001"
 
 echo "Subindo banco e Evolution..."
 compose up -d --build db evolution-db evolution-redis evolution
@@ -87,7 +85,7 @@ compose up -d --build backend whatsapp-worker frontend
 echo
 echo "Frontend:  http://localhost:$(env_value FRONTEND_PORT 3002)"
 echo "Backend:   http://localhost:$(env_value BACKEND_PORT 3001)"
-echo "Evolution: http://localhost:$(env_value EVOLUTION_PORT 8080)"
+echo "Evolution: interno no Docker, sem porta pública para usuário final"
 echo
 echo "Para conectar o celular no WhatsApp mestre:"
 echo "  ./scripts/docker-whatsapp-qr.sh 55DDDNUMERO"

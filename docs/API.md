@@ -210,6 +210,8 @@ Quando `channel=whatsapp`, `POST /notifications/send` usa o Canal WhatsApp Raiz 
 
 `GET /integrations/whatsapp/evolution/qr` cria/consulta a instancia e retorna QR quando necessario. `POST /integrations/whatsapp/evolution/reconnect` reconfigura webhook e solicita reconexao.
 
+Endpoints Evolution, fila raiz manual, logs raiz e retry manual exigem escopo owner/root. Usuarios de tenant acessam apenas status comercial, preferencias, destinatarios e notificacoes do proprio escopo.
+
 `POST /integrations/whatsapp/evolution/webhook` e protegido por `X-Vulcan-Webhook-Token`, normaliza eventos da Evolution e atualiza `whatsapp_delivery_queue` quando ha `provider_message_id`.
 
 `GET /integrations/whatsapp/root/recipients?notificationType=alerta&audience=managers` retorna destinatarios com WhatsApp cadastrado e preferencia habilitada, respeitando tenant e subarvore do usuario autenticado.

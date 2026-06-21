@@ -40,7 +40,8 @@ O compose sobe:
 - volumes para banco/cache/sessao;
 - health checks;
 - `restart: unless-stopped`;
-- porta local configuravel, por padrao `127.0.0.1:8080`.
+- no runtime Docker completo, Evolution fica interna na rede do Compose e nao publica porta para usuario final;
+- no runtime standalone/owner, a porta local pode ser exposta em `127.0.0.1:${EVOLUTION_PORT}` para manutencao controlada.
 
 ## Subir Local
 
@@ -97,11 +98,12 @@ ROOT_WHATSAPP_NAME=Vulcan Notifications
 ROOT_WHATSAPP_MOCK_MODE=false
 
 EVOLUTION_ENABLED=true
-EVOLUTION_BASE_URL=http://127.0.0.1:8080
+EVOLUTION_BASE_URL=http://evolution:8080
 EVOLUTION_API_KEY=
 EVOLUTION_INSTANCE_NAME=vulcan-root
-EVOLUTION_WEBHOOK_URL=http://127.0.0.1:3001/integrations/whatsapp/evolution/webhook
+EVOLUTION_WEBHOOK_URL=http://backend:3001/integrations/whatsapp/evolution/webhook
 EVOLUTION_WEBHOOK_TOKEN=
+EVOLUTION_REQUEST_ORIGIN=http://evolution:8080
 EVOLUTION_REQUEST_TIMEOUT_SECONDS=30
 EVOLUTION_MAX_RETRIES=3
 EVOLUTION_RETRY_BACKOFF_SECONDS=5
@@ -114,7 +116,7 @@ WHATSAPP_EMAIL_FALLBACK_ENABLED=true
 WHATSAPP_IN_APP_FALLBACK_ENABLED=true
 ```
 
-Tambem e possivel salvar a configuracao pela tela `Configuracoes -> WhatsApp`. Secrets ficam mascarados e sao gravados no runtime store local `.runtime/integration-secrets.json`, que nao entra no Git.
+Tambem e possivel salvar a configuracao pela tela `Configuracoes -> WhatsApp`, mas somente com usuario owner. Secrets ficam mascarados e sao gravados no runtime store local `.runtime/integration-secrets.json`, que nao entra no Git. Usuarios de tenant nao veem URL, API key, QR, fila tecnica ou logs tecnicos.
 
 ## Status
 
@@ -147,14 +149,13 @@ Status de fila:
 
 ## QR Code
 
-1. Suba a Evolution.
-2. Suba o Vulcan.
-3. Abra `Configuracoes -> WhatsApp`.
-4. Preencha numero mestre, URL, API key e instancia.
-5. Clique em `Salvar`.
-6. Clique em `Ver QR`.
-7. Escaneie com o WhatsApp do numero mestre.
-8. Confirme status `Evolution conectado`.
+1. Suba o runtime Docker completo com `./scripts/docker-up.sh`.
+2. Gere QR pelo owner: `./scripts/docker-whatsapp-qr.sh 55DDDNUMERO`.
+3. Abra `.runtime/evolution-qr.png`.
+4. Escaneie com o WhatsApp do numero mestre.
+5. Confirme status `unofficial_connected` em `./scripts/docker-status.sh`.
+
+Alternativa UI owner: entrar como `admin/admin`, abrir `Configuracoes -> WhatsApp`, clicar em `Ver QR` e escanear. Login de tenant nao mostra QR.
 
 ## Redundancia Realista
 
@@ -189,6 +190,8 @@ Camadas usadas:
 - `POST /integrations/whatsapp/root/queue/{queue_id}/retry`
 
 O webhook exige `X-Vulcan-Webhook-Token`.
+
+Os endpoints Evolution e as operacoes manuais de fila/log/retry exigem escopo owner/root. O cliente usa apenas status comercial, destinatarios, preferencias, notificacoes e historico normal do tenant.
 
 ## Producao Oficial
 
