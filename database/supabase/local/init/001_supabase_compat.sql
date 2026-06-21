@@ -27,6 +27,40 @@ create table if not exists auth.users (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+create schema if not exists storage;
+
+create table if not exists storage.buckets (
+  id text primary key,
+  name text not null unique,
+  owner uuid,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  public boolean not null default false,
+  avif_autodetection boolean not null default false,
+  file_size_limit bigint,
+  allowed_mime_types text[]
+);
+
+create table if not exists storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text references storage.buckets(id) on delete cascade,
+  name text,
+  owner uuid,
+  metadata jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  last_accessed_at timestamptz,
+  path_tokens text[] generated always as (string_to_array(name, '/')) stored
+);
+
+create or replace function storage.foldername(name text)
+returns text[]
+language sql
+immutable
+as $$
+  select string_to_array(trim(both '/' from coalesce(name, '')), '/')
+$$;
+
 create or replace function auth.uid()
 returns uuid
 language sql
@@ -44,5 +78,8 @@ as $$
 $$;
 
 grant usage on schema auth to postgres, anon, authenticated, service_role;
+grant usage on schema storage to postgres, anon, authenticated, service_role;
 grant select, insert, update, delete on auth.users to postgres, service_role;
 grant select on auth.users to authenticated;
+grant select, insert, update, delete on storage.buckets, storage.objects to postgres, service_role;
+grant select on storage.buckets to anon, authenticated;
