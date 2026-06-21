@@ -142,6 +142,60 @@ begin
     '{"temporary": true}'::jsonb
   )
   on conflict (id) do nothing;
+
+  insert into public.whatsapp_delivery_queue (
+    id,
+    tenant_id,
+    recipient_membership_id,
+    notification_type,
+    root_channel_name,
+    root_channel_number,
+    destination,
+    title,
+    message,
+    status,
+    provider,
+    payload
+  )
+  values (
+    '00000000-0000-0000-0000-00000000f905',
+    '00000000-0000-0000-0000-00000000f999',
+    null,
+    'alerta',
+    'RLS Smoke',
+    '5500000000000',
+    '5500000000000',
+    'RLS Foreign WhatsApp',
+    'This row must not be visible outside its tenant.',
+    'queued',
+    'smoke',
+    '{"temporary": true}'::jsonb
+  )
+  on conflict (id) do nothing;
+
+  insert into public.whatsapp_delivery_logs (
+    id,
+    tenant_id,
+    queue_id,
+    recipient_membership_id,
+    destination,
+    status,
+    provider,
+    provider_result,
+    payload
+  )
+  values (
+    '00000000-0000-0000-0000-00000000f906',
+    '00000000-0000-0000-0000-00000000f999',
+    '00000000-0000-0000-0000-00000000f905',
+    null,
+    '5500000000000',
+    'queued',
+    'smoke',
+    'smoke',
+    '{"temporary": true}'::jsonb
+  )
+  on conflict (id) do nothing;
 end
 $$;
 
@@ -263,6 +317,22 @@ begin
     where id = '00000000-0000-0000-0000-00000000f904'
   ) then
     raise exception 'RLS leak: authenticated user saw foreign unassigned AI insight';
+  end if;
+
+  if exists (
+    select 1
+    from public.whatsapp_delivery_queue
+    where id = '00000000-0000-0000-0000-00000000f905'
+  ) then
+    raise exception 'RLS leak: authenticated user saw foreign WhatsApp queue row';
+  end if;
+
+  if exists (
+    select 1
+    from public.whatsapp_delivery_logs
+    where id = '00000000-0000-0000-0000-00000000f906'
+  ) then
+    raise exception 'RLS leak: authenticated user saw foreign WhatsApp delivery log';
   end if;
 
   select count(*) into v_visible_audit_logs

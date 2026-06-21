@@ -33,6 +33,8 @@ corepack pnpm --dir frontend/web test:e2e
 Comandos raiz esperados para aceite comercial:
 
 ```bash
+./scripts/start-all.sh
+./scripts/status-all.sh
 corepack pnpm supabase:validate
 corepack pnpm supabase:migrate
 corepack pnpm seed:demo
@@ -45,7 +47,87 @@ corepack pnpm test
 corepack pnpm test:api
 ```
 
+WhatsApp Evolution/Baileys:
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/infra/evolution
+./scripts/start.sh
+./scripts/status.sh
+./scripts/logs.sh
+./scripts/restart.sh
+```
+
+Autostart:
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
+./scripts/install-evolution-autostart.sh
+```
+
+Checklist Evolution:
+
+- Docker Compose sobe Evolution, Postgres e Redis;
+- `/` da Evolution responde health/version;
+- systemd service instala e reinicia em falha;
+- Vulcan mostra status `unofficial_*`, `mock`, `missing_credentials` ou `disabled`;
+- QR aparece quando a instancia precisa conectar;
+- API key fica mascarada no frontend;
+- teste mock nao finge envio real;
+- envio real so ocorre com Evolution conectada;
+- fila cria item com `tenant_id`, destinatario, provider, status e tentativas;
+- `process-queue` envia/reagenda/falha com backoff;
+- retry reabre item falho;
+- webhook protegido atualiza entrega quando ha `provider_message_id`;
+- Notificacoes mostra fila do Canal Raiz;
+- Configuracoes mostra status, QR, fila, logs e falhas;
+- operador nao ve dado fora do proprio escopo;
+- supervisor/lider ve apenas subarvore;
+- diretor/admin ve consolidado do tenant;
+- sem WhatsApp/opt-in nao gera envio para destinatario vazio.
+
 ## Validações Executadas Nesta Rodada
+
+### Rodada atual - 2026-06-21 - WhatsApp Evolution/Baileys
+
+- `PYTHONPATH=backend/api .venv/bin/python -m pytest backend/api/tests/test_api.py -q`: aprovado, 17 testes.
+- `corepack pnpm lint`: aprovado.
+- `corepack pnpm typecheck`: aprovado.
+- `corepack pnpm build`: aprovado.
+- `corepack pnpm test`: aprovado.
+- `corepack pnpm test:api`: aprovado.
+- `corepack pnpm supabase:validate`: aprovado.
+- `corepack pnpm supabase:migrate`: aprovado, incluindo `20260620000200_evolution_whatsapp_resilience.sql`.
+- `corepack pnpm seed:demo`: aprovado.
+- `corepack pnpm demo:validate`: aprovado, sem vazamento de hierarquia/dispositivos.
+- `corepack pnpm verify:phase1`: aprovado.
+- `corepack pnpm verify:phase2`: aprovado.
+- `corepack pnpm verify:phase3`: aprovado.
+- `corepack pnpm verify:phase4`: aprovado.
+- `corepack pnpm verify:phase5`: aprovado.
+- `corepack pnpm verify:phase6`: aprovado.
+- `corepack pnpm verify:phase7`: aprovado.
+- `.venv/bin/python -m pytest backend/ingestion-gateway/tests -q`: aprovado.
+- `.venv/bin/python -m pytest backend/jobs/tests -q`: aprovado.
+- `.venv/bin/python -m pytest backend/query-api/tests -q`: aprovado.
+- `.venv/bin/python -m pytest ai/api/tests -q`: aprovado.
+- `FRONTEND_PORT=3002 corepack pnpm --dir frontend/web test:e2e`: aprovado.
+- `corepack pnpm agent:linux:package`: aprovado.
+- `corepack pnpm agent:windows:build`: aprovado.
+- `./scripts/start-vulcan.sh`: aprovado, backend/frontend/worker iniciados.
+- `./scripts/status-all.sh`: aprovado parcialmente; Vulcan OK, Evolution bloqueada por permissao do Docker daemon no usuario atual.
+
+Smoke WhatsApp:
+
+- `GET /integrations/whatsapp/evolution/status`: aprovado; API key/webhook mascarados como configurados depois de gerar `infra/evolution/.env`.
+- Configuracao temporaria mock via `PUT /integrations/whatsapp/evolution/config`: aprovado.
+- `POST /integrations/whatsapp/evolution/send-test`: aprovado em mock explicito, sem envio real.
+- `POST /integrations/whatsapp/root/send`: aprovado em mock explicito com fila/log e `idempotencyKey`.
+- Seed demo passou a limpar `whatsapp_delivery_queue`/`whatsapp_delivery_logs` do tenant demo para evitar resíduo de teste em demonstrações.
+
+Bloqueio de ambiente:
+
+- `infra/evolution/scripts/start.sh` criou `infra/evolution/.env` com `0600`, mas nao conseguiu subir containers porque o usuario atual nao tem acesso a `/var/run/docker.sock`.
+- `systemctl --user status vulcan-evolution.service` falhou com `Failed to connect to bus: Connection refused`; autostart deve ser instalado em sessao/systemd valida ou via `sudo` no host.
 
 ### Rodada atual - 2026-06-15 - Notificacoes
 

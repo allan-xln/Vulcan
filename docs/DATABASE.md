@@ -14,6 +14,7 @@ The schema lives in `database/supabase`.
 - Normalization: deterministic normalized operational events.
 - Operational facts: session slices, idle windows, application usage facts.
 - Daily metrics: daily user operational metrics.
+- Root WhatsApp channel: templates, schedules, delivery queue and delivery logs.
 
 ## Tenant Columns
 
@@ -41,6 +42,10 @@ Run tables now require `tenant_id`; cross-tenant processing must be implemented 
 - `idle_windows`
 - `application_usage_facts`
 - `daily_user_operational_metrics`
+- `root_whatsapp_templates`
+- `notification_schedules`
+- `whatsapp_delivery_queue`
+- `whatsapp_delivery_logs`
 - `audit_logs`
 
 ## Hierarchy
@@ -51,6 +56,18 @@ The definitive dynamic hierarchy model is:
 - `membership_closure`: generated ancestor/descendant table for infinite-depth authorization.
 
 This supports Director -> Manager -> Supervisor -> Operator, CEO -> VP -> Director, or any tenant-defined structure without hard-coded levels.
+
+## Root WhatsApp Channel
+
+`root_whatsapp_templates` stores global or tenant-specific templates without secrets.
+
+`notification_schedules` stores recurrence rules by tenant. Supported recurrence values are `imediato`, `diario`, `semanal`, `mensal` and `personalizado`.
+
+`whatsapp_delivery_queue` stores one row per recipient/message, with `tenant_id`, `recipient_membership_id`, retry counters, provider result, scheduled time and final status.
+
+`whatsapp_delivery_logs` stores every delivery attempt. Logs never store access tokens or provider secrets.
+
+RLS allows tenant-scope users to see the tenant queue and hierarchy users to see only their own/subtree delivery records. Writes are performed by the backend service role after API authorization.
 
 ## Validation
 

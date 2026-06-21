@@ -7,6 +7,7 @@ Este documento resume como o Vulcan carrega configuracoes.
 1. Variaveis de ambiente: infraestrutura, secrets e providers globais.
 2. `tenant_settings`: defaults e politicas por tenant.
 3. Tabelas de dominio: usuarios, equipes, hierarquia, notificacoes e dispositivos.
+4. Runtime store local `.runtime/integration-secrets.json` para configuracoes de integracao salvas pela tela em ambiente local/piloto.
 
 ## Regra De Secrets
 
@@ -18,6 +19,8 @@ Secrets nunca voltam para o frontend:
 - Llama/OpenRouter/Groq key;
 - SMTP password;
 - WhatsApp token;
+- Evolution API key;
+- Evolution webhook token;
 - OAuth refresh token.
 
 O frontend recebe apenas status: `configurado`, `requer credencial`, `mock explicito` ou `erro`.
@@ -56,5 +59,24 @@ Toda chamada `PUT /settings/{section}` registra:
 - `SMTP_HOST`
 - `SMTP_PASS`
 - `ROOT_WHATSAPP_NUMBER`
+- `ROOT_WHATSAPP_PROVIDER`
+- `ROOT_WHATSAPP_MOCK_MODE`
+- `EVOLUTION_ENABLED`
+- `EVOLUTION_BASE_URL`
+- `EVOLUTION_API_KEY`
+- `EVOLUTION_INSTANCE_NAME`
+- `EVOLUTION_WEBHOOK_URL`
+- `EVOLUTION_WEBHOOK_TOKEN`
+- `WHATSAPP_PROVIDER`
+- `WHATSAPP_REQUIRE_OPT_IN`
+- `WHATSAPP_ENABLE_UNOFFICIAL_PROVIDER`
+- `WHATSAPP_EMAIL_FALLBACK_ENABLED`
+- `WHATSAPP_IN_APP_FALLBACK_ENABLED`
 - `WHATSAPP_ACCESS_TOKEN`
 - `AGENT_ENROLLMENT_TOKEN`
+
+## WhatsApp Evolution Runtime
+
+`PUT /integrations/whatsapp/evolution/config` salva configuracoes locais quando `ALLOW_RUNTIME_INTEGRATION_CONFIG=true`. Em producao, use cofre/variaveis do deploy e mantenha runtime config desabilitado.
+
+O frontend nunca recebe o valor real da API key; recebe apenas `apiKeyConfigured=true/false`.

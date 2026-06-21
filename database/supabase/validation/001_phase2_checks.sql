@@ -23,6 +23,10 @@ begin
       'ai_insights',
       'notifications',
       'notification_preferences',
+      'root_whatsapp_templates',
+      'notification_schedules',
+      'whatsapp_delivery_queue',
+      'whatsapp_delivery_logs',
       'ai_provider_configs',
       'org_nodes',
       'org_edges',
@@ -63,6 +67,10 @@ begin
       'metrics_read_hierarchy',
       'insights_read_hierarchy',
       'notifications_read_recipient_or_admin',
+      'root_whatsapp_templates_read_member',
+      'notification_schedules_read_tenant_scope',
+      'whatsapp_delivery_queue_read_hierarchy',
+      'whatsapp_delivery_logs_read_hierarchy',
       'org_closure_read_member',
       'audit_logs_read_member'
     ]) as expected_policy
@@ -94,6 +102,10 @@ begin
         'ai_insights',
         'notifications',
         'notification_preferences',
+        'root_whatsapp_templates',
+        'notification_schedules',
+        'whatsapp_delivery_queue',
+        'whatsapp_delivery_logs',
         'ai_provider_configs',
         'audit_logs'
       ]) as table_name

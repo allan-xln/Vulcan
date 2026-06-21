@@ -1,0 +1,116 @@
+name: vulcan-evolution
+
+services:
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: vulcan-evolution-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${EVOLUTION_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SERVER_NAME: vulcan-evolution
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      SERVER_URL: ${EVOLUTION_PUBLIC_URL:-http://127.0.0.1:8080}
+      SERVER_DISABLE_DOCS: "false"
+      SERVER_DISABLE_MANAGER: "false"
+      CORS_ORIGIN: http://127.0.0.1:${EVOLUTION_PORT:-8080},http://localhost:${EVOLUTION_PORT:-8080}
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DATABASE}?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: vulcan-evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_IS_ON_WHATSAPP: "true"
+      DATABASE_SAVE_IS_ON_WHATSAPP_DAYS: "7"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/0
+      CACHE_REDIS_PREFIX_KEY: vulcan-evolution
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      CONFIG_SESSION_PHONE_CLIENT: Vulcan
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: "30"
+      LANGUAGE: pt-BR
+      DEL_INSTANCE: "false"
+      TELEMETRY_ENABLED: "false"
+      LOG_LEVEL: ERROR,WARN,INFO,LOG,WEBHOOKS
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_REQUEST_TIMEOUT_MS: "30000"
+      WEBHOOK_RETRY_MAX_ATTEMPTS: "5"
+      WEBHOOK_RETRY_INITIAL_DELAY_SECONDS: "5"
+      WEBHOOK_RETRY_USE_EXPONENTIAL_BACKOFF: "true"
+      WEBHOOK_RETRY_MAX_DELAY_SECONDS: "300"
+      WEBHOOK_RETRY_JITTER_FACTOR: "0.2"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - data
+      - egress
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:8080/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 8s
+      retries: 12
+      start_period: 45s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: vulcan-evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+      POSTGRES_USER: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command: ["postgres", "-c", "max_connections=200"]
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME} -d ${POSTGRES_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: vulcan-evolution-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - evolution_redis:/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  evolution_instances:
+  evolution_postgres:
+  evolution_redis:
+
+networks:
+  data:
+    internal: true
+  egress:
+    driver: bridge

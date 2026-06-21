@@ -1,0 +1,23 @@
+[Unit]
+Description=Vulcan Evolution WhatsApp transport
+Documentation=__VULCAN_ROOT__/docs/WHATSAPP_EVOLUTION.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=__VULCAN_USER__
+Group=__VULCAN_GROUP__
+WorkingDirectory=__VULCAN_ROOT__/infra/evolution
+ExecStart=__VULCAN_ROOT__/infra/evolution/scripts/start.sh
+ExecReload=__VULCAN_ROOT__/infra/evolution/scripts/restart.sh
+ExecStop=__VULCAN_ROOT__/infra/evolution/scripts/stop.sh
+TimeoutStartSec=300
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

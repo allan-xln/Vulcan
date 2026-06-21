@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from os import getenv
 
+from app.runtime_config import load_runtime_config
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -70,6 +72,27 @@ class Settings:
     root_whatsapp_provider: str
     root_whatsapp_number: str | None
     root_whatsapp_name: str
+    root_whatsapp_mock_mode: bool
+    root_whatsapp_base_url: str | None
+    root_whatsapp_api_key: str | None
+    whatsapp_graph_api_version: str
+    whatsapp_request_timeout_seconds: int
+    evolution_enabled: bool
+    evolution_base_url: str | None
+    evolution_api_key: str | None
+    evolution_instance_name: str
+    evolution_webhook_url: str | None
+    evolution_webhook_token: str | None
+    evolution_request_timeout_seconds: int
+    evolution_max_retries: int
+    evolution_retry_backoff_seconds: int
+    whatsapp_default_country: str
+    whatsapp_require_opt_in: bool
+    whatsapp_enable_unofficial_provider: bool
+    whatsapp_email_fallback_enabled: bool
+    whatsapp_in_app_fallback_enabled: bool
+    whatsapp_worker_poll_seconds: int
+    allow_runtime_integration_config: bool
     fcm_server_key: str | None
     fcm_vapid_key: str | None
     agent_enrollment_token: str
@@ -80,6 +103,14 @@ def _bool_env(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _bool_value(value: object | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _origin_list_env(names: tuple[str, ...], default: tuple[str, ...]) -> tuple[str, ...]:
@@ -113,6 +144,14 @@ def _vercel_origin() -> tuple[str, ...]:
 
 def get_settings() -> Settings:
     environment = getenv("NEXT_PUBLIC_ENVIRONMENT", "local")
+    runtime = load_runtime_config()
+
+    def configured(name: str, default: str = "") -> str:
+        value = runtime.get(name)
+        if value is not None:
+            return str(value)
+        return getenv(name, default)
+
     default_origin_regex = None if environment == "production" else r"^https?://(localhost|127\.0\.0\.1):[0-9]+$"
     return Settings(
         host=getenv("LOCAL_API_HOST", "0.0.0.0"),
@@ -196,10 +235,43 @@ def get_settings() -> Settings:
         whatsapp_business_account_id=getenv("WHATSAPP_BUSINESS_ACCOUNT_ID") or None,
         whatsapp_webhook_verify_token=getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN") or None,
         whatsapp_default_recipient=getenv("WHATSAPP_DEFAULT_RECIPIENT") or None,
-        root_whatsapp_enabled=_bool_env("ROOT_WHATSAPP_ENABLED", False),
-        root_whatsapp_provider=getenv("ROOT_WHATSAPP_PROVIDER", "lanchat"),
-        root_whatsapp_number=getenv("ROOT_WHATSAPP_NUMBER") or None,
-        root_whatsapp_name=getenv("ROOT_WHATSAPP_NAME", "Notificações Vulcan"),
+        root_whatsapp_enabled=_bool_value(runtime.get("ROOT_WHATSAPP_ENABLED"), _bool_env("ROOT_WHATSAPP_ENABLED", False)),
+        root_whatsapp_provider=configured("ROOT_WHATSAPP_PROVIDER", "mock"),
+        root_whatsapp_number=configured("ROOT_WHATSAPP_NUMBER") or None,
+        root_whatsapp_name=configured("ROOT_WHATSAPP_NAME", "Vulcan Notifications"),
+        root_whatsapp_mock_mode=_bool_value(
+            runtime.get("ROOT_WHATSAPP_MOCK_MODE"),
+            _bool_env("ROOT_WHATSAPP_MOCK_MODE", environment != "production"),
+        ),
+        root_whatsapp_base_url=getenv("ROOT_WHATSAPP_BASE_URL") or None,
+        root_whatsapp_api_key=getenv("ROOT_WHATSAPP_API_KEY") or None,
+        whatsapp_graph_api_version=getenv("WHATSAPP_GRAPH_API_VERSION", "v25.0"),
+        whatsapp_request_timeout_seconds=int(getenv("WHATSAPP_REQUEST_TIMEOUT_SECONDS", "15")),
+        evolution_enabled=_bool_value(runtime.get("EVOLUTION_ENABLED"), _bool_env("EVOLUTION_ENABLED", False)),
+        evolution_base_url=configured("EVOLUTION_BASE_URL", "http://127.0.0.1:8080") or None,
+        evolution_api_key=configured("EVOLUTION_API_KEY") or None,
+        evolution_instance_name=configured("EVOLUTION_INSTANCE_NAME", "vulcan-root"),
+        evolution_webhook_url=getenv(
+            "EVOLUTION_WEBHOOK_URL",
+            "http://host.docker.internal:3001/integrations/whatsapp/evolution/webhook",
+        ) or None,
+        evolution_webhook_token=configured("EVOLUTION_WEBHOOK_TOKEN") or None,
+        evolution_request_timeout_seconds=int(getenv("EVOLUTION_REQUEST_TIMEOUT_SECONDS", "30")),
+        evolution_max_retries=max(1, int(getenv("EVOLUTION_MAX_RETRIES", "3"))),
+        evolution_retry_backoff_seconds=max(1, int(getenv("EVOLUTION_RETRY_BACKOFF_SECONDS", "5"))),
+        whatsapp_default_country=getenv("WHATSAPP_DEFAULT_COUNTRY", "BR"),
+        whatsapp_require_opt_in=_bool_value(runtime.get("WHATSAPP_REQUIRE_OPT_IN"), _bool_env("WHATSAPP_REQUIRE_OPT_IN", True)),
+        whatsapp_enable_unofficial_provider=_bool_env("WHATSAPP_ENABLE_UNOFFICIAL_PROVIDER", False),
+        whatsapp_email_fallback_enabled=_bool_value(
+            runtime.get("WHATSAPP_EMAIL_FALLBACK_ENABLED"),
+            _bool_env("WHATSAPP_EMAIL_FALLBACK_ENABLED", True),
+        ),
+        whatsapp_in_app_fallback_enabled=_bool_value(
+            runtime.get("WHATSAPP_IN_APP_FALLBACK_ENABLED"),
+            _bool_env("WHATSAPP_IN_APP_FALLBACK_ENABLED", True),
+        ),
+        whatsapp_worker_poll_seconds=max(2, int(getenv("WHATSAPP_WORKER_POLL_SECONDS", "10"))),
+        allow_runtime_integration_config=_bool_env("VULCAN_ALLOW_RUNTIME_INTEGRATION_CONFIG", environment != "production"),
         fcm_server_key=getenv("FCM_SERVER_KEY") or None,
         fcm_vapid_key=getenv("FCM_VAPID_KEY") or None,
         agent_enrollment_token=getenv("AGENT_ENROLLMENT_TOKEN", "vulcan-local-enrollment-token"),

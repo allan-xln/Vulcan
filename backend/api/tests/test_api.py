@@ -222,6 +222,96 @@ def test_mock_connection_tests_return_clear_status() -> None:
     assert "providerResult" in email_response.json()
 
 
+def test_root_whatsapp_channel_contracts_are_available() -> None:
+    token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    recipients_response = client.get(
+        "/integrations/whatsapp/root/recipients?notificationType=alerta&audience=managers",
+        headers=headers,
+    )
+    dry_run_response = client.post(
+        "/integrations/whatsapp/root/send",
+        headers=headers,
+        json={
+            "tenantId": "00000000-0000-0000-0000-000000000301",
+            "notificationType": "alerta",
+            "title": "Alerta de QA",
+            "message": "Mensagem controlada de QA.",
+            "audience": "managers",
+            "priority": "alto",
+            "dryRun": True,
+        },
+    )
+
+    assert recipients_response.status_code == 200
+    assert len(recipients_response.json()) >= 1
+    assert recipients_response.json()[0]["whatsapp"]
+    assert dry_run_response.status_code == 200
+    payload = dry_run_response.json()
+    assert payload["mode"] in {"mock", "missing_credentials", "connected", "disabled"}
+    assert payload["mocked"] >= 1
+    assert payload["queued"] == 0
+
+
+def test_evolution_whatsapp_contracts_are_available_and_protected() -> None:
+    token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    status_response = client.get("/integrations/whatsapp/evolution/status", headers=headers)
+    qr_response = client.get("/integrations/whatsapp/evolution/qr", headers=headers)
+    send_test_response = client.post(
+        "/integrations/whatsapp/evolution/send-test",
+        headers=headers,
+        json={
+            "tenantId": "00000000-0000-0000-0000-000000000301",
+            "provider": "evolution",
+            "destination": "5541999999999",
+            "message": "Teste automatizado",
+        },
+    )
+    invalid_config_response = client.put(
+        "/integrations/whatsapp/evolution/config",
+        headers=headers,
+        json={
+            "enabled": True,
+            "provider": "evolution",
+            "rootNumber": "",
+            "rootName": "Vulcan QA",
+            "baseUrl": "http://127.0.0.1:8080",
+            "instanceName": "vulcan-root",
+            "mockMode": False,
+            "requireOptIn": True,
+            "emailFallbackEnabled": True,
+            "inAppFallbackEnabled": True,
+        },
+    )
+    webhook_response = client.post("/integrations/whatsapp/evolution/webhook", json={"event": "CONNECTION_UPDATE"})
+
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["provider"]
+    assert status_payload["status"] in {
+        "disabled",
+        "mock",
+        "missing_credentials",
+        "unofficial_disconnected",
+        "unofficial_qr_required",
+        "unofficial_connected",
+        "unofficial_failed",
+        "unofficial_rate_limited",
+        "official_ready_future",
+    }
+    assert "apiKeyConfigured" in status_payload
+    assert "mockMode" in status_payload
+    assert qr_response.status_code == 200
+    assert "status" in qr_response.json()
+    assert send_test_response.status_code == 200
+    assert "providerResult" in send_test_response.json()
+    assert invalid_config_response.status_code == 422
+    assert webhook_response.status_code == 401
+
+
 def test_schedules_and_report_templates_are_available() -> None:
     token = client.post("/auth/login", json={"username": "admin", "password": "admin"}).json()["accessToken"]
     headers = {"Authorization": f"Bearer {token}"}

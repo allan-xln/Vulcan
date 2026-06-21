@@ -59,11 +59,26 @@ Depois disso:
 ## Campos De Adoção
 
 - pessoa ou usuário existente;
+- nome;
+- e-mail;
+- telefone;
+- WhatsApp;
 - equipe;
+- departamento;
+- cargo;
+- gestor direto;
+- perfil;
+- preferencias de notificacao;
+- opt-in de WhatsApp;
+- janela silenciosa;
 - política de coleta;
 - status de privacidade;
 - código de adoção;
 - qualidade de coleta.
+
+Quando a adoção cria uma pessoa nova, `telefone`, `WhatsApp`, `whatsapp_enabled`, `whatsapp_opt_in`, tipos de notificacao e janela silenciosa devem ser persistidos no cadastro da pessoa. Quando a adoção vincula um dispositivo a pessoa existente, o Canal WhatsApp Raiz usa o WhatsApp já salvo nessa pessoa.
+
+Se nao houver WhatsApp cadastrado ou opt-in, o Vulcan nao tenta enviar para destino vazio e deve mostrar pendencia operacional.
 
 ## Auditoria
 

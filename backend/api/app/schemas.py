@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ApiModel(BaseModel):
@@ -77,6 +77,11 @@ class Membership(ApiModel):
     work_email: str | None = Field(default=None, alias="workEmail")
     phone: str | None = None
     whatsapp: str | None = None
+    whatsapp_enabled: bool = Field(default=True, alias="whatsappEnabled")
+    whatsapp_opt_in: bool = Field(default=False, alias="whatsappOptIn")
+    whatsapp_notification_types: list[str] = Field(default_factory=list, alias="whatsappNotificationTypes")
+    quiet_hours_start: str | None = Field(default=None, alias="quietHoursStart")
+    quiet_hours_end: str | None = Field(default=None, alias="quietHoursEnd")
     title: str | None = None
     hierarchy_level: int | None = Field(default=None, alias="hierarchyLevel")
 
@@ -95,6 +100,11 @@ class MembershipCreate(BaseModel):
     work_email: str | None = Field(default=None, alias="workEmail")
     phone: str | None = None
     whatsapp: str | None = None
+    whatsapp_enabled: bool = Field(default=True, alias="whatsappEnabled")
+    whatsapp_opt_in: bool = Field(default=False, alias="whatsappOptIn")
+    whatsapp_notification_types: list[str] = Field(default_factory=list, alias="whatsappNotificationTypes")
+    quiet_hours_start: str | None = Field(default=None, alias="quietHoursStart")
+    quiet_hours_end: str | None = Field(default=None, alias="quietHoursEnd")
     title: str | None = None
     hierarchy_level: int | None = Field(default=None, alias="hierarchyLevel")
 
@@ -112,6 +122,11 @@ class MembershipUpdate(BaseModel):
     work_email: str | None = Field(default=None, alias="workEmail")
     phone: str | None = None
     whatsapp: str | None = None
+    whatsapp_enabled: bool | None = Field(default=None, alias="whatsappEnabled")
+    whatsapp_opt_in: bool | None = Field(default=None, alias="whatsappOptIn")
+    whatsapp_notification_types: list[str] | None = Field(default=None, alias="whatsappNotificationTypes")
+    quiet_hours_start: str | None = Field(default=None, alias="quietHoursStart")
+    quiet_hours_end: str | None = Field(default=None, alias="quietHoursEnd")
     title: str | None = None
     hierarchy_level: int | None = Field(default=None, alias="hierarchyLevel")
 
@@ -680,6 +695,88 @@ class NotificationTemplatePreviewResponse(ApiModel):
     variables_used: dict[str, Any] = Field(alias="variablesUsed")
 
 
+class RootWhatsAppRecipient(ApiModel):
+    membership_id: UUID = Field(alias="membershipId")
+    tenant_id: UUID = Field(alias="tenantId")
+    name: str
+    title: str | None = None
+    department: str | None = None
+    whatsapp: str
+    scope: Literal["self", "subtree", "tenant"] = "self"
+    preference_enabled: bool = Field(default=True, alias="preferenceEnabled")
+
+
+class RootWhatsAppSendRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    notification_type: str = Field(default="alerta", alias="notificationType")
+    title: str | None = None
+    message: str | None = None
+    template_id: str | None = Field(default=None, alias="templateId")
+    variables: dict[str, Any] = Field(default_factory=dict)
+    audience: Literal["auto", "self", "subtree", "managers", "tenant", "custom"] = "auto"
+    recipient_membership_ids: list[UUID] = Field(default_factory=list, alias="recipientMembershipIds")
+    priority: Literal["informativo", "baixo", "medio", "alto", "critico"] = "medio"
+    schedule: Literal["imediato", "diario", "semanal", "mensal", "personalizado"] = "imediato"
+    scheduled_for: datetime | None = Field(default=None, alias="scheduledFor")
+    max_attempts: int = Field(default=3, alias="maxAttempts", ge=1, le=10)
+    dry_run: bool = Field(default=False, alias="dryRun")
+    action_url: str | None = Field(default=None, alias="actionUrl")
+    idempotency_key: str | None = Field(default=None, alias="idempotencyKey", max_length=200)
+
+
+class RootWhatsAppQueueItem(ApiModel):
+    id: UUID
+    tenant_id: UUID = Field(alias="tenantId")
+    notification_id: UUID | None = Field(default=None, alias="notificationId")
+    recipient_membership_id: UUID | None = Field(default=None, alias="recipientMembershipId")
+    recipient: str | None = None
+    destination: str
+    notification_type: str = Field(alias="notificationType")
+    title: str
+    message: str
+    priority: str
+    status: str
+    provider: str | None = None
+    provider_message_id: str | None = Field(default=None, alias="providerMessageId")
+    attempts: int
+    max_attempts: int = Field(alias="maxAttempts")
+    scheduled_for: datetime | None = Field(default=None, alias="scheduledFor")
+    next_attempt_at: datetime | None = Field(default=None, alias="nextAttemptAt")
+    sent_at: datetime | None = Field(default=None, alias="sentAt")
+    delivered_at: datetime | None = Field(default=None, alias="deliveredAt")
+    dead_letter_at: datetime | None = Field(default=None, alias="deadLetterAt")
+    last_error: str | None = Field(default=None, alias="lastError")
+    created_at: datetime = Field(alias="createdAt")
+
+
+class RootWhatsAppSendResponse(ApiModel):
+    status: str
+    mode: str
+    queued: int
+    sent: int
+    failed: int
+    mocked: int
+    missing_credentials: int = Field(alias="missingCredentials")
+    recipients: list[RootWhatsAppRecipient]
+    queue_items: list[RootWhatsAppQueueItem] = Field(alias="queueItems")
+
+
+class RootWhatsAppLog(ApiModel):
+    id: UUID
+    tenant_id: UUID = Field(alias="tenantId")
+    queue_id: UUID | None = Field(default=None, alias="queueId")
+    notification_id: UUID | None = Field(default=None, alias="notificationId")
+    recipient_membership_id: UUID | None = Field(default=None, alias="recipientMembershipId")
+    destination: str | None = None
+    status: str
+    provider: str | None = None
+    provider_result: str | None = Field(default=None, alias="providerResult")
+    error: str | None = None
+    created_at: datetime = Field(alias="createdAt")
+
+
 class ConnectionTestRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -694,6 +791,99 @@ class ConnectionTestResponse(ApiModel):
     status: str
     provider_result: str = Field(alias="providerResult")
     message: str
+
+
+class EvolutionConfigurationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enabled: bool
+    provider: Literal["mock", "evolution", "meta_cloud_future"] = "evolution"
+    root_number: str = Field(default="", alias="rootNumber")
+    root_name: str = Field(default="Vulcan Notifications", alias="rootName", min_length=1, max_length=100)
+    base_url: str = Field(default="http://127.0.0.1:8080", alias="baseUrl")
+    api_key: str | None = Field(default=None, alias="apiKey", max_length=512)
+    instance_name: str = Field(default="vulcan-root", alias="instanceName", min_length=3, max_length=100)
+    mock_mode: bool = Field(default=False, alias="mockMode")
+    require_opt_in: bool = Field(default=True, alias="requireOptIn")
+    email_fallback_enabled: bool = Field(default=True, alias="emailFallbackEnabled")
+    in_app_fallback_enabled: bool = Field(default=True, alias="inAppFallbackEnabled")
+
+    @field_validator("root_number")
+    @classmethod
+    def validate_root_number(cls, value: str) -> str:
+        digits = "".join(char for char in value if char.isdigit())
+        if not digits:
+            return ""
+        if not (10 <= len(digits) <= 15) or digits.startswith("0"):
+            raise ValueError("Número mestre deve estar no padrão E.164, somente com dígitos")
+        return digits
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def normalize_api_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value or None
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        from app.whatsapp import valid_http_url
+
+        if not valid_http_url(value):
+            raise ValueError("URL da Evolution deve começar com http:// ou https://")
+        return value.rstrip("/")
+
+    @field_validator("instance_name")
+    @classmethod
+    def validate_instance_name(cls, value: str) -> str:
+        if not all(char.isalnum() or char in {"-", "_"} for char in value):
+            raise ValueError("Nome da instância aceita apenas letras, números, hífen e underscore")
+        return value
+
+    @model_validator(mode="after")
+    def validate_enabled_configuration(self) -> "EvolutionConfigurationRequest":
+        if self.enabled and self.provider != "mock" and not self.root_number:
+            raise ValueError("Número mestre é obrigatório quando o WhatsApp raiz está ativo")
+        if self.enabled and self.provider == "evolution" and self.api_key is not None and len(self.api_key) < 16:
+            raise ValueError("API key da Evolution deve ter pelo menos 16 caracteres")
+        return self
+
+
+class EvolutionStatus(ApiModel):
+    provider: str
+    status: str
+    connected: bool
+    unofficial: bool
+    service_reachable: bool = Field(alias="serviceReachable")
+    instance_name: str = Field(alias="instanceName")
+    base_url: str | None = Field(default=None, alias="baseUrl")
+    root_number: str | None = Field(default=None, alias="rootNumber")
+    root_name: str = Field(alias="rootName")
+    qr_required: bool = Field(alias="qrRequired")
+    qr_code: str | None = Field(default=None, alias="qrCode")
+    api_key_configured: bool = Field(alias="apiKeyConfigured")
+    webhook_configured: bool = Field(alias="webhookConfigured")
+    mock_mode: bool = Field(alias="mockMode")
+    require_opt_in: bool = Field(alias="requireOptIn")
+    email_fallback_enabled: bool = Field(alias="emailFallbackEnabled")
+    in_app_fallback_enabled: bool = Field(alias="inAppFallbackEnabled")
+    logs: list[str]
+
+
+class EvolutionActionResponse(ApiModel):
+    ok: bool
+    status: str
+    message: str
+    qr_code: str | None = Field(default=None, alias="qrCode")
+
+
+class EvolutionWebhookResponse(ApiModel):
+    accepted: bool
+    event: str
+    status: str
+    provider_message_id: str | None = Field(default=None, alias="providerMessageId")
 
 
 class IntegrationStatus(ApiModel):
@@ -826,6 +1016,11 @@ class HierarchyNode(ApiModel):
     email: str
     phone: str | None = None
     whatsapp: str | None = None
+    whatsapp_enabled: bool = Field(default=True, alias="whatsappEnabled")
+    whatsapp_opt_in: bool = Field(default=False, alias="whatsappOptIn")
+    whatsapp_notification_types: list[str] = Field(default_factory=list, alias="whatsappNotificationTypes")
+    quiet_hours_start: str | None = Field(default=None, alias="quietHoursStart")
+    quiet_hours_end: str | None = Field(default=None, alias="quietHoursEnd")
     hierarchy_level: int = Field(alias="hierarchyLevel")
     direct_reports: int = Field(alias="directReports")
     visible_scope: Literal["self", "subtree", "tenant", "global"] = Field(alias="visibleScope")

@@ -145,7 +145,7 @@ type NotificationItem = {
   id: string;
   tenantId?: string | null;
   channel: "system" | "push" | "windows" | "whatsapp" | "email";
-  status: "pending" | "queued" | "sending" | "sent" | "delivered" | "failed" | "cancelled" | "skipped" | "retrying" | "ready" | "mocked" | "missing_credentials" | "missing_destination" | "unknown_provider" | "disabled" | "resolved";
+  status: "pending" | "queued" | "sending" | "sent" | "delivered" | "failed" | "cancelled" | "skipped" | "retrying" | "ready" | "mocked" | "missing_credentials" | "missing_destination" | "unknown_provider" | "disabled" | "resolved" | "provider_unavailable" | "qr_required" | "rate_limited";
   title: string;
   message: string;
   createdAt: string;
@@ -336,6 +336,11 @@ type HierarchyNode = {
   email: string;
   phone?: string | null;
   whatsapp?: string | null;
+  whatsappEnabled?: boolean;
+  whatsappOptIn?: boolean;
+  whatsappNotificationTypes?: string[];
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
   hierarchyLevel: number;
   directReports: number;
   visibleScope: "self" | "subtree" | "tenant" | "global";
@@ -372,6 +377,10 @@ type HierarchyMemberFormPayload = {
   password: string;
   phone: string;
   whatsapp: string;
+  whatsappEnabled: boolean;
+  whatsappOptIn: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
 };
 
 type SupabaseStatus = {
@@ -401,6 +410,77 @@ type WhatsAppStatus = {
   lastConnectionAt: string | null;
   lastSyncAt: string | null;
   logs: string[];
+};
+
+type EvolutionStatus = {
+  provider: string;
+  status: string;
+  connected: boolean;
+  unofficial: boolean;
+  serviceReachable: boolean;
+  instanceName: string;
+  baseUrl: string | null;
+  rootNumber: string | null;
+  rootName: string;
+  qrRequired: boolean;
+  qrCode: string | null;
+  apiKeyConfigured: boolean;
+  webhookConfigured: boolean;
+  mockMode: boolean;
+  requireOptIn: boolean;
+  emailFallbackEnabled: boolean;
+  inAppFallbackEnabled: boolean;
+  logs: string[];
+};
+
+type RootWhatsAppQueueItem = {
+  id: string;
+  recipient?: string | null;
+  destination: string;
+  title: string;
+  status: string;
+  provider?: string | null;
+  providerMessageId?: string | null;
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt?: string | null;
+  deadLetterAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+};
+
+type RootWhatsAppLog = {
+  id: string;
+  queueId?: string | null;
+  destination?: string | null;
+  status: string;
+  provider?: string | null;
+  providerResult?: string | null;
+  error?: string | null;
+  createdAt: string;
+};
+
+type EvolutionActionResponse = {
+  ok: boolean;
+  status: string;
+  message: string;
+  qrCode?: string | null;
+};
+
+type EvolutionConfigDraft = {
+  enabled: boolean;
+  provider: "mock" | "evolution" | "meta_cloud_future";
+  rootNumber: string;
+  rootName: string;
+  baseUrl: string;
+  apiKey: string;
+  instanceName: string;
+  mockMode: boolean;
+  requireOptIn: boolean;
+  emailFallbackEnabled: boolean;
+  inAppFallbackEnabled: boolean;
+  testDestination: string;
+  testMessage: string;
 };
 
 type EmailProviderStatus = {
@@ -1252,6 +1332,18 @@ function statusPt(status: string) {
     consulta_pendente: "consulta pendente",
     unknown_provider: "provedor desconhecido",
     missing_destination: "destinatário ausente",
+    mock: "mock explícito",
+    unofficial_connected: "Evolution conectado",
+    unofficial_disconnected: "Evolution desconectado",
+    unofficial_qr_required: "QR necessário",
+    unofficial_failed: "Evolution indisponível",
+    unofficial_rate_limited: "Evolution limitado",
+    official_ready_future: "API oficial preparada para o futuro",
+    provider_unavailable: "provider indisponível",
+    qr_required: "QR necessário",
+    rate_limited: "limite temporário",
+    retrying: "nova tentativa agendada",
+    delivered: "entregue",
     conectado: "conectado",
     pendente: "pendente",
     aguardando_configuracao: "aguardando configuração"
@@ -2211,6 +2303,11 @@ export default function HomePage() {
       workEmail: payload.workEmail.trim(),
       phone: payload.phone.trim() || null,
       whatsapp: payload.whatsapp.trim() || null,
+      whatsappEnabled: payload.whatsappEnabled,
+      whatsappOptIn: payload.whatsappOptIn,
+      whatsappNotificationTypes: [],
+      quietHoursStart: payload.quietHoursStart || null,
+      quietHoursEnd: payload.quietHoursEnd || null,
       title: payload.title.trim(),
       hierarchyLevel: payload.level
     };
@@ -3033,7 +3130,11 @@ function HierarchyView({
     username: "",
     password: "",
     phone: "",
-    whatsapp: ""
+    whatsapp: "",
+    whatsappEnabled: true,
+    whatsappOptIn: false,
+    quietHoursStart: "22:00",
+    quietHoursEnd: "07:00"
   });
   const sortedNodes = [...hierarchy].sort((a, b) => a.hierarchyLevel - b.hierarchyLevel);
   const tenantScope = hierarchy.filter((node) => node.visibleScope === "tenant" || node.visibleScope === "global").length;
@@ -3126,7 +3227,11 @@ function HierarchyView({
       username: "",
       password: "",
       phone: "",
-      whatsapp: ""
+      whatsapp: "",
+      whatsappEnabled: true,
+      whatsappOptIn: false,
+      quietHoursStart: "22:00",
+      quietHoursEnd: "07:00"
     });
   }
 
@@ -3145,7 +3250,11 @@ function HierarchyView({
       username: node.email ? node.email.split("@")[0] : node.name.toLowerCase().replace(/\s+/g, "."),
       password: "",
       phone: node.phone ?? "",
-      whatsapp: node.whatsapp ?? ""
+      whatsapp: node.whatsapp ?? "",
+      whatsappEnabled: node.whatsappEnabled ?? true,
+      whatsappOptIn: node.whatsappOptIn ?? false,
+      quietHoursStart: node.quietHoursStart?.slice(0, 5) ?? "22:00",
+      quietHoursEnd: node.quietHoursEnd?.slice(0, 5) ?? "07:00"
     });
   }
 
@@ -3208,7 +3317,11 @@ function HierarchyView({
             username: "",
             password: "",
             phone: "",
-            whatsapp: ""
+            whatsapp: "",
+            whatsappEnabled: true,
+            whatsappOptIn: false,
+            quietHoursStart: "22:00",
+            quietHoursEnd: "07:00"
           });
         }
       }
@@ -3485,6 +3598,17 @@ function HierarchyView({
                 <HierarchyInput label={form.id ? "Nova senha opcional" : "Senha inicial"} value={form.password} onChange={(value) => updateForm("password", value)} type="password" />
                 <HierarchyInput label="Telefone" value={form.phone} onChange={(value) => updateForm("phone", value)} />
                 <HierarchyInput label="WhatsApp para alertas" value={form.whatsapp} onChange={(value) => updateForm("whatsapp", value)} />
+              </div>
+
+              <div className="grid gap-3 border border-zinc-800 bg-black/35 p-4 md:grid-cols-4">
+                <button type="button" onClick={() => updateForm("whatsappEnabled", !form.whatsappEnabled)} className={`h-11 border px-3 text-sm ${form.whatsappEnabled ? "border-emerald-400/30 text-emerald-200" : "border-zinc-700 text-zinc-500"}`}>
+                  WhatsApp {form.whatsappEnabled ? "ativo" : "inativo"}
+                </button>
+                <button type="button" onClick={() => updateForm("whatsappOptIn", !form.whatsappOptIn)} className={`h-11 border px-3 text-sm ${form.whatsappOptIn ? "border-emerald-400/30 text-emerald-200" : "border-orange-400/25 text-orange-200"}`}>
+                  Opt-in {form.whatsappOptIn ? "confirmado" : "pendente"}
+                </button>
+                <HierarchyInput label="Silêncio início" value={form.quietHoursStart} onChange={(value) => updateForm("quietHoursStart", value)} type="time" />
+                <HierarchyInput label="Silêncio fim" value={form.quietHoursEnd} onChange={(value) => updateForm("quietHoursEnd", value)} type="time" />
               </div>
 
               <div className="grid gap-3 border border-zinc-800 bg-black/35 p-4 md:grid-cols-3">
@@ -5684,11 +5808,17 @@ function NotificationsView({
   const [templatePreview, setTemplatePreview] = useState<{ title: string; body: string } | null>(null);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [rootQueue, setRootQueue] = useState<RootWhatsAppQueueItem[]>([]);
+  const [rootLogs, setRootLogs] = useState<RootWhatsAppLog[]>([]);
   const iconByChannel = { system: BellRing, push: BellRing, windows: Monitor, whatsapp: MessageCircle, email: Mail };
   const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
 
   useEffect(() => setItems(notifications), [notifications]);
   useEffect(() => setTypes(notificationTypes), [notificationTypes]);
+  useEffect(() => {
+    void refreshRootWhatsappQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const filtered = items.filter((item) => {
     if (channelFilter !== "all" && item.channel !== channelFilter) return false;
@@ -5700,6 +5830,64 @@ function NotificationsView({
   const statuses = [...new Set(items.map((item) => item.status))];
   const priorities = ["informativo", "baixo", "medio", "alto", "critico"];
   const selectedTemplate = notificationTemplates.find((item) => item.id === selectedTemplateId) ?? notificationTemplates[0];
+  const rootQueueIssues = rootQueue.filter((item) => ["failed", "provider_unavailable", "qr_required", "rate_limited", "retrying"].includes(item.status));
+
+  async function rootRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (!token) throw new Error("Sessão ausente.");
+    const response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Tenant-Id": DEMO_TENANT_ID,
+        ...(init.body ? { "Content-Type": "application/json" } : {})
+      }
+    });
+    const payload = (await response.json().catch(() => ({}))) as T & { detail?: string };
+    if (!response.ok) throw new Error(String(payload.detail ?? "Requisição recusada pelo backend."));
+    return payload;
+  }
+
+  async function refreshRootWhatsappQueue() {
+    if (!token) return;
+    try {
+      const [queuePayload, logsPayload] = await Promise.all([
+        rootRequest<RootWhatsAppQueueItem[]>("/integrations/whatsapp/root/queue?limit=8"),
+        rootRequest<RootWhatsAppLog[]>("/integrations/whatsapp/root/logs?limit=5")
+      ]);
+      setRootQueue(queuePayload);
+      setRootLogs(logsPayload);
+    } catch {
+      setRootQueue([]);
+      setRootLogs([]);
+    }
+  }
+
+  async function processRootWhatsappQueue() {
+    setBusy("root-process-queue");
+    try {
+      const payload = await rootRequest<{ queued: number; sent: number; failed: number; mode: string }>("/integrations/whatsapp/root/process-queue?limit=25", { method: "POST" });
+      setFeedback({ tone: payload.failed ? "warn" : "ok", message: `WhatsApp raiz: ${payload.sent} enviada(s), ${payload.failed} falha(s), ${payload.queued} pendente(s). Modo: ${statusPt(payload.mode)}.` });
+      await refreshRootWhatsappQueue();
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao processar fila WhatsApp." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryRootWhatsappItem(id: string) {
+    setBusy(`root-retry-${id}`);
+    try {
+      const updated = await rootRequest<RootWhatsAppQueueItem>(`/integrations/whatsapp/root/queue/${id}/retry`, { method: "POST" });
+      setRootQueue((current) => current.map((item) => item.id === id ? updated : item));
+      setFeedback({ tone: "ok", message: "Item WhatsApp reaberto para retry com auditoria." });
+      await refreshRootWhatsappQueue();
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao reabrir item WhatsApp." });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function notificationAction(id: string, action: "retry" | "cancel" | "mark-read" | "resolve") {
     if (!token) return;
@@ -5833,6 +6021,31 @@ function NotificationsView({
                 </button>
               );
             })}
+          </div>
+          <div className="mt-4 border border-zinc-800 bg-black/35 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-zinc-100">Canal WhatsApp raiz</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.14em] text-zinc-500">{statusPt(whatsAppStatus.status)} | {rootQueueIssues.length} atenção</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => void processRootWhatsappQueue()} disabled={Boolean(busy)} className="h-9 border border-orange-400/25 px-3 text-xs text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Processar</button>
+                <button type="button" onClick={() => void refreshRootWhatsappQueue()} disabled={Boolean(busy)} className="h-9 border border-zinc-800 px-3 text-xs text-zinc-300 transition hover:border-orange-400/50 disabled:opacity-40">Atualizar</button>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {rootQueue.slice(0, 4).map((item) => (
+                <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border border-zinc-800 bg-zinc-950/55 px-3 py-2">
+                  <div>
+                    <p className="text-sm text-zinc-200">{item.title}</p>
+                    <p className="text-xs text-zinc-500">{maskPhone(item.destination)} | {statusPt(item.status)} | {item.attempts}/{item.maxAttempts}</p>
+                  </div>
+                  <button type="button" onClick={() => void retryRootWhatsappItem(item.id)} disabled={Boolean(busy)} className="border border-orange-400/25 px-2 py-1 text-xs text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Reabrir</button>
+                </div>
+              ))}
+              {!rootQueue.length ? <p className="text-sm text-zinc-500">Sem envios WhatsApp pendentes no escopo atual.</p> : null}
+              {rootLogs[0] ? <p className="text-xs text-zinc-600">Último log: {statusPt(rootLogs[0].status)} em {formatDateTime(rootLogs[0].createdAt)}</p> : null}
+            </div>
           </div>
         </Panel>
       </div>
@@ -6219,6 +6432,10 @@ function SettingsView({
                   </button>
                 ) : null}
               </div>
+
+              {selectedSection.id === "whatsapp" ? (
+                <EvolutionWhatsAppPanel token={token} initialWhatsAppStatus={whatsAppStatus} />
+              ) : null}
             </Panel>
           ) : (
             <EmptyState title="Configurações indisponíveis" description="O backend ainda não retornou seções de configuração para este usuário." />
@@ -6255,6 +6472,360 @@ function SettingsView({
       </div>
     </ViewFrame>
   );
+}
+
+function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: string; initialWhatsAppStatus: WhatsAppStatus }) {
+  const [status, setStatus] = useState<EvolutionStatus | null>(null);
+  const [queue, setQueue] = useState<RootWhatsAppQueueItem[]>([]);
+  const [logs, setLogs] = useState<RootWhatsAppLog[]>([]);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [draft, setDraft] = useState<EvolutionConfigDraft>(() => evolutionDraftFromStatus(null, initialWhatsAppStatus));
+  const [busy, setBusy] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
+
+  useEffect(() => {
+    void refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Tenant-Id": DEMO_TENANT_ID,
+        ...(init.body ? { "Content-Type": "application/json" } : {})
+      }
+    });
+    const payload = (await response.json().catch(() => ({}))) as T & { detail?: string };
+    if (!response.ok) throw new Error(String(payload.detail ?? "Requisição recusada pelo backend."));
+    return payload;
+  }
+
+  async function refreshAll() {
+    if (!token) return;
+    setBusy((current) => current ?? "refresh");
+    try {
+      const [nextStatus, nextQueue, nextLogs] = await Promise.all([
+        requestJson<EvolutionStatus>("/integrations/whatsapp/evolution/status"),
+        requestJson<RootWhatsAppQueueItem[]>("/integrations/whatsapp/root/queue?limit=12"),
+        requestJson<RootWhatsAppLog[]>("/integrations/whatsapp/root/logs?limit=12")
+      ]);
+      setStatus(nextStatus);
+      setQueue(nextQueue);
+      setLogs(nextLogs);
+      setQrCode(nextStatus.qrCode);
+      setDraft((current) => {
+        const next = evolutionDraftFromStatus(nextStatus, initialWhatsAppStatus);
+        return {
+          ...next,
+          apiKey: current.apiKey,
+          testDestination: current.testDestination || next.rootNumber,
+          testMessage: current.testMessage || next.testMessage
+        };
+      });
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao atualizar WhatsApp." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function updateDraft<K extends keyof EvolutionConfigDraft>(key: K, value: EvolutionConfigDraft[K]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveConfig() {
+    setBusy("save-evolution");
+    setFeedback(null);
+    try {
+      const nextStatus = await requestJson<EvolutionStatus>("/integrations/whatsapp/evolution/config", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: draft.enabled,
+          provider: draft.provider,
+          rootNumber: draft.rootNumber,
+          rootName: draft.rootName,
+          baseUrl: draft.baseUrl,
+          apiKey: draft.apiKey.trim() || undefined,
+          instanceName: draft.instanceName,
+          mockMode: draft.mockMode || draft.provider === "mock",
+          requireOptIn: draft.requireOptIn,
+          emailFallbackEnabled: draft.emailFallbackEnabled,
+          inAppFallbackEnabled: draft.inAppFallbackEnabled
+        })
+      });
+      setStatus(nextStatus);
+      setQrCode(nextStatus.qrCode);
+      setDraft((current) => ({ ...evolutionDraftFromStatus(nextStatus, initialWhatsAppStatus), apiKey: "", testDestination: current.testDestination, testMessage: current.testMessage }));
+      setFeedback({ tone: "ok", message: `WhatsApp salvo. Status: ${statusPt(nextStatus.status)}.` });
+      await refreshAll();
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao salvar WhatsApp." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runEvolutionAction(key: string, label: string, path: string, init: RequestInit = {}) {
+    setBusy(key);
+    setFeedback(null);
+    try {
+      const payload = await requestJson<EvolutionActionResponse>(path, init);
+      setQrCode(payload.qrCode ?? qrCode);
+      setFeedback({ tone: payload.ok ? "ok" : "warn", message: `${label}: ${payload.message || statusPt(payload.status)}` });
+      await refreshAll();
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : `Falha em ${label}.` });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendTest() {
+    await runEvolutionAction("send-test", "Envio teste", "/integrations/whatsapp/evolution/send-test", {
+      method: "POST",
+      body: JSON.stringify({
+        tenantId: DEMO_TENANT_ID,
+        provider: "evolution",
+        destination: draft.testDestination,
+        message: draft.testMessage
+      })
+    });
+  }
+
+  async function processQueue() {
+    setBusy("process-queue");
+    setFeedback(null);
+    try {
+      const payload = await requestJson<{ status: string; queued: number; sent: number; failed: number; mode: string }>("/integrations/whatsapp/root/process-queue?limit=25", { method: "POST" });
+      setFeedback({ tone: payload.failed ? "warn" : "ok", message: `Fila processada: ${payload.sent} enviada(s), ${payload.failed} falha(s), ${payload.queued} ainda na fila. Modo: ${statusPt(payload.mode)}.` });
+      await refreshAll();
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao processar fila." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryQueueItem(id: string) {
+    setBusy(`retry-${id}`);
+    setFeedback(null);
+    try {
+      const updated = await requestJson<RootWhatsAppQueueItem>(`/integrations/whatsapp/root/queue/${id}/retry`, { method: "POST" });
+      setQueue((current) => current.map((item) => item.id === id ? updated : item));
+      setFeedback({ tone: "ok", message: `Reenvio reaberto para ${maskPhone(updated.destination)}.` });
+      await refreshAll();
+    } catch (error) {
+      setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao reagendar envio." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const currentStatus = status?.status ?? initialWhatsAppStatus.status;
+  const connected = Boolean(status?.connected ?? initialWhatsAppStatus.connected);
+  const latestFailures = queue.filter((item) => ["failed", "provider_unavailable", "qr_required", "rate_limited"].includes(item.status));
+  const canShowQr = Boolean(qrCode);
+
+  return (
+    <div className="mt-6 border-t border-zinc-800 pt-6">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-zinc-100">Evolution/Baileys</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">Provider não oficial. O Vulcan mantém tenant, hierarquia, fila, retry e auditoria; a Evolution faz só o transporte.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Tremor.Badge color={connected ? "emerald" : currentStatus === "mock" ? "orange" : "rose"}>{statusPt(currentStatus)}</Tremor.Badge>
+          <Tremor.Badge color={status?.apiKeyConfigured ? "emerald" : "orange"}>{status?.apiKeyConfigured ? "API key configurada" : "sem API key"}</Tremor.Badge>
+          <Tremor.Badge color={status?.unofficial ? "orange" : "emerald"}>{status?.unofficial ? "não oficial" : "oficial/futuro"}</Tremor.Badge>
+        </div>
+      </div>
+
+      {feedback ? <FeedbackBanner tone={feedback.tone} message={feedback.message} /> : null}
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="border border-zinc-800 bg-black/35 p-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <ToggleControl label="Canal raiz" value={draft.enabled} onChange={(value) => updateDraft("enabled", value)} />
+            <ToggleControl label="Mock explícito" value={draft.mockMode} onChange={(value) => updateDraft("mockMode", value)} />
+            <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+              Provider
+              <select value={draft.provider} onChange={(event) => updateDraft("provider", event.target.value as EvolutionConfigDraft["provider"])} className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400">
+                <option value="mock">mock</option>
+                <option value="evolution">evolution</option>
+                <option value="meta_cloud_future">meta_cloud_future</option>
+              </select>
+            </label>
+            <TextControl label="Número mestre do Vulcan" value={draft.rootNumber} onChange={(value) => updateDraft("rootNumber", value)} placeholder="5541999999999" />
+            <TextControl label="Nome do canal" value={draft.rootName} onChange={(value) => updateDraft("rootName", value)} placeholder="Vulcan Notifications" />
+            <TextControl label="URL Evolution" value={draft.baseUrl} onChange={(value) => updateDraft("baseUrl", value)} placeholder="http://127.0.0.1:8080" />
+            <TextControl label="Instância" value={draft.instanceName} onChange={(value) => updateDraft("instanceName", value)} placeholder="vulcan-root" />
+            <TextControl label="API key Evolution" value={draft.apiKey} onChange={(value) => updateDraft("apiKey", value)} placeholder={status?.apiKeyConfigured ? "******** configurada" : "cole a chave"} type="password" />
+            <ToggleControl label="Exigir opt-in" value={draft.requireOptIn} onChange={(value) => updateDraft("requireOptIn", value)} />
+            <ToggleControl label="Fallback e-mail" value={draft.emailFallbackEnabled} onChange={(value) => updateDraft("emailFallbackEnabled", value)} />
+            <ToggleControl label="Fallback in-app" value={draft.inAppFallbackEnabled} onChange={(value) => updateDraft("inAppFallbackEnabled", value)} />
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <button type="button" onClick={() => void saveConfig()} disabled={Boolean(busy)} className="inline-flex h-10 items-center gap-2 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-40">
+              <Save className="h-4 w-4" />
+              Salvar
+            </button>
+            <button type="button" onClick={() => void runEvolutionAction("test", "Conexão", "/integrations/whatsapp/evolution/test", { method: "POST" })} disabled={Boolean(busy)} className="h-10 border border-orange-400/25 px-4 text-sm text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Testar conexão</button>
+            <button type="button" onClick={() => void runEvolutionAction("qr", "QR Code", "/integrations/whatsapp/evolution/qr")} disabled={Boolean(busy)} className="h-10 border border-zinc-800 px-4 text-sm text-zinc-200 transition hover:border-orange-400/50 disabled:opacity-40">Ver QR</button>
+            <button type="button" onClick={() => void runEvolutionAction("reconnect", "Reconectar", "/integrations/whatsapp/evolution/reconnect", { method: "POST" })} disabled={Boolean(busy)} className="h-10 border border-zinc-800 px-4 text-sm text-zinc-200 transition hover:border-orange-400/50 disabled:opacity-40">Reconectar</button>
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <div className="border border-zinc-800 bg-black/35 p-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <TextControl label="Destino teste" value={draft.testDestination} onChange={(value) => updateDraft("testDestination", value)} placeholder="5541999999999" />
+              <TextControl label="Mensagem teste" value={draft.testMessage} onChange={(value) => updateDraft("testMessage", value)} placeholder="Teste Vulcan" />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !draft.testDestination.trim()} className="h-10 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-40">Enviar teste</button>
+              <button type="button" onClick={() => void processQueue()} disabled={Boolean(busy)} className="h-10 border border-orange-400/25 px-4 text-sm text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Processar fila</button>
+              <button type="button" onClick={() => void refreshAll()} disabled={Boolean(busy)} className="h-10 border border-zinc-800 px-4 text-sm text-zinc-200 transition hover:border-orange-400/50 disabled:opacity-40">Atualizar</button>
+            </div>
+          </div>
+
+          <div className="border border-zinc-800 bg-black/35 p-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <ConnectionSummary label="Serviço" value={status?.serviceReachable ? "alcançável" : "pendente"} tone={status?.serviceReachable ? "ok" : "warn"} />
+              <ConnectionSummary label="Instância" value={status?.instanceName || draft.instanceName || "pendente"} tone={connected ? "ok" : "warn"} />
+              <ConnectionSummary label="Falhas recentes" value={`${latestFailures.length}`} tone={latestFailures.length ? "warn" : "ok"} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {canShowQr ? (
+        <div className="mt-4 border border-orange-400/20 bg-orange-950/10 p-4">
+          <p className="text-sm font-semibold text-orange-100">QR Code de conexão</p>
+          <div className="mt-3">{renderQrCode(qrCode)}</div>
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="border border-zinc-800 bg-black/35 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="font-semibold text-zinc-100">Fila WhatsApp</p>
+            <span className="text-xs text-zinc-500">{queue.length} item(ns)</span>
+          </div>
+          <div className="grid max-h-80 gap-2 overflow-y-auto pr-1">
+            {queue.length ? queue.map((item) => (
+              <div key={item.id} className="border border-zinc-800 bg-zinc-950/55 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-100">{item.title}</p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">{maskPhone(item.destination)} | {statusPt(item.status)} | {item.attempts}/{item.maxAttempts}</p>
+                  </div>
+                  <button type="button" onClick={() => void retryQueueItem(item.id)} disabled={Boolean(busy)} className="border border-orange-400/25 px-3 py-2 text-xs text-orange-200 transition hover:border-orange-300/60 disabled:opacity-40">Reabrir</button>
+                </div>
+                {item.lastError ? <p className="mt-2 text-xs leading-5 text-orange-200">{item.lastError}</p> : null}
+              </div>
+            )) : <EmptyState title="Fila vazia" description="Novos envios do canal raiz aparecerão aqui com status e tentativas." />}
+          </div>
+        </div>
+
+        <div className="border border-zinc-800 bg-black/35 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="font-semibold text-zinc-100">Logs e auditoria</p>
+            <span className="text-xs text-zinc-500">{logs.length} registro(s)</span>
+          </div>
+          <div className="grid max-h-80 gap-2 overflow-y-auto pr-1">
+            {logs.length ? logs.map((item) => (
+              <div key={item.id} className="border border-zinc-800 bg-zinc-950/55 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-zinc-100">{statusPt(item.status)}</p>
+                  <span className="text-xs text-zinc-500">{formatDateTime(item.createdAt)}</span>
+                </div>
+                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">{item.provider || "provider"} | {item.destination ? maskPhone(item.destination) : "sem destino"}</p>
+                {item.error ? <p className="mt-2 text-xs leading-5 text-orange-200">{item.error}</p> : null}
+              </div>
+            )) : <EmptyState title="Sem logs recentes" description="Tentativas de envio e webhooks da Evolution aparecerão neste histórico." />}
+          </div>
+        </div>
+      </div>
+
+      {status?.logs?.length ? (
+        <div className="mt-4 border border-zinc-800 bg-black/35 p-4">
+          <p className="mb-2 font-semibold text-zinc-100">Diagnóstico do provider</p>
+          <div className="grid gap-2">
+            {status.logs.map((line) => <p key={line} className="text-sm leading-6 text-zinc-500">{line}</p>)}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function evolutionDraftFromStatus(status: EvolutionStatus | null, fallback: WhatsAppStatus): EvolutionConfigDraft {
+  const provider = status?.provider === "mock" || status?.provider === "meta_cloud_future" || status?.provider === "evolution"
+    ? status.provider
+    : fallback.provider === "mock"
+      ? "mock"
+      : "evolution";
+  return {
+    enabled: fallback.rootChannelEnabled || Boolean(status && status.status !== "disabled"),
+    provider,
+    rootNumber: status?.rootNumber ?? fallback.rootChannelNumber ?? "",
+    rootName: status?.rootName ?? fallback.rootChannelName ?? "Vulcan Notifications",
+    baseUrl: status?.baseUrl ?? "http://127.0.0.1:8080",
+    apiKey: "",
+    instanceName: status?.instanceName ?? "vulcan-root",
+    mockMode: status?.mockMode ?? fallback.status === "mock",
+    requireOptIn: status?.requireOptIn ?? true,
+    emailFallbackEnabled: status?.emailFallbackEnabled ?? true,
+    inAppFallbackEnabled: status?.inAppFallbackEnabled ?? true,
+    testDestination: status?.rootNumber ?? fallback.rootChannelNumber ?? "",
+    testMessage: "Teste do Canal WhatsApp Raiz do Vulcan."
+  };
+}
+
+function ToggleControl({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      className={`h-11 border px-3 text-left text-sm transition ${value ? "border-emerald-400/30 text-emerald-200" : "border-zinc-700 text-zinc-400"}`}
+    >
+      {label}: {value ? "ativo" : "inativo"}
+    </button>
+  );
+}
+
+function TextControl({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string }) {
+  return (
+    <label className="grid gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+      {label}
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 min-w-0 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-orange-400"
+      />
+    </label>
+  );
+}
+
+function renderQrCode(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const imageSrc = trimmed.startsWith("data:image") ? trimmed : /^[A-Za-z0-9+/=]{120,}$/.test(trimmed) ? `data:image/png;base64,${trimmed}` : null;
+  if (imageSrc) {
+    return <Image unoptimized src={imageSrc} alt="QR Code WhatsApp Evolution" width={220} height={220} className="border border-zinc-800 bg-white p-2" />;
+  }
+  return <pre className="max-h-64 overflow-auto whitespace-pre-wrap border border-zinc-800 bg-black/60 p-3 text-xs leading-5 text-zinc-300">{trimmed}</pre>;
+}
+
+function maskPhone(value: string | null | undefined) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length <= 4) return digits || "sem telefone";
+  return `${digits.slice(0, 4)}*****${digits.slice(-4)}`;
 }
 
 function ConnectionSummary({ label, value, tone }: { label: string; value: string; tone: "ok" | "warn" }) {

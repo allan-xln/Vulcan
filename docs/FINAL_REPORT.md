@@ -53,7 +53,7 @@ Pendencias reais:
 - Ajustei a tela de configurações para seções guiadas: Geral, Empresa, Usuários e hierarquia, Agentes, Supabase, IA, WhatsApp, E-mail, Notificações, Segurança e Integrações.
 - Criei o módulo próprio de WhatsApp do Vulcan em `backend/api/app/whatsapp.py`, com canal raiz, sessão, status, teste, webhook e serviço de notificação.
 - Usei o LanChat apenas como referência conceitual de arquitetura de sessão/status/QR/reconexão. Nenhum arquivo do LanChat foi alterado e o Vulcan não importa código do LanChat.
-- Criei o canal WhatsApp raiz centralizado por `ROOT_WHATSAPP_*`, incluindo o número oficial `5541984166423` como variável de ambiente.
+- Criei o canal WhatsApp raiz centralizado por `ROOT_WHATSAPP_*`; o número mestre fica em variável de ambiente/runtime config, não hardcoded no código.
 - Criei o módulo próprio de e-mail em `backend/api/app/email_channels.py`, com SMTP, Gmail, Outlook/Microsoft 365, IMAP e POP3.
 - Documentei que SMTP/OAuth são prioridade para envio, enquanto IMAP/POP3 ficam para leitura/consulta.
 - Adicionei endpoints de integrações: `/integrations/whatsapp/status`, `/integrations/whatsapp/test`, `/integrations/email/status`, `/integrations/email/test` e `/integrations/status`.

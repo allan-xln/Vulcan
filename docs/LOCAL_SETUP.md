@@ -28,6 +28,20 @@ If `3000` is already occupied, `scripts/dev.sh` automatically tries `3002`, `300
 FRONTEND_PORT=3002 corepack pnpm dev
 ```
 
+Para subir Vulcan + Evolution/Baileys + worker de WhatsApp com os scripts operacionais:
+
+```bash
+./scripts/start-all.sh
+./scripts/status-all.sh
+./scripts/logs-all.sh
+```
+
+Parar tudo:
+
+```bash
+./scripts/stop-all.sh
+```
+
 ## Local Login
 
 Fastest development account:
@@ -162,14 +176,46 @@ curl -H "Authorization: Bearer dev-vulcan-admin-token" http://localhost:3001/int
 curl -H "Authorization: Bearer dev-vulcan-admin-token" http://localhost:3001/integrations/email/status
 ```
 
-Canal WhatsApp raiz:
+Canal WhatsApp raiz com Evolution/Baileys:
 
 ```env
 ROOT_WHATSAPP_ENABLED=true
-ROOT_WHATSAPP_PROVIDER=lanchat
-ROOT_WHATSAPP_NUMBER=5541984166423
+ROOT_WHATSAPP_PROVIDER=evolution
+ROOT_WHATSAPP_NUMBER=
 ROOT_WHATSAPP_NAME=Notificações Vulcan
+ROOT_WHATSAPP_MOCK_MODE=false
+EVOLUTION_ENABLED=true
+EVOLUTION_BASE_URL=http://127.0.0.1:8080
+EVOLUTION_API_KEY=
+EVOLUTION_INSTANCE_NAME=vulcan-root
+EVOLUTION_WEBHOOK_URL=http://127.0.0.1:3001/integrations/whatsapp/evolution/webhook
+EVOLUTION_WEBHOOK_TOKEN=
+WHATSAPP_PROVIDER=evolution
+WHATSAPP_REQUIRE_OPT_IN=true
+WHATSAPP_ENABLE_UNOFFICIAL_PROVIDER=true
+WHATSAPP_GRAPH_API_VERSION=v25.0
 ```
+
+Com `ROOT_WHATSAPP_MOCK_MODE=true`, o Vulcan cria fila, historico e auditoria, mas nao envia mensagem real.
+
+Evolution/Baileys nao e API oficial da Meta. Para QR Code:
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/infra/evolution
+./scripts/start.sh
+./scripts/status.sh
+```
+
+Depois abra `Configuracoes -> WhatsApp`, salve URL/API key/instancia/numero mestre e clique em `Ver QR`.
+
+Autostart:
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
+./scripts/install-evolution-autostart.sh
+```
+
+Detalhes: `docs/WHATSAPP_EVOLUTION.md` e `docs/WHATSAPP_ROOT_CHANNEL.md`.
 
 SMTP:
 

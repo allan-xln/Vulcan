@@ -20,6 +20,7 @@ coverage
 __pycache__
 .venv
 .tools
+.runtime
 *.pyc
 *.tsbuildinfo
 *.egg-info

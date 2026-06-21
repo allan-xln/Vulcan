@@ -56,6 +56,19 @@ Base service: `backend/api`
 - `GET /reports/templates`
 - `GET /integrations/whatsapp/status`
 - `POST /integrations/whatsapp/test`
+- `GET /integrations/whatsapp/evolution/status`
+- `PUT /integrations/whatsapp/evolution/config`
+- `POST /integrations/whatsapp/evolution/test`
+- `GET /integrations/whatsapp/evolution/qr`
+- `POST /integrations/whatsapp/evolution/reconnect`
+- `POST /integrations/whatsapp/evolution/send-test`
+- `POST /integrations/whatsapp/evolution/webhook`
+- `GET /integrations/whatsapp/root/recipients`
+- `POST /integrations/whatsapp/root/send`
+- `POST /integrations/whatsapp/root/process-queue`
+- `GET /integrations/whatsapp/root/queue`
+- `GET /integrations/whatsapp/root/logs`
+- `POST /integrations/whatsapp/root/queue/{queue_id}/retry`
 - `GET /integrations/email/status`
 - `POST /integrations/email/test`
 - `GET /integrations/status`
@@ -181,11 +194,45 @@ Mais detalhes: `docs/INSIGHTS.md`.
 
 `POST /notifications/test` e `POST /notifications/send` usam `NotificationService` e gravam o resultado em `notifications`. Sem credenciais reais, o status fica explicito: `mocked`, `missing_credentials`, `missing_destination`, `failed` ou equivalente.
 
+Quando `channel=whatsapp`, `POST /notifications/send` usa o Canal WhatsApp Raiz do Vulcan. O backend resolve destinatarios por tenant/hierarquia, grava `notifications`, cria itens em `whatsapp_delivery_queue`, processa envio imediato quando aplicavel e grava logs em `whatsapp_delivery_logs`.
+
 `POST /notifications/{notification_id}/retry` tenta reenviar pelo provider configurado e incrementa tentativas. `cancel`, `mark-read` e `resolve` atualizam metadata com auditoria.
 
 `GET /notifications/schedules` le agendamentos persistidos em `notifications` com `notification_type='schedule_config'`; se nao houver registros, devolve defaults comerciais. Endpoints `POST/PUT/DELETE/pause/resume` persistem a configuracao no mesmo modelo de compatibilidade.
 
-Mais detalhes: `docs/NOTIFICATIONS.md`, `docs/WHATSAPP.md`, `docs/EMAIL.md` e `docs/AGENT_NOTIFICATIONS.md`.
+## WhatsApp Raiz
+
+`GET /integrations/whatsapp/status` retorna status do canal raiz: `connected`, `mock`, `missing_credentials` ou `disabled`.
+
+`GET /integrations/whatsapp/evolution/status` retorna status detalhado da Evolution/Baileys: conectividade, instancia, QR, mock, credencial configurada, opt-in e fallbacks. Status nao oficial sempre usa prefixo `unofficial_*`.
+
+`PUT /integrations/whatsapp/evolution/config` salva configuracao local/piloto quando permitido por `ALLOW_RUNTIME_INTEGRATION_CONFIG`. Secrets ficam mascarados e sao gravados no runtime store local, nao em Git.
+
+`GET /integrations/whatsapp/evolution/qr` cria/consulta a instancia e retorna QR quando necessario. `POST /integrations/whatsapp/evolution/reconnect` reconfigura webhook e solicita reconexao.
+
+`POST /integrations/whatsapp/evolution/webhook` e protegido por `X-Vulcan-Webhook-Token`, normaliza eventos da Evolution e atualiza `whatsapp_delivery_queue` quando ha `provider_message_id`.
+
+`GET /integrations/whatsapp/root/recipients?notificationType=alerta&audience=managers` retorna destinatarios com WhatsApp cadastrado e preferencia habilitada, respeitando tenant e subarvore do usuario autenticado.
+
+`POST /integrations/whatsapp/root/send` cria fila e, se `schedule=imediato`, tenta processar imediatamente.
+
+Exemplo:
+
+```json
+{
+  "tenantId": "00000000-0000-0000-0000-000000000301",
+  "notificationType": "alerta",
+  "title": "Gargalo detectado",
+  "message": "A equipe financeira teve aumento de tempo no faturamento.",
+  "audience": "managers",
+  "priority": "alto",
+  "schedule": "imediato"
+}
+```
+
+`POST /integrations/whatsapp/root/process-queue` processa itens pendentes/due da fila. `GET /integrations/whatsapp/root/queue` e `GET /integrations/whatsapp/root/logs` exibem fila e historico. `POST /integrations/whatsapp/root/queue/{queue_id}/retry` reabre item falho sem criar duplicidade.
+
+Mais detalhes: `docs/NOTIFICATIONS.md`, `docs/WHATSAPP.md`, `docs/WHATSAPP_EVOLUTION.md`, `docs/WHATSAPP_ROOT_CHANNEL.md`, `docs/EMAIL.md` e `docs/AGENT_NOTIFICATIONS.md`.
 
 ## Configuracoes
 

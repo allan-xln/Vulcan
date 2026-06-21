@@ -79,7 +79,7 @@ PEOPLE = [
         "email": "teste@vulcan.local",
         "title": "Root Demo / Diretor",
         "level": 0,
-        "phone": "+55 41 98416-6423",
+        "phone": "+55 41 99999-0301",
     },
     {
         "login": "diretor",
@@ -566,6 +566,8 @@ def seed() -> None:
         conn.execute("select public.vulcan_refresh_membership_closure(%s)", (DEMO_TENANT_ID,))
 
         conn.execute("delete from public.notifications where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))
+        conn.execute("delete from public.whatsapp_delivery_logs where tenant_id = %s", (DEMO_TENANT_ID,))
+        conn.execute("delete from public.whatsapp_delivery_queue where tenant_id = %s", (DEMO_TENANT_ID,))
         conn.execute("delete from public.ai_insights where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))
         conn.execute("delete from public.operational_metrics where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))
         conn.execute("delete from public.activity_events where tenant_id = %s and metadata ->> 'seed' = %s", (DEMO_TENANT_ID, SEED_TAG))

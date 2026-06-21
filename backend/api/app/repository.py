@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 from io import StringIO
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import psycopg
@@ -31,6 +32,7 @@ from app.schemas import (
     NotificationScheduleCreate,
     NotificationSendRequest,
     NotificationSendResponse,
+    RootWhatsAppSendRequest,
     SettingsSectionUpdate,
     TeamCreate,
     TeamMemberCreate,
@@ -74,9 +76,25 @@ NOTIFICATION_TYPES: list[dict] = [
 
 DEFAULT_NOTIFICATION_TEMPLATES: list[dict] = [
     {"id": "tpl-whatsapp-critical", "channel": "whatsapp", "notificationType": "insight_critico", "title": "Vulcan alerta crítico", "body": "Vulcan: {{equipe}} apresentou {{metrica}} acima do esperado em {{periodo}}. Impacto: {{impacto}}. Acesse {{link_dashboard}}", "variables": ["equipe", "metrica", "periodo", "impacto", "link_dashboard"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-whatsapp-metric", "channel": "whatsapp", "notificationType": "metrica", "title": "Métrica Vulcan", "body": "{{escopo}} registrou {{metrica}} em {{periodo}}: {{valor}}.", "variables": ["escopo", "metrica", "periodo", "valor"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-whatsapp-alert", "channel": "whatsapp", "notificationType": "alerta", "title": "Alerta Vulcan", "body": "{{titulo}}. Impacto: {{impacto}}. Recomendação: {{recomendacao}}.", "variables": ["titulo", "impacto", "recomendacao"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-whatsapp-insight", "channel": "whatsapp", "notificationType": "insight", "title": "Insight Vulcan", "body": "{{resumo}} Próximo passo: {{recomendacao}}.", "variables": ["resumo", "recomendacao"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-whatsapp-daily", "channel": "whatsapp", "notificationType": "relatorio_diario", "title": "Resumo diário Vulcan", "body": "{{escopo}}: {{tempo_ativo}} ativos, {{tempo_ocioso}} ociosos, {{gargalos}} gargalos.", "variables": ["escopo", "tempo_ativo", "tempo_ocioso", "gargalos"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-whatsapp-weekly", "channel": "whatsapp", "notificationType": "relatorio_semanal", "title": "Resumo semanal Vulcan", "body": "{{escopo}}: {{insights}} insights, {{automacoes}} oportunidades, {{economia_estimada}} de economia potencial.", "variables": ["escopo", "insights", "automacoes", "economia_estimada"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "tpl-whatsapp-critical-report", "channel": "whatsapp", "notificationType": "relatorio_critico", "title": "Crítico Vulcan", "body": "{{evento}}. Escopo: {{escopo}}. Ação imediata: {{acao}}.", "variables": ["evento", "escopo", "acao"], "language": "pt-BR", "version": 1, "active": True},
     {"id": "tpl-email-daily", "channel": "email", "notificationType": "relatorio_diario", "title": "Vulcan - Relatório operacional diário de {{empresa}}", "body": "Resumo executivo de {{data}}\\n\\nGargalos: {{gargalos}}\\nEconomia estimada: {{economia_estimada}}\\nAções recomendadas: {{acoes}}", "variables": ["empresa", "data", "gargalos", "economia_estimada", "acoes"], "language": "pt-BR", "version": 1, "active": True},
     {"id": "tpl-system-device", "channel": "system", "notificationType": "dispositivo_aguardando_adocao", "title": "Dispositivo aguardando adoção", "body": "{{dispositivo}} apareceu no Vulcan e precisa ser vinculado a usuário/equipe.", "variables": ["dispositivo"], "language": "pt-BR", "version": 1, "active": True},
     {"id": "tpl-windows-policy", "channel": "windows", "notificationType": "coleta_limitada", "title": "Vulcan precisa de atenção", "body": "Sua coleta está limitada por política do sistema. O Vulcan mede fluxo operacional, não conteúdo pessoal.", "variables": ["usuario"], "language": "pt-BR", "version": 1, "active": True},
+]
+
+
+ROOT_WHATSAPP_TEMPLATES: list[dict] = [
+    {"id": "root-whatsapp-metrica", "channel": "whatsapp", "notificationType": "metrica", "title": "Métrica operacional Vulcan", "body": "Vulcan: {{escopo}} registrou {{metrica}} em {{periodo}}. Valor: {{valor}}. Acesse {{link_dashboard}}", "variables": ["escopo", "metrica", "periodo", "valor", "link_dashboard"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "root-whatsapp-alerta", "channel": "whatsapp", "notificationType": "alerta", "title": "Alerta operacional Vulcan", "body": "Vulcan Alert: {{titulo}}. Impacto: {{impacto}}. Recomendação: {{recomendacao}}", "variables": ["titulo", "impacto", "recomendacao"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "root-whatsapp-insight", "channel": "whatsapp", "notificationType": "insight", "title": "Insight Vulcan", "body": "Vulcan Insight: {{resumo}}. Oportunidade estimada: {{economia_estimada}}. Próximo passo: {{recomendacao}}", "variables": ["resumo", "economia_estimada", "recomendacao"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "root-whatsapp-relatorio-diario", "channel": "whatsapp", "notificationType": "relatorio_diario", "title": "Resumo diário Vulcan", "body": "Resumo diário: {{escopo}} teve {{tempo_ativo}} ativos, {{tempo_ocioso}} ociosos e {{gargalos}} gargalos. Ver dashboard: {{link_dashboard}}", "variables": ["escopo", "tempo_ativo", "tempo_ocioso", "gargalos", "link_dashboard"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "root-whatsapp-relatorio-semanal", "channel": "whatsapp", "notificationType": "relatorio_semanal", "title": "Resumo semanal Vulcan", "body": "Resumo semanal: {{escopo}} gerou {{insights}} insights, {{automacoes}} oportunidades e {{economia_estimada}} de economia potencial.", "variables": ["escopo", "insights", "automacoes", "economia_estimada"], "language": "pt-BR", "version": 1, "active": True},
+    {"id": "root-whatsapp-critico", "channel": "whatsapp", "notificationType": "critico", "title": "Crítico Vulcan", "body": "Alerta crítico: {{evento}}. Escopo: {{escopo}}. Ação imediata: {{acao}}", "variables": ["evento", "escopo", "acao"], "language": "pt-BR", "version": 1, "active": True},
 ]
 
 
@@ -180,12 +198,17 @@ SETTINGS_SECTION_DEFINITIONS: list[dict] = [
         "description": "Status do canal raiz e provider de envio. Secrets ficam fora do frontend.",
         "scope": "system",
         "fields": [
-            {"key": "rootEnabled", "label": "Canal raiz", "valueType": "readonly", "description": "Ligado por env ROOT_WHATSAPP_ENABLED.", "editable": False},
-            {"key": "rootNumber", "label": "Número raiz", "valueType": "readonly", "description": "Número central configurado por env.", "editable": False},
+            {"key": "rootEnabled", "label": "Canal raiz", "valueType": "readonly", "description": "Ligado por ambiente ou configuração local protegida.", "editable": False},
+            {"key": "rootNumber", "label": "Número mestre do Vulcan", "valueType": "readonly", "description": "Emissor central em formato E.164.", "editable": False},
             {"key": "provider", "label": "Provider", "valueType": "readonly", "description": "Provider atual de WhatsApp.", "editable": False},
-            {"key": "accessToken", "label": "Token WhatsApp", "valueType": "secret", "description": "Secret fica no ambiente/cofre seguro.", "editable": False, "isSecret": True},
+            {"key": "evolutionUrl", "label": "Evolution API", "valueType": "readonly", "description": "URL local do transportador Evolution/Baileys.", "editable": False},
+            {"key": "evolutionInstance", "label": "Instância", "valueType": "readonly", "description": "Instância exclusiva do Canal Raiz.", "editable": False},
+            {"key": "accessToken", "label": "Evolution API key", "valueType": "secret", "description": "Secret fica no ambiente ou arquivo local com permissão 0600.", "editable": False, "isSecret": True},
+            {"key": "unofficialMode", "label": "Modalidade", "valueType": "readonly", "description": "Evolution/Baileys não é uma API oficial da Meta.", "editable": False},
             {"key": "defaultRecipients", "label": "Destinatários padrão", "valueType": "text", "description": "Papéis que recebem alertas críticos por padrão.", "required": False},
-            {"key": "mockMode", "label": "Modo mock explícito", "valueType": "boolean", "description": "Permite simulação sem fingir entrega real.", "required": True},
+            {"key": "mockMode", "label": "Modo mock explícito", "valueType": "readonly", "description": "Simula sem enviar e sem fingir entrega real.", "editable": False},
+            {"key": "emailFallback", "label": "Fallback por e-mail", "valueType": "readonly", "description": "Prepara e-mail quando WhatsApp entra em dead-letter.", "editable": False},
+            {"key": "inAppFallback", "label": "Fallback interno", "valueType": "readonly", "description": "Cria aviso interno quando WhatsApp falha definitivamente.", "editable": False},
         ],
     },
     {
@@ -251,7 +274,7 @@ DEFAULT_SETTINGS_VALUES: dict[str, dict] = {
     "metrics": {"focusTarget": 72, "idleLimitPercent": 30, "contextSwitchLimitPerHour": 40, "hourlyCostBRL": 95, "weightAgents": 20, "weightFocus": 25, "weightIdle": 20, "weightContext": 15, "weightBottlenecks": 20},
     "ai": {"mode": "rules_fallback", "operationalProvider": "llama", "executiveProvider": "gpt", "timeoutSeconds": 60, "monthlyBudgetBRL": 500},
     "notifications": {"enabled": True, "criticalRealtime": True, "dailySummary": True, "weeklySummary": True, "quietStart": "22:00", "quietEnd": "07:00", "maxAttempts": 3},
-    "whatsapp": {"defaultRecipients": "diretor, gerente, supervisor", "mockMode": True},
+    "whatsapp": {"defaultRecipients": "diretor, gerente, supervisor"},
     "email": {"provider": "smtp", "fromName": "Vulcan Notifications", "imapReadEnabled": False, "pop3ReadEnabled": False},
     "security": {"sessionMinutes": 480},
     "privacy": {"consentRequired": True, "allowUserPause": False, "dataExportEnabled": True, "anonymizeAfterDays": 365},
@@ -569,6 +592,16 @@ class VulcanRepository:
     def _can_edit_settings(self, access: AccessScope, context: AuthContext) -> bool:
         return access.is_root or access.scope in {"tenant", "global"} or context.role in {"tenant_admin", "owner", "root"}
 
+    def assert_can_manage_integrations(self, context: AuthContext) -> None:
+        if not self.enabled:
+            if context.role not in {"tenant_admin", "owner", "root"}:
+                raise ValueError("integration management requires tenant admin scope")
+            return
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            if not self._can_edit_settings(access, context):
+                raise ValueError("integration management requires tenant admin scope")
+
     def _field_definition(self, section_id: str, key: str) -> dict | None:
         section = next((item for item in SETTINGS_SECTION_DEFINITIONS if item["id"] == section_id), None)
         if not section:
@@ -588,9 +621,22 @@ class VulcanRepository:
             return (settings.root_whatsapp_number or "requer configuração", "ok" if settings.root_whatsapp_number else "missing")
         if section_id == "whatsapp" and key == "provider":
             return (settings.root_whatsapp_provider or settings.whatsapp_provider or "não definido", "ok" if (settings.root_whatsapp_provider or settings.whatsapp_provider) else "missing")
+        if section_id == "whatsapp" and key == "evolutionUrl":
+            return (settings.evolution_base_url or "requer configuração", "ok" if settings.evolution_base_url else "missing")
+        if section_id == "whatsapp" and key == "evolutionInstance":
+            return (settings.evolution_instance_name or "requer configuração", "ok" if settings.evolution_instance_name else "missing")
         if section_id == "whatsapp" and key == "accessToken":
-            configured = bool(settings.whatsapp_access_token and settings.whatsapp_phone_number_id)
+            configured = bool(settings.evolution_api_key) if settings.root_whatsapp_provider == "evolution" else bool(settings.whatsapp_access_token and settings.whatsapp_phone_number_id)
             return ("configurado" if configured else "requer credencial", "ok" if configured else "missing")
+        if section_id == "whatsapp" and key == "unofficialMode":
+            unofficial = settings.root_whatsapp_provider == "evolution"
+            return ("não oficial: Evolution/Baileys" if unofficial else "oficial/futuro", "attention" if unofficial else "ok")
+        if section_id == "whatsapp" and key == "mockMode":
+            return ("ativo" if settings.root_whatsapp_mock_mode else "inativo", "mock" if settings.root_whatsapp_mock_mode else "ok")
+        if section_id == "whatsapp" and key == "emailFallback":
+            return ("ativo" if settings.whatsapp_email_fallback_enabled else "inativo", "ok" if settings.whatsapp_email_fallback_enabled else "attention")
+        if section_id == "whatsapp" and key == "inAppFallback":
+            return ("ativo" if settings.whatsapp_in_app_fallback_enabled else "inativo", "ok" if settings.whatsapp_in_app_fallback_enabled else "attention")
         if section_id == "email" and key == "smtpConfigured":
             configured = bool(settings.smtp_host and settings.smtp_user and settings.smtp_pass and settings.email_from)
             return ("configurado" if configured else "requer credencial", "ok" if configured else "missing")
@@ -1126,7 +1172,13 @@ class VulcanRepository:
                        m.role_id as "roleId", m.department_id as "departmentId",
                        m.direct_manager_membership_id as "directManagerMembershipId",
                        m.status, m.full_name as "fullName", m.work_email as "workEmail",
-                       m.phone, m.whatsapp, m.title, m.hierarchy_level as "hierarchyLevel"
+                       m.phone, m.whatsapp,
+                       coalesce(m.whatsapp_enabled, true) as "whatsappEnabled",
+                       coalesce(m.whatsapp_opt_in, false) as "whatsappOptIn",
+                       coalesce(m.whatsapp_notification_types, '[]'::jsonb) as "whatsappNotificationTypes",
+                       m.quiet_hours_start::text as "quietHoursStart",
+                       m.quiet_hours_end::text as "quietHoursEnd",
+                       m.title, m.hierarchy_level as "hierarchyLevel"
                 from public.memberships m
                 where m.status = 'active' and {condition}
                 order by m.hierarchy_level nulls last, m.full_name
@@ -1300,7 +1352,13 @@ class VulcanRepository:
                    m.role_id as "roleId", m.department_id as "departmentId",
                    m.direct_manager_membership_id as "directManagerMembershipId",
                    m.status, m.full_name as "fullName", m.work_email as "workEmail",
-                   m.phone, m.whatsapp, m.title, m.hierarchy_level as "hierarchyLevel"
+                   m.phone, m.whatsapp,
+                   coalesce(m.whatsapp_enabled, true) as "whatsappEnabled",
+                   coalesce(m.whatsapp_opt_in, false) as "whatsappOptIn",
+                   coalesce(m.whatsapp_notification_types, '[]'::jsonb) as "whatsappNotificationTypes",
+                   m.quiet_hours_start::text as "quietHoursStart",
+                   m.quiet_hours_end::text as "quietHoursEnd",
+                   m.title, m.hierarchy_level as "hierarchyLevel"
             from public.memberships m
             where m.id = %s
             """,
@@ -1333,9 +1391,16 @@ class VulcanRepository:
                 """
                 insert into public.memberships (
                   tenant_id, user_id, role_id, department_id, direct_manager_membership_id,
-                  status, full_name, work_email, phone, whatsapp, title, hierarchy_level, joined_at, metadata
+                  status, full_name, work_email, phone, whatsapp,
+                  whatsapp_enabled, whatsapp_opt_in, whatsapp_notification_types,
+                  quiet_hours_start, quiet_hours_end,
+                  title, hierarchy_level, joined_at, metadata
                 )
-                values (%s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s, %s, timezone('utc', now()), %s)
+                values (
+                  %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s,
+                  %s, %s, %s, %s, %s,
+                  %s, %s, timezone('utc', now()), %s
+                )
                 returning id
                 """,
                 (
@@ -1348,6 +1413,11 @@ class VulcanRepository:
                     request.work_email,
                     request.phone,
                     request.whatsapp,
+                    request.whatsapp_enabled,
+                    request.whatsapp_opt_in,
+                    Jsonb(request.whatsapp_notification_types),
+                    request.quiet_hours_start,
+                    request.quiet_hours_end,
                     request.title,
                     request.hierarchy_level,
                     Jsonb({"source": "api", "username": request.username, "notificationEmail": request.work_email, "notificationWhatsapp": request.whatsapp}),
@@ -1398,6 +1468,11 @@ class VulcanRepository:
                     work_email = coalesce(%s, work_email),
                     phone = coalesce(%s, phone),
                     whatsapp = coalesce(%s, whatsapp),
+                    whatsapp_enabled = coalesce(%s, whatsapp_enabled),
+                    whatsapp_opt_in = coalesce(%s, whatsapp_opt_in),
+                    whatsapp_notification_types = coalesce(%s, whatsapp_notification_types),
+                    quiet_hours_start = coalesce(%s::time, quiet_hours_start),
+                    quiet_hours_end = coalesce(%s::time, quiet_hours_end),
                     title = coalesce(%s, title),
                     hierarchy_level = coalesce(%s, hierarchy_level),
                     updated_at = timezone('utc', now())
@@ -1414,6 +1489,11 @@ class VulcanRepository:
                     request.work_email,
                     request.phone,
                     request.whatsapp,
+                    request.whatsapp_enabled,
+                    request.whatsapp_opt_in,
+                    Jsonb(request.whatsapp_notification_types) if request.whatsapp_notification_types is not None else None,
+                    request.quiet_hours_start,
+                    request.quiet_hours_end,
                     request.title,
                     request.hierarchy_level,
                     membership_id,
@@ -1550,6 +1630,11 @@ class VulcanRepository:
                        coalesce(m.work_email::text, au.email, '') as email,
                        m.phone,
                        m.whatsapp,
+                       coalesce(m.whatsapp_enabled, true) as "whatsappEnabled",
+                       coalesce(m.whatsapp_opt_in, false) as "whatsappOptIn",
+                       coalesce(m.whatsapp_notification_types, '[]'::jsonb) as "whatsappNotificationTypes",
+                       m.quiet_hours_start::text as "quietHoursStart",
+                       m.quiet_hours_end::text as "quietHoursEnd",
                        coalesce(m.hierarchy_level, 0) as "hierarchyLevel",
                        (
                          select count(*)
@@ -3312,6 +3397,842 @@ class VulcanRepository:
             "byPriority": dict(priorities),
         }
 
+    def list_root_whatsapp_templates(self, context: AuthContext) -> list[dict]:
+        if not self.enabled:
+            return ROOT_WHATSAPP_TEMPLATES
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            params: tuple[object, ...] = () if access.is_root else (access.tenant_id,)
+            condition = "true" if access.is_root else "(tenant_id is null or tenant_id = %s)"
+            rows = conn.execute(
+                f"""
+                select id,
+                       'whatsapp' as channel,
+                       template_type as "notificationType",
+                       title,
+                       body,
+                       variables,
+                       language,
+                       version,
+                       active
+                from public.root_whatsapp_templates
+                where {condition}
+                  and active = true
+                order by tenant_id nulls first, template_type, version desc
+                """,
+                params,
+            ).fetchall()
+            return list(rows) or ROOT_WHATSAPP_TEMPLATES
+
+    def resolve_root_whatsapp_recipients(
+        self,
+        context: AuthContext,
+        notification_type: str = "alerta",
+        audience: str = "auto",
+        recipient_membership_ids: list[UUID] | None = None,
+    ) -> list[dict]:
+        if not self.enabled:
+            return [
+                {"membershipId": DEMO_TEST_MEMBERSHIP_ID, "tenantId": DEMO_TENANT_ID, "name": "teste", "title": "Diretor Demo", "department": "Operações", "whatsapp": "5541999999999", "scope": "tenant", "preferenceEnabled": True},
+                {"membershipId": UUID("00000000-0000-0000-0000-000000300002"), "tenantId": DEMO_TENANT_ID, "name": "Coordenador de Operações", "title": "Coordenador", "department": "Operações", "whatsapp": "5541988888888", "scope": "subtree", "preferenceEnabled": True},
+            ]
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._membership_filter(access, "m")
+            rows = list(conn.execute(
+                f"""
+                select m.id as "membershipId",
+                       m.tenant_id as "tenantId",
+                       m.full_name as name,
+                       m.title,
+                       d.name as department,
+                       regexp_replace(coalesce(m.whatsapp, ''), '\\D', '', 'g') as whatsapp,
+                       case
+                         when coalesce(descendants.total, 0) > 0 then 'subtree'
+                         else 'self'
+                       end as scope,
+                       coalesce(np.enabled, true) as "preferenceEnabled",
+                       coalesce(m.whatsapp_enabled, true) as whatsapp_enabled,
+                       coalesce(m.whatsapp_opt_in, false) as whatsapp_opt_in,
+                       coalesce(m.whatsapp_notification_types, '[]'::jsonb) as whatsapp_notification_types,
+                       m.quiet_hours_start,
+                       m.quiet_hours_end,
+                       coalesce(m.hierarchy_level, 9999) as hierarchy_level
+                from public.memberships m
+                left join public.departments d on d.id = m.department_id
+                left join lateral (
+                  select count(*) as total
+                  from public.membership_closure mc
+                  where mc.tenant_id = m.tenant_id
+                    and mc.ancestor_membership_id = m.id
+                    and mc.descendant_membership_id <> m.id
+                ) descendants on true
+                left join public.notification_preferences np
+                  on np.tenant_id = m.tenant_id
+                 and np.membership_id = m.id
+                 and np.channel = 'whatsapp'
+                 and np.notification_type = %s
+                where {condition}
+                  and m.status = 'active'
+                  and nullif(regexp_replace(coalesce(m.whatsapp, ''), '\\D', '', 'g'), '') is not null
+                  and coalesce(np.enabled, true)
+                  and coalesce(m.whatsapp_enabled, true)
+                  and (%s = false or coalesce(m.whatsapp_opt_in, false))
+                  and (
+                    jsonb_array_length(coalesce(m.whatsapp_notification_types, '[]'::jsonb)) = 0
+                    or coalesce(m.whatsapp_notification_types, '[]'::jsonb) ? %s
+                  )
+                order by coalesce(m.hierarchy_level, 9999), m.full_name
+                """,
+                (notification_type, *params, self.settings.whatsapp_require_opt_in, notification_type),
+            ).fetchall())
+
+        critical = notification_type in {"critico", "insight_critico", "relatorio_critico", "falha_integracao"}
+        if not critical:
+            rows = [row for row in rows if not self._recipient_in_quiet_hours(row)]
+
+        requested = {str(item) for item in (recipient_membership_ids or [])}
+        if audience == "custom":
+            rows = [row for row in rows if str(row["membershipId"]) in requested]
+        elif audience == "self":
+            rows = [row for row in rows if str(row["membershipId"]) == str(access.membership_id)]
+        elif audience == "managers":
+            rows = [row for row in rows if self._is_manager_recipient(row)]
+        elif audience == "tenant" and access.scope not in {"tenant", "global"} and not access.is_root:
+            rows = [row for row in rows if str(row["membershipId"]) == str(access.membership_id)]
+        elif audience == "auto":
+            if notification_type in {"relatorio_semanal", "relatorio_mensal", "insight_executivo", "critico", "insight"}:
+                managers = [row for row in rows if self._is_manager_recipient(row)]
+                rows = managers or rows
+            elif notification_type in {"metrica", "relatorio_diario"}:
+                managers = [row for row in rows if self._is_manager_recipient(row)]
+                rows = managers or rows
+        internal_fields = {
+            "hierarchy_level",
+            "whatsapp_enabled",
+            "whatsapp_opt_in",
+            "whatsapp_notification_types",
+            "quiet_hours_start",
+            "quiet_hours_end",
+        }
+        return [{key: value for key, value in dict(row).items() if key not in internal_fields} for row in rows]
+
+    def _recipient_in_quiet_hours(self, row: dict) -> bool:
+        start = row.get("quiet_hours_start")
+        end = row.get("quiet_hours_end")
+        if not start or not end:
+            return False
+        now_time = datetime.now(timezone(timedelta(hours=-3))).time().replace(tzinfo=None)
+        if start <= end:
+            return start <= now_time < end
+        return now_time >= start or now_time < end
+
+    def _is_manager_recipient(self, row: dict) -> bool:
+        title = str(row.get("title") or "").lower()
+        name = str(row.get("name") or "").lower()
+        tokens = ("diretor", "coordenador", "gerente", "supervisor", "líder", "lider", "admin")
+        return row.get("scope") in {"tenant", "subtree"} or any(token in title or token in name for token in tokens)
+
+    def _root_whatsapp_template_for(self, context: AuthContext, request: RootWhatsAppSendRequest) -> dict:
+        templates = self.list_root_whatsapp_templates(context)
+        if request.template_id:
+            found = next((item for item in templates if item["id"] == request.template_id), None)
+            if found:
+                return found
+        normalized_type = request.notification_type
+        aliases = {
+            "gargalo_operacional": "alerta",
+            "alerta_operacional": "alerta",
+            "insight_critico": "critico",
+            "oportunidade_automacao": "insight",
+            "relatorio_critico": "critico",
+        }
+        normalized_type = aliases.get(normalized_type, normalized_type)
+        return next((item for item in templates if item["notificationType"] == normalized_type), templates[0])
+
+    def _render_root_whatsapp_message(self, context: AuthContext, request: RootWhatsAppSendRequest, template: dict, recipient: dict | None = None) -> tuple[str, str, dict]:
+        values = {
+            "empresa": "Vulcan",
+            "escopo": recipient.get("name") if recipient else "Operação",
+            "metrica": "indicador operacional",
+            "periodo": "últimas 24 horas",
+            "valor": "em análise",
+            "impacto": request.priority,
+            "titulo": request.title or template["title"],
+            "resumo": request.message or "Resumo operacional disponível no Vulcan.",
+            "recomendacao": "Abra o painel do Vulcan para revisar a recomendação.",
+            "economia_estimada": "a confirmar",
+            "tempo_ativo": "tempo ativo consolidado",
+            "tempo_ocioso": "tempo ocioso consolidado",
+            "gargalos": "gargalos identificados",
+            "insights": "insights gerados",
+            "automacoes": "oportunidades de automação",
+            "evento": request.title or "evento crítico",
+            "acao": "verificar agora",
+            "link_dashboard": request.action_url or "http://localhost:3002",
+            **request.variables,
+        }
+
+        def render(text: str) -> str:
+            rendered = text
+            for key, value in values.items():
+                rendered = rendered.replace("{{" + key + "}}", str(value))
+            return rendered
+
+        title = request.title or render(template["title"])
+        body = request.message or render(template["body"])
+        return title, body, values
+
+    def queue_root_whatsapp_messages(self, context: AuthContext, request: RootWhatsAppSendRequest) -> list[dict]:
+        recipients = self.resolve_root_whatsapp_recipients(
+            context,
+            request.notification_type,
+            request.audience,
+            request.recipient_membership_ids,
+        )
+        template = self._root_whatsapp_template_for(context, request)
+        if request.dry_run or not self.enabled:
+            now = datetime.now(timezone.utc)
+            return [
+                {
+                    "id": uuid4(),
+                    "tenantId": request.tenant_id,
+                    "notificationId": None,
+                    "recipientMembershipId": recipient["membershipId"],
+                    "recipient": recipient["name"],
+                    "destination": recipient["whatsapp"],
+                    "notificationType": request.notification_type,
+                    "title": self._render_root_whatsapp_message(context, request, template, recipient)[0],
+                    "message": self._render_root_whatsapp_message(context, request, template, recipient)[1],
+                    "priority": request.priority,
+                    "status": "skipped" if request.dry_run else "mocked",
+                    "provider": self.settings.root_whatsapp_provider,
+                    "providerMessageId": None,
+                    "attempts": 0,
+                    "maxAttempts": request.max_attempts,
+                    "scheduledFor": request.scheduled_for,
+                    "sentAt": None,
+                    "lastError": None,
+                    "createdAt": now,
+                }
+                for recipient in recipients
+            ]
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            if not access.is_root and request.tenant_id != access.tenant_id:
+                raise ValueError("tenant mismatch")
+            schedule_status = "pending" if request.schedule != "imediato" or request.scheduled_for else "queued"
+            created: list[dict] = []
+            for recipient in recipients:
+                title, message, values = self._render_root_whatsapp_message(context, request, template, recipient)
+                idempotency_key = None
+                if request.idempotency_key:
+                    raw_key = f"{request.idempotency_key}:{recipient['membershipId']}"
+                    idempotency_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+                    existing = conn.execute(
+                        """
+                        select q.id, q.tenant_id as "tenantId", q.notification_id as "notificationId",
+                               q.recipient_membership_id as "recipientMembershipId", m.full_name as recipient,
+                               q.destination, q.notification_type as "notificationType", q.title, q.message,
+                               q.priority, q.status, q.provider, q.provider_message_id as "providerMessageId",
+                               q.attempts, q.max_attempts as "maxAttempts", q.scheduled_for as "scheduledFor",
+                               q.next_attempt_at as "nextAttemptAt", q.sent_at as "sentAt",
+                               q.delivered_at as "deliveredAt", q.dead_letter_at as "deadLetterAt",
+                               q.last_error as "lastError", q.created_at as "createdAt"
+                        from public.whatsapp_delivery_queue q
+                        left join public.memberships m on m.id = q.recipient_membership_id
+                        where q.tenant_id = %s
+                          and q.recipient_membership_id = %s
+                          and q.idempotency_key = %s
+                        """,
+                        (request.tenant_id, recipient["membershipId"], idempotency_key),
+                    ).fetchone()
+                    if existing:
+                        created.append(dict(existing))
+                        continue
+                notification = conn.execute(
+                    """
+                    insert into public.notifications (
+                      tenant_id, recipient_membership_id, channel, notification_type,
+                      status, title, message, provider, metadata
+                    )
+                    values (%s, %s, 'whatsapp', %s, %s, %s, %s, %s, %s)
+                    returning id
+                    """,
+                    (
+                        request.tenant_id,
+                        recipient["membershipId"],
+                        request.notification_type,
+                        schedule_status,
+                        title,
+                        message,
+                        self.settings.root_whatsapp_provider,
+                        Jsonb(
+                            {
+                                "deliveryStatus": schedule_status,
+                                "priority": request.priority,
+                                "rootChannel": True,
+                                "rootChannelName": self.settings.root_whatsapp_name,
+                                "scheduledFor": request.scheduled_for.isoformat() if request.scheduled_for else None,
+                                "actionUrl": request.action_url,
+                                "recipient": recipient["name"],
+                                "recipientScope": recipient["scope"],
+                                "templateId": template["id"],
+                            }
+                        ),
+                    ),
+                ).fetchone()
+                queue = conn.execute(
+                    """
+                    insert into public.whatsapp_delivery_queue (
+                      tenant_id, notification_id, recipient_membership_id, template_id,
+                      notification_type, root_channel_name, root_channel_number,
+                      destination, title, message, priority, status, provider,
+                      provider_instance, idempotency_key,
+                      scheduled_for, next_attempt_at, max_attempts, payload
+                    )
+                    values (
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    returning id, tenant_id as "tenantId", notification_id as "notificationId",
+                              recipient_membership_id as "recipientMembershipId",
+                              destination, notification_type as "notificationType", title, message,
+                              priority, status, provider, provider_message_id as "providerMessageId",
+                              attempts, max_attempts as "maxAttempts", scheduled_for as "scheduledFor",
+                              next_attempt_at as "nextAttemptAt", sent_at as "sentAt",
+                              delivered_at as "deliveredAt", dead_letter_at as "deadLetterAt",
+                              last_error as "lastError", created_at as "createdAt"
+                    """,
+                    (
+                        request.tenant_id,
+                        notification["id"],
+                        recipient["membershipId"],
+                        template["id"],
+                        request.notification_type,
+                        self.settings.root_whatsapp_name,
+                        self.settings.root_whatsapp_number,
+                        recipient["whatsapp"],
+                        title,
+                        message,
+                        request.priority,
+                        schedule_status,
+                        self.settings.root_whatsapp_provider,
+                        self.settings.evolution_instance_name if self.settings.root_whatsapp_provider == "evolution" else None,
+                        idempotency_key,
+                        request.scheduled_for,
+                        request.scheduled_for or datetime.now(timezone.utc),
+                        request.max_attempts,
+                        Jsonb({"variables": values, "audience": request.audience, "schedule": request.schedule, "recipientScope": recipient["scope"]}),
+                    ),
+                ).fetchone()
+                created.append({**dict(queue), "recipient": recipient["name"]})
+            self.write_audit(
+                conn,
+                context,
+                request.tenant_id,
+                "root_whatsapp.queue.created",
+                "whatsapp_delivery_queue",
+                created[0]["id"] if created else None,
+                {"count": len(created), "notificationType": request.notification_type, "audience": request.audience},
+            )
+            conn.commit()
+        return created
+
+    def list_root_whatsapp_queue(self, context: AuthContext, limit: int = 100) -> list[dict]:
+        if not self.enabled:
+            return []
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._owner_filter(access, "q.recipient_membership_id", "q.tenant_id")
+            rows = conn.execute(
+                f"""
+                select q.id,
+                       q.tenant_id as "tenantId",
+                       q.notification_id as "notificationId",
+                       q.recipient_membership_id as "recipientMembershipId",
+                       m.full_name as recipient,
+                       q.destination,
+                       q.notification_type as "notificationType",
+                       q.title,
+                       q.message,
+                       q.priority,
+                       q.status,
+                       q.provider,
+                       q.provider_message_id as "providerMessageId",
+                       q.attempts,
+                       q.max_attempts as "maxAttempts",
+                       q.scheduled_for as "scheduledFor",
+                       q.next_attempt_at as "nextAttemptAt",
+                       q.sent_at as "sentAt",
+                       q.delivered_at as "deliveredAt",
+                       q.dead_letter_at as "deadLetterAt",
+                       q.last_error as "lastError",
+                       q.created_at as "createdAt"
+                from public.whatsapp_delivery_queue q
+                left join public.memberships m on m.id = q.recipient_membership_id
+                where {condition}
+                order by q.created_at desc
+                limit %s
+                """,
+                (*params, limit),
+            ).fetchall()
+            return list(rows)
+
+    def list_root_whatsapp_logs(self, context: AuthContext, limit: int = 100) -> list[dict]:
+        if not self.enabled:
+            return []
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._owner_filter(access, "l.recipient_membership_id", "l.tenant_id")
+            rows = conn.execute(
+                f"""
+                select l.id,
+                       l.tenant_id as "tenantId",
+                       l.queue_id as "queueId",
+                       l.notification_id as "notificationId",
+                       l.recipient_membership_id as "recipientMembershipId",
+                       l.destination,
+                       l.status,
+                       l.provider,
+                       l.provider_result as "providerResult",
+                       l.error,
+                       l.created_at as "createdAt"
+                from public.whatsapp_delivery_logs l
+                where {condition}
+                order by l.created_at desc
+                limit %s
+                """,
+                (*params, limit),
+            ).fetchall()
+            return list(rows)
+
+    def dispatch_root_whatsapp_queue(self, context: AuthContext, queue_ids: list[UUID] | None = None, limit: int = 25) -> list[dict]:
+        if not self.enabled:
+            return []
+        from app.whatsapp import WhatsAppProvider
+
+        provider = WhatsAppProvider(self.settings)
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._owner_filter(access, "q.recipient_membership_id", "q.tenant_id")
+            rows = self._claim_root_whatsapp_rows(conn, condition, params, queue_ids, limit)
+            conn.commit()
+        updated: list[dict] = []
+        for row in rows:
+            delivery = provider.send(
+                str(row["tenant_id"]),
+                row["message"],
+                row["destination"],
+                metadata={"queueId": str(row["id"]), "notificationId": str(row["notification_id"]) if row["notification_id"] else None},
+            )
+            updated_item = self.record_root_whatsapp_delivery(context, row["id"], delivery)
+            if updated_item:
+                updated.append(updated_item)
+        return updated
+
+    def dispatch_root_whatsapp_queue_system(self, limit: int = 25) -> list[dict]:
+        if not self.enabled:
+            return []
+        from app.whatsapp import WhatsAppProvider
+
+        provider = WhatsAppProvider(self.settings)
+        with self._connect() as conn:
+            rows = self._claim_root_whatsapp_rows(conn, "true", (), None, limit)
+            conn.commit()
+        updated: list[dict] = []
+        for row in rows:
+            delivery = provider.send(
+                str(row["tenant_id"]),
+                row["message"],
+                row["destination"],
+                metadata={"queueId": str(row["id"]), "notificationId": str(row["notification_id"]) if row["notification_id"] else None},
+            )
+            item = self._record_root_whatsapp_delivery_system(row["id"], delivery)
+            if item:
+                updated.append(item)
+        return updated
+
+    def _claim_root_whatsapp_rows(
+        self,
+        conn: psycopg.Connection,
+        condition: str,
+        params: tuple[object, ...],
+        queue_ids: list[UUID] | None,
+        limit: int,
+    ) -> list[dict]:
+        queue_filter = ""
+        queue_params: tuple[object, ...] = ()
+        if queue_ids:
+            queue_filter = "and q.id = any(%s::uuid[])"
+            queue_params = ([str(item) for item in queue_ids],)
+        return list(conn.execute(
+            f"""
+            with candidates as (
+              select q.id
+              from public.whatsapp_delivery_queue q
+              where {condition}
+                and q.status in ('pending', 'queued', 'retrying', 'provider_unavailable', 'qr_required', 'rate_limited')
+                and coalesce(q.next_attempt_at, q.scheduled_for, timezone('utc', now())) <= timezone('utc', now())
+                {queue_filter}
+              order by q.priority = 'critico' desc, q.created_at
+              for update skip locked
+              limit %s
+            )
+            update public.whatsapp_delivery_queue q
+            set status = 'sending',
+                attempts = q.attempts + 1,
+                updated_at = timezone('utc', now())
+            from candidates c
+            where q.id = c.id
+            returning q.*
+            """,
+            (*params, *queue_params, limit),
+        ).fetchall())
+
+    def record_root_whatsapp_delivery(self, context: AuthContext, queue_id: UUID, delivery) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._owner_filter(access, "recipient_membership_id", "tenant_id")
+            row = self._record_root_whatsapp_delivery(conn, queue_id, delivery, condition, params)
+            if not row:
+                return None
+            self.write_audit(
+                conn,
+                context,
+                row["tenant_id"],
+                "root_whatsapp.delivery.updated",
+                "whatsapp_delivery_queue",
+                row["id"],
+                {"status": row["status"], "providerResult": delivery.provider_result},
+            )
+            conn.commit()
+        return next((item for item in self.list_root_whatsapp_queue(context, limit=200) if str(item["id"]) == str(queue_id)), None)
+
+    def _record_root_whatsapp_delivery_system(self, queue_id: UUID, delivery) -> dict | None:
+        with self._connect() as conn:
+            row = self._record_root_whatsapp_delivery(conn, queue_id, delivery, "true", ())
+            if not row:
+                return None
+            self.write_agent_audit(
+                conn,
+                row["tenant_id"],
+                "root_whatsapp.worker.delivery.updated",
+                "whatsapp_delivery_queue",
+                row["id"],
+                {"status": row["status"], "providerResult": delivery.provider_result},
+            )
+            conn.commit()
+            return self._queue_row_to_api(row)
+
+    def _record_root_whatsapp_delivery(
+        self,
+        conn: psycopg.Connection,
+        queue_id: UUID,
+        delivery,
+        condition: str,
+        params: tuple[object, ...],
+    ) -> dict | None:
+        row = conn.execute(
+            f"select * from public.whatsapp_delivery_queue where id = %s and {condition} for update",
+            (queue_id, *params),
+        ).fetchone()
+        if not row:
+            return None
+
+        now = datetime.now(timezone.utc)
+        attempt_status = str(delivery.status)
+        retryable = {"failed", "missing_credentials", "provider_unavailable", "qr_required", "rate_limited"}
+        terminal_failure = {"missing_destination", "unknown_provider", "disabled"}
+        success = attempt_status in {"sent", "delivered", "mocked"}
+        should_retry = attempt_status in retryable and row["attempts"] < row["max_attempts"]
+        if success:
+            queue_status = attempt_status
+        elif should_retry:
+            queue_status = "retrying"
+        else:
+            queue_status = "failed" if attempt_status in retryable | terminal_failure else attempt_status
+
+        next_attempt_at = None
+        if should_retry:
+            delay_seconds = min(
+                self.settings.evolution_retry_backoff_seconds * (2 ** max(0, int(row["attempts"]) - 1)),
+                3600,
+            )
+            next_attempt_at = now + timedelta(seconds=delay_seconds)
+        sent_at = now if attempt_status in {"sent", "delivered", "mocked"} else None
+        delivered_at = now if attempt_status == "delivered" else None
+        dead_letter_at = now if queue_status == "failed" else None
+        error_message = None if success else delivery.message
+
+        updated = conn.execute(
+            """
+            update public.whatsapp_delivery_queue
+            set status = %s,
+                provider_message_id = coalesce(%s, provider_message_id),
+                sent_at = coalesce(%s, sent_at),
+                delivered_at = coalesce(%s, delivered_at),
+                dead_letter_at = %s,
+                last_error = %s,
+                next_attempt_at = %s,
+                updated_at = timezone('utc', now())
+            where id = %s
+            returning *
+            """,
+            (
+                queue_status,
+                delivery.provider_message_id,
+                sent_at,
+                delivered_at,
+                dead_letter_at,
+                error_message,
+                next_attempt_at,
+                queue_id,
+            ),
+        ).fetchone()
+        if not updated:
+            return None
+
+        db_notification_status = (
+            "sent" if queue_status in {"sent", "delivered"}
+            else "mocked" if queue_status == "mocked"
+            else "failed" if queue_status == "failed"
+            else "queued"
+        )
+        if updated["notification_id"]:
+            conn.execute(
+                """
+                update public.notifications
+                set status = %s,
+                    provider_message_id = coalesce(%s, provider_message_id),
+                    sent_at = coalesce(%s, sent_at),
+                    delivered_at = coalesce(%s, delivered_at),
+                    metadata = metadata || %s
+                where id = %s
+                """,
+                (
+                    db_notification_status,
+                    delivery.provider_message_id,
+                    sent_at,
+                    delivered_at,
+                    Jsonb({
+                        "deliveryStatus": queue_status,
+                        "attemptStatus": attempt_status,
+                        "lastProviderResult": delivery.provider_result,
+                        "lastError": error_message,
+                        "attemptedAt": now.isoformat(),
+                        "nextAttemptAt": next_attempt_at.isoformat() if next_attempt_at else None,
+                    }),
+                    updated["notification_id"],
+                ),
+            )
+        conn.execute(
+            """
+            insert into public.whatsapp_delivery_logs (
+              tenant_id, queue_id, notification_id, recipient_membership_id,
+              destination, status, provider, provider_result, error, payload
+            )
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                updated["tenant_id"],
+                updated["id"],
+                updated["notification_id"],
+                updated["recipient_membership_id"],
+                updated["destination"],
+                attempt_status,
+                updated["provider"],
+                delivery.provider_result,
+                error_message,
+                Jsonb({
+                    "message": delivery.message,
+                    "providerMessageId": delivery.provider_message_id,
+                    "queueStatus": queue_status,
+                    "attempt": updated["attempts"],
+                }),
+            ),
+        )
+        if queue_status == "failed" and not updated["fallback_triggered_at"]:
+            self._create_whatsapp_fallbacks(conn, updated)
+            updated["fallback_triggered_at"] = now
+        return updated
+
+    def _create_whatsapp_fallbacks(self, conn: psycopg.Connection, row: dict) -> None:
+        now = datetime.now(timezone.utc)
+        if self.settings.whatsapp_in_app_fallback_enabled:
+            conn.execute(
+                """
+                insert into public.notifications (
+                  tenant_id, recipient_membership_id, channel, notification_type,
+                  status, title, message, provider, metadata
+                )
+                values (%s, %s, 'system', 'falha_whatsapp', 'pending', %s, %s, 'vulcan-in-app-fallback', %s)
+                """,
+                (
+                    row["tenant_id"],
+                    row["recipient_membership_id"],
+                    f"WhatsApp indisponível: {row['title']}",
+                    row["message"],
+                    Jsonb({"fallbackForQueueId": str(row["id"]), "sourceChannel": "whatsapp"}),
+                ),
+            )
+        if self.settings.whatsapp_email_fallback_enabled:
+            recipient = conn.execute(
+                "select work_email from public.memberships where tenant_id = %s and id = %s",
+                (row["tenant_id"], row["recipient_membership_id"]),
+            ).fetchone()
+            if recipient and recipient["work_email"]:
+                conn.execute(
+                    """
+                    insert into public.notifications (
+                      tenant_id, recipient_membership_id, channel, notification_type,
+                      status, title, message, provider, metadata
+                    )
+                    values (%s, %s, 'email', 'falha_whatsapp', 'pending', %s, %s, 'email-fallback-queue', %s)
+                    """,
+                    (
+                        row["tenant_id"],
+                        row["recipient_membership_id"],
+                        row["title"],
+                        row["message"],
+                        Jsonb({"fallbackForQueueId": str(row["id"]), "destination": recipient["work_email"]}),
+                    ),
+                )
+        conn.execute(
+            "update public.whatsapp_delivery_queue set fallback_triggered_at = %s where id = %s",
+            (now, row["id"]),
+        )
+
+    def retry_root_whatsapp_queue_item(self, context: AuthContext, queue_id: UUID) -> dict | None:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            condition, params = self._owner_filter(access, "recipient_membership_id", "tenant_id")
+            row = conn.execute(
+                f"""
+                update public.whatsapp_delivery_queue
+                set status = 'queued', attempts = 0, next_attempt_at = timezone('utc', now()),
+                    dead_letter_at = null, fallback_triggered_at = null, last_error = null,
+                    updated_at = timezone('utc', now())
+                where id = %s and {condition}
+                returning *
+                """,
+                (queue_id, *params),
+            ).fetchone()
+            if not row:
+                return None
+            self.write_audit(conn, context, row["tenant_id"], "root_whatsapp.queue.retried", "whatsapp_delivery_queue", row["id"], {})
+            conn.commit()
+        return next((item for item in self.list_root_whatsapp_queue(context, 200) if item["id"] == queue_id), None)
+
+    def apply_root_whatsapp_webhook(self, provider_message_id: str, delivery_status: str, payload: dict) -> bool:
+        if not self.enabled or delivery_status not in {"sent", "delivered", "failed"}:
+            return False
+        with self._connect() as conn:
+            row = conn.execute(
+                "select * from public.whatsapp_delivery_queue where provider_message_id = %s for update",
+                (provider_message_id,),
+            ).fetchone()
+            if not row:
+                return False
+            current = str(row["status"])
+            status_value = current if current == "delivered" else delivery_status
+            delivered_at = datetime.now(timezone.utc) if status_value == "delivered" else None
+            conn.execute(
+                """
+                update public.whatsapp_delivery_queue
+                set status = %s, delivered_at = coalesce(%s, delivered_at),
+                    dead_letter_at = case when %s = 'failed' then timezone('utc', now()) else dead_letter_at end,
+                    updated_at = timezone('utc', now())
+                where id = %s
+                """,
+                (status_value, delivered_at, status_value, row["id"]),
+            )
+            if row["notification_id"]:
+                conn.execute(
+                    """
+                    update public.notifications
+                    set status = %s, delivered_at = coalesce(%s, delivered_at),
+                        metadata = metadata || %s
+                    where id = %s
+                    """,
+                    (
+                        status_value,
+                        delivered_at,
+                        Jsonb({"deliveryStatus": status_value, "webhookReceivedAt": datetime.now(timezone.utc).isoformat()}),
+                        row["notification_id"],
+                    ),
+                )
+            conn.execute(
+                """
+                insert into public.whatsapp_delivery_logs (
+                  tenant_id, queue_id, notification_id, recipient_membership_id,
+                  destination, status, provider, provider_result, payload
+                ) values (%s, %s, %s, %s, %s, %s, %s, 'evolution:webhook', %s)
+                """,
+                (
+                    row["tenant_id"], row["id"], row["notification_id"], row["recipient_membership_id"],
+                    row["destination"], status_value, row["provider"], Jsonb(payload),
+                ),
+            )
+            self.write_agent_audit(conn, row["tenant_id"], "root_whatsapp.webhook.received", "whatsapp_delivery_queue", row["id"], {"status": status_value})
+            conn.commit()
+            return True
+
+    def root_whatsapp_queue_counts_system(self) -> dict[str, int]:
+        if not self.enabled:
+            return {}
+        with self._connect() as conn:
+            rows = conn.execute(
+                "select status, count(*)::int as total from public.whatsapp_delivery_queue group by status"
+            ).fetchall()
+        return {str(row["status"]): int(row["total"]) for row in rows}
+
+    def _queue_row_to_api(self, row: dict) -> dict:
+        return {
+            "id": row["id"],
+            "tenantId": row["tenant_id"],
+            "notificationId": row["notification_id"],
+            "recipientMembershipId": row["recipient_membership_id"],
+            "recipient": None,
+            "destination": row["destination"],
+            "notificationType": row["notification_type"],
+            "title": row["title"],
+            "message": row["message"],
+            "priority": row["priority"],
+            "status": row["status"],
+            "provider": row["provider"],
+            "providerMessageId": row["provider_message_id"],
+            "attempts": row["attempts"],
+            "maxAttempts": row["max_attempts"],
+            "scheduledFor": row["scheduled_for"],
+            "nextAttemptAt": row["next_attempt_at"],
+            "sentAt": row["sent_at"],
+            "deliveredAt": row["delivered_at"],
+            "deadLetterAt": row["dead_letter_at"],
+            "lastError": row["last_error"],
+            "createdAt": row["created_at"],
+        }
+
+    def summarize_root_whatsapp_result(self, items: list[dict], recipients: list[dict], mode: str) -> dict:
+        statuses = defaultdict(int)
+        for item in items:
+            statuses[str(item.get("status"))] += 1
+        return {
+            "status": "ok" if not statuses.get("failed") else "partial",
+            "mode": mode,
+            "queued": statuses.get("queued", 0) + statuses.get("pending", 0),
+            "sent": statuses.get("sent", 0) + statuses.get("delivered", 0),
+            "failed": statuses.get("failed", 0) + statuses.get("missing_destination", 0) + statuses.get("unknown_provider", 0) + statuses.get("disabled", 0),
+            "mocked": statuses.get("mocked", 0) + statuses.get("skipped", 0),
+            "missingCredentials": statuses.get("missing_credentials", 0),
+            "recipients": recipients,
+            "queueItems": items,
+        }
+
     def list_notification_types(self, context: AuthContext) -> list[dict]:
         preferences = self.list_notification_preferences(context)
         disabled = {item["notificationType"] for item in preferences if not item["enabled"]}
@@ -3401,10 +4322,12 @@ class VulcanRepository:
         return self._patch_notification_metadata(context, schedule_id, patch, "notification_schedule.updated")
 
     def list_notification_templates(self, context: AuthContext) -> list[dict]:
-        return DEFAULT_NOTIFICATION_TEMPLATES
+        root_templates = [item for item in self.list_root_whatsapp_templates(context)]
+        known_ids = {item["id"] for item in DEFAULT_NOTIFICATION_TEMPLATES}
+        return [*DEFAULT_NOTIFICATION_TEMPLATES, *[item for item in root_templates if item["id"] not in known_ids]]
 
     def preview_notification_template(self, template_id: str, variables: dict) -> dict | None:
-        template = next((item for item in DEFAULT_NOTIFICATION_TEMPLATES if item["id"] == template_id), None)
+        template = next((item for item in [*DEFAULT_NOTIFICATION_TEMPLATES, *ROOT_WHATSAPP_TEMPLATES] if item["id"] == template_id), None)
         if not template:
             return None
         values = {

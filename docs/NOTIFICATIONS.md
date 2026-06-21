@@ -86,12 +86,18 @@ Campos principais:
 - `channels`;
 - `enabled`.
 
-No MVP, agendamentos customizados sao persistidos na tabela `notifications` com `notification_type='schedule_config'` e metadata estruturado. Para producao de alto volume, a evolucao recomendada e uma tabela dedicada `notification_schedules` e worker com fila duravel.
+No MVP atual, `notification_schedules` existe como tabela dedicada para agendamentos reais. O modelo antigo em `notifications` com `notification_type='schedule_config'` continua como compatibilidade de tela, mas novos fluxos devem usar a tabela dedicada e um worker duravel.
 
 ## Templates
 
-Templates padrao ficam centralizados no backend e aparecem na tela Notificacoes:
+Templates padrao ficam centralizados no backend e no banco:
 
+- WhatsApp critico;
+- WhatsApp metrica;
+- WhatsApp alerta;
+- WhatsApp insight;
+- WhatsApp relatorio diario;
+- WhatsApp relatorio semanal;
 - WhatsApp critico;
 - e-mail diario;
 - sistema/dispositivo aguardando adocao;
@@ -124,6 +130,9 @@ Status operacionais aceitos pela API/UI:
 - `sent`;
 - `delivered`;
 - `failed`;
+- `provider_unavailable`;
+- `qr_required`;
+- `rate_limited`;
 - `cancelled`;
 - `skipped`;
 - `retrying`;
@@ -135,7 +144,7 @@ Status operacionais aceitos pela API/UI:
 - `disabled`;
 - `resolved`.
 
-O enum atual do banco suporta uma base menor (`queued`, `sent`, `failed`, `mocked`, `missing_credentials`, `disabled`). Estados detalhados ficam em `metadata.deliveryStatus`, preservando compatibilidade sem esconder o estado real.
+O banco agora aceita estados principais no enum de `notifications` e usa `whatsapp_delivery_queue.status` para estados operacionais detalhados de WhatsApp. `metadata.deliveryStatus` continua registrado para compatibilidade e rastreabilidade.
 
 Campos importantes:
 
@@ -175,6 +184,19 @@ Campos importantes:
 - `POST /notification-templates/{id}/test`
 - `GET /integrations/whatsapp/status`
 - `POST /integrations/whatsapp/test`
+- `GET /integrations/whatsapp/evolution/status`
+- `PUT /integrations/whatsapp/evolution/config`
+- `POST /integrations/whatsapp/evolution/test`
+- `GET /integrations/whatsapp/evolution/qr`
+- `POST /integrations/whatsapp/evolution/reconnect`
+- `POST /integrations/whatsapp/evolution/send-test`
+- `POST /integrations/whatsapp/evolution/webhook`
+- `GET /integrations/whatsapp/root/recipients`
+- `POST /integrations/whatsapp/root/send`
+- `POST /integrations/whatsapp/root/process-queue`
+- `GET /integrations/whatsapp/root/queue`
+- `GET /integrations/whatsapp/root/logs`
+- `POST /integrations/whatsapp/root/queue/{queue_id}/retry`
 - `GET /integrations/email/status`
 - `POST /integrations/email/test`
 
@@ -184,20 +206,35 @@ Variaveis:
 
 ```env
 ROOT_WHATSAPP_ENABLED=true
-ROOT_WHATSAPP_PROVIDER=
-ROOT_WHATSAPP_NUMBER=5541984166423
+ROOT_WHATSAPP_PROVIDER=evolution
+ROOT_WHATSAPP_NUMBER=
 ROOT_WHATSAPP_NAME=Vulcan Notifications
+ROOT_WHATSAPP_MOCK_MODE=false
+ROOT_WHATSAPP_BASE_URL=
+ROOT_WHATSAPP_API_KEY=
 
-WHATSAPP_PROVIDER=
+EVOLUTION_ENABLED=true
+EVOLUTION_BASE_URL=http://127.0.0.1:8080
+EVOLUTION_API_KEY=
+EVOLUTION_INSTANCE_NAME=vulcan-root
+EVOLUTION_WEBHOOK_URL=http://127.0.0.1:3001/integrations/whatsapp/evolution/webhook
+EVOLUTION_WEBHOOK_TOKEN=
+
+WHATSAPP_PROVIDER=evolution
+WHATSAPP_DEFAULT_COUNTRY=BR
+WHATSAPP_REQUIRE_OPT_IN=true
+WHATSAPP_ENABLE_UNOFFICIAL_PROVIDER=true
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
 WHATSAPP_BUSINESS_ACCOUNT_ID=
 WHATSAPP_WEBHOOK_VERIFY_TOKEN=
+WHATSAPP_GRAPH_API_VERSION=v25.0
+WHATSAPP_REQUEST_TIMEOUT_SECONDS=15
 ```
 
-O numero inicial do canal raiz e `+55 41 98416-6423`. Ele deve ficar centralizado em ambiente/configuracao, nunca espalhado no codigo.
+Sem credencial real, o backend registra explicitamente `missing_credentials`. Com `ROOT_WHATSAPP_MOCK_MODE=true`, registra `mocked` e deixa claro que nenhuma mensagem real saiu.
 
-Sem credencial real, o backend registra explicitamente `missing_credentials` ou `mocked`.
+Com Evolution/Baileys, os status mostram explicitamente `unofficial_*`. O modo nao oficial serve para piloto/local; producao enterprise deve migrar para Meta WhatsApp Cloud API ou BSP homologado.
 
 ## E-mail
 
@@ -272,7 +309,6 @@ Mensagem central:
 
 ## Pendencias Para Producao Total
 
-- Criar tabelas dedicadas para schedules/templates/regras em vez de usar metadata para tudo.
 - Integrar worker duravel de fila/retry/dead-letter.
 - Ativar provedor real WhatsApp Business API ou provider equivalente.
 - Finalizar OAuth real para Gmail/Outlook.

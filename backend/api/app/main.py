@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import hmac
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg import Error as PsycopgError
@@ -42,6 +43,10 @@ from app.schemas import (
     DeviceMoveRequest,
     DeviceOwnerUpdate,
     EmailProviderStatusResponse,
+    EvolutionActionResponse,
+    EvolutionConfigurationRequest,
+    EvolutionStatus,
+    EvolutionWebhookResponse,
     HealthResponse,
     HierarchyNode,
     IntegrationStatus,
@@ -71,6 +76,11 @@ from app.schemas import (
     NotificationTemplatePreviewRequest,
     NotificationTemplatePreviewResponse,
     NotificationTypeDefinition,
+    RootWhatsAppLog,
+    RootWhatsAppQueueItem,
+    RootWhatsAppRecipient,
+    RootWhatsAppSendRequest,
+    RootWhatsAppSendResponse,
     OperationalIntelligence,
     OperationalMetric,
     ReportTemplate,
@@ -92,7 +102,13 @@ from app.schemas import (
 )
 from app.security import AuthContext, Authenticated, login_with_local_admin
 from app.supabase import supabase_status
-from app.whatsapp import WhatsAppConnection, WhatsAppNotificationService
+from app.runtime_config import masked_runtime_config, update_runtime_config
+from app.whatsapp import (
+    EvolutionWhatsAppProvider,
+    WhatsAppConnection,
+    WhatsAppNotificationService,
+    normalize_evolution_webhook,
+)
 
 
 app = FastAPI(title="Vulcan API", version="0.1.0")
@@ -612,21 +628,36 @@ def send_insight_whatsapp(insight_id: UUID, context: AuthContext = Authenticated
     insight = repo.get_insight(context, insight_id)
     if not insight:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="insight not found")
-    service = WhatsAppNotificationService()
-    delivery = service.send_alert(
-        str(insight["tenantId"]),
-        insight["title"],
-        f"{insight['summary']}\n\nAção recomendada: {insight['recommendation']}",
+    request = RootWhatsAppSendRequest(
+        tenantId=insight["tenantId"],
+        notificationType="insight_critico" if insight.get("impact") in {"high", "critical"} else "insight",
+        title=insight["title"],
+        message=f"{insight['summary']}\n\nAção recomendada: {insight['recommendation']}",
+        audience="auto",
+        priority="critico" if insight.get("impact") == "critical" else "alto",
+        schedule="imediato",
+        variables={
+            "resumo": insight["summary"],
+            "recomendacao": insight["recommendation"],
+            "economia_estimada": f"{insight.get('automationSavingsHours') or 0}h",
+            "impacto": insight.get("impact") or "alto",
+        },
+        idempotencyKey=f"insight:{insight_id}:whatsapp",
     )
+    items = repo.queue_root_whatsapp_messages(context, request)
+    if items:
+        queue_ids = [item["id"] for item in items]
+        items = repo.dispatch_root_whatsapp_queue(context, queue_ids=queue_ids, limit=len(queue_ids)) or items
+    statuses = [str(item.get("status")) for item in items]
     updated = repo.update_insight_metadata(
         context,
         insight_id,
         {
-            "sentToWhatsapp": delivery.ok,
-            "whatsappStatus": delivery.status,
+            "sentToWhatsapp": any(status in {"sent", "delivered", "mocked"} for status in statuses),
+            "whatsappStatus": statuses[0] if statuses else "skipped",
             "lastSentAt": datetime.now(timezone.utc).isoformat(),
-            "recipients": [delivery.provider_result],
-            "lastWhatsappResult": delivery.provider_result,
+            "recipients": [str(item.get("recipient") or item.get("recipientMembershipId")) for item in items],
+            "lastWhatsappResult": f"root_whatsapp:{len(items)} destinatário(s)",
         },
         "insight.sent_whatsapp",
     )
@@ -714,6 +745,35 @@ def send_notification(
     context: AuthContext = Authenticated,
     repo: VulcanRepository = Depends(repository),
 ) -> NotificationSendResponse:
+    if request.channel == "whatsapp":
+        try:
+            root_request = RootWhatsAppSendRequest(
+                tenantId=request.tenant_id,
+                notificationType=request.notification_type,
+                title=request.title,
+                message=request.message,
+                audience="custom" if request.recipient_membership_id else "auto",
+                recipientMembershipIds=[request.recipient_membership_id] if request.recipient_membership_id else [],
+                priority=request.priority,
+                schedule="imediato" if request.scheduled_for is None else "personalizado",
+                scheduledFor=request.scheduled_for,
+                maxAttempts=3,
+                actionUrl=request.action_url,
+                idempotencyKey=f"notification:{request.tenant_id}:{request.notification_type}:{request.recipient_membership_id or request.destination or request.title}",
+            )
+            items = repo.queue_root_whatsapp_messages(context, root_request)
+            if request.scheduled_for is None and items:
+                queue_ids = [item["id"] for item in items]
+                items = repo.dispatch_root_whatsapp_queue(context, queue_ids=queue_ids, limit=len(queue_ids)) or items
+            first = items[0] if items else None
+            return NotificationSendResponse(
+                id=first.get("notificationId") if first else None,
+                channel="whatsapp",
+                status=first.get("status", "skipped") if first else "skipped",
+                providerResult=f"root_whatsapp:{len(items)} destinatário(s)",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     service = NotificationService()
     delivery = service.send(request.channel, NotificationPayload(title=request.title, message=request.message, tenant_id=str(request.tenant_id), destination=request.destination))
     try:
@@ -780,7 +840,14 @@ def whatsapp_status(context: AuthContext = Authenticated) -> WhatsAppStatus:
 
 
 @app.post("/integrations/whatsapp/test", response_model=ConnectionTestResponse)
-def whatsapp_test(request: ConnectionTestRequest, context: AuthContext = Authenticated) -> ConnectionTestResponse:
+def whatsapp_test(
+    request: ConnectionTestRequest,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> ConnectionTestResponse:
+    repo.assert_can_manage_integrations(context)
+    if request.tenant_id != context.tenant_id and context.role != "root":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant mismatch")
     service = WhatsAppNotificationService()
     delivery = service.send_alert(
         tenant_id=str(request.tenant_id),
@@ -789,6 +856,228 @@ def whatsapp_test(request: ConnectionTestRequest, context: AuthContext = Authent
         to=request.destination,
     )
     return ConnectionTestResponse(ok=delivery.ok, status=delivery.status, providerResult=delivery.provider_result, message=delivery.message)
+
+
+def _evolution_status_payload(include_qr: bool = False) -> EvolutionStatus:
+    settings = get_settings()
+    session = WhatsAppConnection(settings).session(include_qr=include_qr)
+    runtime = masked_runtime_config()
+    return EvolutionStatus(
+        provider=session.provider,
+        status=session.status,
+        connected=session.connected,
+        unofficial=session.unofficial or session.provider == "evolution",
+        serviceReachable=session.service_reachable,
+        instanceName=settings.evolution_instance_name,
+        baseUrl=settings.evolution_base_url,
+        rootNumber=settings.root_whatsapp_number,
+        rootName=settings.root_whatsapp_name,
+        qrRequired=session.qr_required,
+        qrCode=session.qr_code,
+        apiKeyConfigured=bool(settings.evolution_api_key or runtime.get("EVOLUTION_API_KEY_CONFIGURED")),
+        webhookConfigured=bool(settings.evolution_webhook_url and settings.evolution_webhook_token),
+        mockMode=settings.root_whatsapp_mock_mode,
+        requireOptIn=settings.whatsapp_require_opt_in,
+        emailFallbackEnabled=settings.whatsapp_email_fallback_enabled,
+        inAppFallbackEnabled=settings.whatsapp_in_app_fallback_enabled,
+        logs=session.logs,
+    )
+
+
+@app.get("/integrations/whatsapp/evolution/status", response_model=EvolutionStatus)
+def evolution_status(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> EvolutionStatus:
+    repo.assert_can_manage_integrations(context)
+    return _evolution_status_payload()
+
+
+@app.put("/integrations/whatsapp/evolution/config", response_model=EvolutionStatus)
+def evolution_configure(
+    request: EvolutionConfigurationRequest,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> EvolutionStatus:
+    repo.assert_can_manage_integrations(context)
+    settings = get_settings()
+    if not settings.allow_runtime_integration_config:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="runtime integration configuration is disabled; configure the production secret store",
+        )
+    values = {
+        "ROOT_WHATSAPP_ENABLED": request.enabled,
+        "ROOT_WHATSAPP_PROVIDER": request.provider,
+        "ROOT_WHATSAPP_NUMBER": request.root_number,
+        "ROOT_WHATSAPP_NAME": request.root_name,
+        "ROOT_WHATSAPP_MOCK_MODE": request.mock_mode or request.provider == "mock",
+        "EVOLUTION_ENABLED": request.enabled and request.provider == "evolution",
+        "EVOLUTION_BASE_URL": request.base_url,
+        "EVOLUTION_INSTANCE_NAME": request.instance_name,
+        "WHATSAPP_REQUIRE_OPT_IN": request.require_opt_in,
+        "WHATSAPP_EMAIL_FALLBACK_ENABLED": request.email_fallback_enabled,
+        "WHATSAPP_IN_APP_FALLBACK_ENABLED": request.in_app_fallback_enabled,
+    }
+    if request.api_key:
+        values["EVOLUTION_API_KEY"] = request.api_key
+    update_runtime_config(values)
+    return _evolution_status_payload()
+
+
+@app.post("/integrations/whatsapp/evolution/test", response_model=EvolutionActionResponse)
+def evolution_test(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> EvolutionActionResponse:
+    repo.assert_can_manage_integrations(context)
+    delivery = WhatsAppConnection(get_settings()).test_connection(context.tenant_id)
+    return EvolutionActionResponse(ok=delivery.ok, status=delivery.status, message=delivery.message)
+
+
+@app.get("/integrations/whatsapp/evolution/qr", response_model=EvolutionActionResponse)
+def evolution_qr(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> EvolutionActionResponse:
+    repo.assert_can_manage_integrations(context)
+    settings = get_settings()
+    if settings.root_whatsapp_provider != "evolution" or settings.root_whatsapp_mock_mode:
+        return EvolutionActionResponse(ok=False, status="disabled", message="Ative Evolution com mock desligado para gerar QR Code.")
+    result = EvolutionWhatsAppProvider(settings).get_qr_code(create_if_missing=True)
+    status_payload = _evolution_status_payload(include_qr=True)
+    return EvolutionActionResponse(
+        ok=result.ok or status_payload.connected,
+        status=status_payload.status,
+        message="WhatsApp já está conectado." if status_payload.connected else result.message,
+        qrCode=status_payload.qr_code,
+    )
+
+
+@app.post("/integrations/whatsapp/evolution/reconnect", response_model=EvolutionActionResponse)
+def evolution_reconnect(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> EvolutionActionResponse:
+    repo.assert_can_manage_integrations(context)
+    result = EvolutionWhatsAppProvider(get_settings()).reconnect()
+    status_payload = _evolution_status_payload(include_qr=True)
+    return EvolutionActionResponse(
+        ok=result.ok,
+        status=status_payload.status,
+        message=result.message,
+        qrCode=status_payload.qr_code,
+    )
+
+
+@app.post("/integrations/whatsapp/evolution/send-test", response_model=ConnectionTestResponse)
+def evolution_send_test(
+    request: ConnectionTestRequest,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> ConnectionTestResponse:
+    return whatsapp_test(request, context, repo)
+
+
+@app.post("/integrations/whatsapp/evolution/webhook", response_model=EvolutionWebhookResponse)
+async def evolution_webhook(
+    request: Request,
+    x_vulcan_webhook_token: str | None = Header(default=None, alias="X-Vulcan-Webhook-Token"),
+    repo: VulcanRepository = Depends(repository),
+) -> EvolutionWebhookResponse:
+    expected = get_settings().evolution_webhook_token
+    if not expected or not x_vulcan_webhook_token or not hmac.compare_digest(expected, x_vulcan_webhook_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid evolution webhook token")
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid webhook payload")
+    event, provider_message_id, normalized_status = normalize_evolution_webhook(payload)
+    accepted = bool(provider_message_id and repo.apply_root_whatsapp_webhook(provider_message_id, normalized_status, payload))
+    return EvolutionWebhookResponse(
+        accepted=accepted or normalized_status.startswith("unofficial_"),
+        event=event,
+        status=normalized_status,
+        providerMessageId=provider_message_id,
+    )
+
+
+@app.get("/integrations/whatsapp/root/recipients", response_model=list[RootWhatsAppRecipient])
+def root_whatsapp_recipients(
+    notification_type: str = Query(default="alerta", alias="notificationType"),
+    audience: str = Query(default="auto"),
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> list[RootWhatsAppRecipient]:
+    recipients = repo.resolve_root_whatsapp_recipients(context, notification_type=notification_type, audience=audience)
+    return [RootWhatsAppRecipient.model_validate(item) for item in recipients]
+
+
+@app.get("/integrations/whatsapp/root/queue", response_model=list[RootWhatsAppQueueItem])
+def root_whatsapp_queue(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[RootWhatsAppQueueItem]:
+    return [RootWhatsAppQueueItem.model_validate(item) for item in repo.list_root_whatsapp_queue(context, limit=limit)]
+
+
+@app.get("/integrations/whatsapp/root/logs", response_model=list[RootWhatsAppLog])
+def root_whatsapp_logs(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[RootWhatsAppLog]:
+    return [RootWhatsAppLog.model_validate(item) for item in repo.list_root_whatsapp_logs(context, limit=limit)]
+
+
+@app.post("/integrations/whatsapp/root/queue/{queue_id}/retry", response_model=RootWhatsAppQueueItem)
+def root_whatsapp_retry_queue_item(
+    queue_id: UUID,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> RootWhatsAppQueueItem:
+    item = repo.retry_root_whatsapp_queue_item(context, queue_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="queue item not found")
+    return RootWhatsAppQueueItem.model_validate(item)
+
+
+@app.post("/integrations/whatsapp/root/send", response_model=RootWhatsAppSendResponse)
+def root_whatsapp_send(
+    request: RootWhatsAppSendRequest,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> RootWhatsAppSendResponse:
+    try:
+        recipients = repo.resolve_root_whatsapp_recipients(
+            context,
+            notification_type=request.notification_type,
+            audience=request.audience,
+            recipient_membership_ids=request.recipient_membership_ids,
+        )
+        items = repo.queue_root_whatsapp_messages(context, request)
+        should_dispatch = request.schedule == "imediato" and request.scheduled_for is None and not request.dry_run
+        if should_dispatch and items:
+            queue_ids = [item["id"] for item in items]
+            dispatched = repo.dispatch_root_whatsapp_queue(context, queue_ids=queue_ids, limit=len(queue_ids))
+            if dispatched:
+                by_id = {str(item["id"]): item for item in dispatched}
+                items = [by_id.get(str(item["id"]), item) for item in items]
+        mode = WhatsAppConnection(get_settings()).session(context.tenant_id).status
+        return RootWhatsAppSendResponse.model_validate(repo.summarize_root_whatsapp_result(items, recipients, mode))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.post("/integrations/whatsapp/root/process-queue", response_model=RootWhatsAppSendResponse)
+def root_whatsapp_process_queue(
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> RootWhatsAppSendResponse:
+    items = repo.dispatch_root_whatsapp_queue(context, limit=limit)
+    mode = WhatsAppConnection(get_settings()).session(context.tenant_id).status
+    return RootWhatsAppSendResponse.model_validate(repo.summarize_root_whatsapp_result(items, [], mode))
 
 
 @app.get("/integrations/email/status", response_model=list[EmailProviderStatusResponse])
