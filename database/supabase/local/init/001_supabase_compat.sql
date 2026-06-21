@@ -35,7 +35,14 @@ as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 $$;
 
+create or replace function auth.role()
+returns text
+language sql
+stable
+as $$
+  select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), 'anon')
+$$;
+
 grant usage on schema auth to postgres, anon, authenticated, service_role;
 grant select, insert, update, delete on auth.users to postgres, service_role;
 grant select on auth.users to authenticated;
-
