@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
@@ -6547,6 +6547,7 @@ function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: strin
   const [draft, setDraft] = useState<EvolutionConfigDraft>(() => evolutionDraftFromStatus(null, initialWhatsAppStatus));
   const [busy, setBusy] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
+  const actionBusyRef = useRef(false);
 
   useEffect(() => {
     void refreshAll();
@@ -6567,9 +6568,10 @@ function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: strin
     return payload;
   }
 
-  async function refreshAll() {
+  async function refreshAll(options: { force?: boolean } = {}) {
     if (!token) return;
-    setBusy((current) => current ?? "refresh");
+    if (actionBusyRef.current && !options.force) return;
+    if (!options.force) setBusy((current) => current ?? "refresh");
     try {
       const [nextStatus, nextQueue, nextLogs] = await Promise.all([
         requestJson<EvolutionStatus>("/integrations/whatsapp/evolution/status"),
@@ -6592,8 +6594,20 @@ function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: strin
     } catch (error) {
       setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao atualizar WhatsApp." });
     } finally {
-      setBusy(null);
+      if (!options.force) setBusy(null);
     }
+  }
+
+  function beginAction(key: string) {
+    if (actionBusyRef.current) return false;
+    actionBusyRef.current = true;
+    setBusy(key);
+    return true;
+  }
+
+  function endAction() {
+    actionBusyRef.current = false;
+    setBusy(null);
   }
 
   function updateDraft<K extends keyof EvolutionConfigDraft>(key: K, value: EvolutionConfigDraft[K]) {
@@ -6601,7 +6615,7 @@ function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: strin
   }
 
   async function saveConfig() {
-    setBusy("save-evolution");
+    if (!beginAction("save-evolution")) return;
     setFeedback(null);
     try {
       const nextStatus = await requestJson<EvolutionStatus>("/integrations/whatsapp/evolution/config", {
@@ -6624,26 +6638,26 @@ function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: strin
       setQrCode(nextStatus.qrCode);
       setDraft((current) => ({ ...evolutionDraftFromStatus(nextStatus, initialWhatsAppStatus), apiKey: "", testDestination: current.testDestination, testMessage: current.testMessage }));
       setFeedback({ tone: "ok", message: `WhatsApp salvo. Status: ${statusPt(nextStatus.status)}.` });
-      await refreshAll();
+      await refreshAll({ force: true });
     } catch (error) {
       setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao salvar WhatsApp." });
     } finally {
-      setBusy(null);
+      endAction();
     }
   }
 
   async function runEvolutionAction(key: string, label: string, path: string, init: RequestInit = {}) {
-    setBusy(key);
+    if (!beginAction(key)) return;
     setFeedback(null);
     try {
       const payload = await requestJson<EvolutionActionResponse>(path, init);
       setQrCode(payload.qrCode ?? qrCode);
       setFeedback({ tone: payload.ok ? "ok" : "warn", message: `${label}: ${payload.message || statusPt(payload.status)}` });
-      await refreshAll();
+      await refreshAll({ force: true });
     } catch (error) {
       setFeedback({ tone: "warn", message: error instanceof Error ? error.message : `Falha em ${label}.` });
     } finally {
-      setBusy(null);
+      endAction();
     }
   }
 
@@ -6660,31 +6674,31 @@ function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: strin
   }
 
   async function processQueue() {
-    setBusy("process-queue");
+    if (!beginAction("process-queue")) return;
     setFeedback(null);
     try {
       const payload = await requestJson<{ status: string; queued: number; sent: number; failed: number; mode: string }>("/integrations/whatsapp/root/process-queue?limit=25", { method: "POST" });
       setFeedback({ tone: payload.failed ? "warn" : "ok", message: `Fila processada: ${payload.sent} enviada(s), ${payload.failed} falha(s), ${payload.queued} ainda na fila. Modo: ${statusPt(payload.mode)}.` });
-      await refreshAll();
+      await refreshAll({ force: true });
     } catch (error) {
       setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao processar fila." });
     } finally {
-      setBusy(null);
+      endAction();
     }
   }
 
   async function retryQueueItem(id: string) {
-    setBusy(`retry-${id}`);
+    if (!beginAction(`retry-${id}`)) return;
     setFeedback(null);
     try {
       const updated = await requestJson<RootWhatsAppQueueItem>(`/integrations/whatsapp/root/queue/${id}/retry`, { method: "POST" });
       setQueue((current) => current.map((item) => item.id === id ? updated : item));
       setFeedback({ tone: "ok", message: `Reenvio reaberto para ${maskPhone(updated.destination)}.` });
-      await refreshAll();
+      await refreshAll({ force: true });
     } catch (error) {
       setFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Falha ao reagendar envio." });
     } finally {
-      setBusy(null);
+      endAction();
     }
   }
 
@@ -6708,6 +6722,11 @@ function EvolutionWhatsAppPanel({ token, initialWhatsAppStatus }: { token: strin
       </div>
 
       {feedback ? <FeedbackBanner tone={feedback.tone} message={feedback.message} /> : null}
+      {busy ? (
+        <div className="mb-4 border border-orange-400/25 bg-orange-950/15 px-4 py-3 text-sm text-orange-100">
+          Ação em andamento: {statusPt(busy)}. Aguarde concluir antes de iniciar outra conexão.
+        </div>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="border border-zinc-800 bg-black/35 p-4">

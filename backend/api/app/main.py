@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import hmac
+from threading import Lock
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -115,6 +116,7 @@ app = FastAPI(title="Vulcan API", version="0.1.0")
 AGENT_GATEWAY_VERSION = "0.1.0"
 settings = get_settings()
 logger = logging.getLogger("vulcan.api")
+evolution_connection_lock = Lock()
 
 app.add_middleware(
     CORSMiddleware,
@@ -964,8 +966,19 @@ def evolution_qr(
     settings = get_settings()
     if settings.root_whatsapp_provider != "evolution" or settings.root_whatsapp_mock_mode:
         return EvolutionActionResponse(ok=False, status="disabled", message="Ative Evolution com mock desligado para gerar QR Code.")
-    result = EvolutionWhatsAppProvider(settings).get_qr_code(create_if_missing=True)
-    status_payload = _evolution_status_payload(include_qr=True)
+    if not evolution_connection_lock.acquire(blocking=False):
+        status_payload = _evolution_status_payload(include_qr=True)
+        return EvolutionActionResponse(
+            ok=False,
+            status=status_payload.status,
+            message="Já existe uma tentativa de conexão/reconexão em andamento. Aguarde finalizar antes de pedir outro QR.",
+            qrCode=status_payload.qr_code,
+        )
+    try:
+        result = EvolutionWhatsAppProvider(settings).get_qr_code(create_if_missing=True)
+        status_payload = _evolution_status_payload(include_qr=True)
+    finally:
+        evolution_connection_lock.release()
     return EvolutionActionResponse(
         ok=result.ok or status_payload.connected,
         status=status_payload.status,
@@ -980,8 +993,19 @@ def evolution_reconnect(
     repo: VulcanRepository = Depends(repository),
 ) -> EvolutionActionResponse:
     require_system_integration_owner(repo, context)
-    result = EvolutionWhatsAppProvider(get_settings()).reconnect()
-    status_payload = _evolution_status_payload(include_qr=True)
+    if not evolution_connection_lock.acquire(blocking=False):
+        status_payload = _evolution_status_payload(include_qr=True)
+        return EvolutionActionResponse(
+            ok=False,
+            status=status_payload.status,
+            message="Já existe uma tentativa de conexão/reconexão em andamento. Aguarde finalizar antes de reconectar.",
+            qrCode=status_payload.qr_code,
+        )
+    try:
+        result = EvolutionWhatsAppProvider(get_settings()).reconnect()
+        status_payload = _evolution_status_payload(include_qr=True)
+    finally:
+        evolution_connection_lock.release()
     return EvolutionActionResponse(
         ok=result.ok,
         status=status_payload.status,
