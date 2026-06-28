@@ -3,6 +3,7 @@ from __future__ import annotations
 import smtplib
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.message import EmailMessage
 
 from app.config import Settings, get_settings
 
@@ -221,4 +222,21 @@ class EmailNotificationService:
             return delivery
         if not to:
             return EmailDelivery(False, "missing_destination", "email:sem_destinatario", "Informe um destinatário de e-mail.")
-        return EmailDelivery(True, "mocked" if self.settings.email_delivery_mode != "live" else "ready", f"email:teste_preparado:{to}", f"E-mail de teste preparado para {to}: {subject} - {message[:100]}")
+        if self.settings.email_delivery_mode != "live":
+            return EmailDelivery(True, "mocked", f"email:teste_preparado:{to}", f"E-mail de teste preparado para {to}: {subject} - {message[:100]}")
+        if (provider or self.settings.email_provider or "smtp").lower() != "smtp":
+            return EmailDelivery(False, "unsupported_provider", "email:envio_real_indisponivel", "Envio real está implementado para SMTP.")
+        try:
+            email = EmailMessage()
+            email["From"] = self.settings.email_from or self.settings.smtp_user or ""
+            email["To"] = to
+            email["Subject"] = subject
+            email.set_content(message)
+            with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port or 587, timeout=12) as client:
+                client.ehlo()
+                client.starttls()
+                client.login(self.settings.smtp_user or "", self.settings.smtp_pass or "")
+                client.send_message(email)
+            return EmailDelivery(True, "sent", f"smtp:sent:{to}", f"E-mail de teste enviado para {to}.")
+        except Exception as exc:  # pragma: no cover - depends on external SMTP
+            return EmailDelivery(False, "failed", "smtp:falha_envio", f"Falha ao enviar e-mail SMTP: {exc}")
