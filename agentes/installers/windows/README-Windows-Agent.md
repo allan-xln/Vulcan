@@ -20,6 +20,7 @@ Coletas sensíveis ficam desligadas por padrão:
 
 - título da janela;
 - domínio/URL do navegador;
+- histórico recente do navegador;
 - lista de processos.
 
 ## O Que Coleta
@@ -41,7 +42,37 @@ Coletas sensíveis ficam desligadas por padrão:
 - erros do agente;
 - IP local;
 - memória aproximada do agente;
-- política de coleta em uso.
+- política de coleta em uso;
+- qualidade da máquina: memória, pagefile, disco, CPU count e top processos quando permitido;
+- domínio e URL sanitizada, sem querystring/fragmento, quando permitido;
+- histórico recente de Chrome, Edge, Brave, Chromium e Firefox, quando permitido;
+- sinal técnico de domínio adulto por padrões conhecidos.
+
+O modo corporativo liga a coleta máxima suportada sem keylogger, screenshots, áudio, webcam, clipboard, cookies ou tokens:
+
+```powershell
+.\install.ps1 `
+  -TenantId "00000000-0000-0000-0000-000000000301" `
+  -BackendUrl "http://localhost:3001" `
+  -EnrollmentToken "vulcan-local-enrollment-token" `
+  -LinkedUser "teste" `
+  -MembershipId "00000000-0000-0000-0000-000000300005" `
+  -RoleLevel "user" `
+  -Department "Operacoes" `
+  -CorporateMonitoring
+```
+
+Esse modo habilita:
+
+- `collectWindowTitle=true`
+- `collectBrowserDomain=true`
+- `collectBrowserUrl=true`
+- `collectBrowserHistory=true`
+- `collectBrowserPageTitle=true`
+- `collectProcessList=true`
+- `privacyMode=corporate`
+
+As URLs coletadas removem querystring e fragmento. Exemplo: `https://site.com/pagina?token=...#x` vira `https://site.com/pagina`.
 
 ## Instalação Local
 
@@ -60,7 +91,7 @@ cd C:\Caminho\Para\VulcanAgent-Windows-x64
   -Department "Operacoes"
 ```
 
-Com título da janela habilitado por política:
+Com título da janela habilitado por política, sem modo corporativo completo:
 
 ```powershell
 .\install.ps1 `
@@ -79,7 +110,7 @@ Com título da janela habilitado por política:
 Distribua `VulcanAgent-Windows-x64.zip` por GPO, Intune, SCCM ou RMM:
 
 ```cmd
-install-gpo.cmd -TenantId "TENANT_UUID" -BackendUrl "https://api.suaempresa.com" -EnrollmentToken "TOKEN_DO_TENANT" -RoleLevel "Operador" -Department "Operacoes"
+install-gpo.cmd -TenantId "TENANT_UUID" -BackendUrl "https://api.suaempresa.com" -EnrollmentToken "TOKEN_DO_TENANT" -RoleLevel "Operador" -Department "Operacoes" -CorporateMonitoring
 ```
 
 ## Operação
@@ -101,6 +132,12 @@ Reiniciar:
 
 ```powershell
 Restart-Service VulcanAgent
+```
+
+Ativar modo corporativo em uma instalação existente:
+
+```powershell
+.\enable-corporate-monitoring.ps1
 ```
 
 Testar conexão:

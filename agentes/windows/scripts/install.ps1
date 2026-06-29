@@ -15,6 +15,11 @@ param(
   [string]$ManagerMembershipId = "",
   [string]$Note = "",
   [switch]$CollectWindowTitle,
+  [switch]$CollectBrowserDomain,
+  [switch]$CollectBrowserUrl,
+  [switch]$CollectBrowserHistory,
+  [switch]$CollectProcessList,
+  [switch]$CorporateMonitoring,
   [switch]$NoElevationPrompt
 )
 
@@ -44,6 +49,21 @@ $agentArgs = @(
 
 if ($CollectWindowTitle) {
   $agentArgs += "-CollectWindowTitle"
+}
+if ($CollectBrowserDomain) {
+  $agentArgs += "-CollectBrowserDomain"
+}
+if ($CollectBrowserUrl) {
+  $agentArgs += "-CollectBrowserUrl"
+}
+if ($CollectBrowserHistory) {
+  $agentArgs += "-CollectBrowserHistory"
+}
+if ($CollectProcessList) {
+  $agentArgs += "-CollectProcessList"
+}
+if ($CorporateMonitoring) {
+  $agentArgs += "-CorporateMonitoring"
 }
 
 if ($NoElevationPrompt) {

@@ -9,7 +9,7 @@ if [[ ! -x "${GO_BIN}" ]]; then
 fi
 
 if [[ -z "${GO_BIN}" ]]; then
-  echo "Go was not found. Install Go 1.22+ or keep the portable toolchain at .tools/go." >&2
+  echo "Go was not found. Install Go 1.25+ or keep the portable toolchain at .tools/go." >&2
   exit 1
 fi
 

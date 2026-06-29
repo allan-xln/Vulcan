@@ -8,6 +8,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,14 +18,18 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 	"unsafe"
+
+	_ "modernc.org/sqlite"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
@@ -42,9 +48,14 @@ type AgentPolicy struct {
 	CollectSessionEvents     bool   `json:"collectSessionEvents"`
 	CollectBrowserDomain     bool   `json:"collectBrowserDomain"`
 	CollectBrowserURL        bool   `json:"collectBrowserUrl"`
+	CollectBrowserHistory    bool   `json:"collectBrowserHistory"`
+	CollectBrowserPageTitle  bool   `json:"collectBrowserPageTitle"`
 	CollectProcessList       bool   `json:"collectProcessList"`
 	CollectSystemMetrics     bool   `json:"collectSystemMetrics"`
 	RedactSensitiveTerms     bool   `json:"redactSensitiveTerms"`
+	BrowserHistoryInterval   int    `json:"browserHistoryIntervalSeconds"`
+	BrowserHistoryLookback   int    `json:"browserHistoryLookbackMinutes"`
+	BrowserHistoryMaxEvents  int    `json:"browserHistoryMaxEvents"`
 	SyncIntervalSeconds      int    `json:"syncIntervalSeconds"`
 	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds"`
 	OfflineQueueEnabled      bool   `json:"offlineQueueEnabled"`
@@ -160,6 +171,37 @@ type logsRequest struct {
 	Logs               []logEntry `json:"logs"`
 }
 
+type browserProfile struct {
+	Browser string
+	Engine  string
+	Profile string
+	Path    string
+}
+
+type browserVisit struct {
+	URL       string
+	Title     string
+	VisitedAt time.Time
+}
+
+type browserHistoryState struct {
+	Seen            []string `json:"seen"`
+	LastCollectedAt string   `json:"lastCollectedAt,omitempty"`
+}
+
+const windowsEpochOffsetSeconds = 11644473600
+
+var sensitivePatterns = []string{
+	"password", "senha", "secret", "token", "cookie", "login", "log in", "sign in",
+	"whatsapp", "telegram", "signal", "bank", "banco", "cpf", "cnpj", "cartao", "card",
+	"private", "privado", "confidential", "confidencial",
+}
+
+var adultDomainPatterns = []string{
+	"porn", "xvideos", "xnxx", "xhamster", "redtube", "youporn", "tube8", "spankbang",
+	"brazzers", "sex", "adult", "onlyfans", "privacy.com.br",
+}
+
 type agentService struct {
 	configPath string
 }
@@ -238,6 +280,11 @@ func installCommand(args []string) error {
 	managerMembershipID := fs.String("ManagerMembershipId", "", "optional manager membership UUID")
 	note := fs.String("Note", "", "installation note")
 	collectWindowTitle := fs.Bool("CollectWindowTitle", false, "collect active window title after privacy filtering")
+	collectBrowserDomain := fs.Bool("CollectBrowserDomain", false, "collect browser domain when available by policy")
+	collectBrowserURL := fs.Bool("CollectBrowserUrl", false, "collect browser URL without querystring or fragment")
+	collectBrowserHistory := fs.Bool("CollectBrowserHistory", false, "collect recent browser history with sanitized URL")
+	collectProcessList := fs.Bool("CollectProcessList", false, "collect summarized process list and use process fallback")
+	corporateMonitoring := fs.Bool("CorporateMonitoring", false, "enable maximum corporate monitoring policy without keystrokes, screenshots, audio, webcam, clipboard, cookies or tokens")
 	syncInterval := fs.Int("SyncInterval", 30, "sync interval in seconds")
 	heartbeatInterval := fs.Int("HeartbeatInterval", 60, "heartbeat interval in seconds")
 	installDir := fs.String("InstallDir", defaultInstallDir(), "install directory")
@@ -264,6 +311,19 @@ func installCommand(args []string) error {
 		return err
 	}
 
+	policy := defaultAgentPolicy(*collectWindowTitle, maxInt(*syncInterval, 15), maxInt(*heartbeatInterval, 15), *corporateMonitoring)
+	if *collectBrowserDomain {
+		policy.CollectBrowserDomain = true
+	}
+	if *collectBrowserURL {
+		policy.CollectBrowserURL = true
+	}
+	if *collectBrowserHistory {
+		policy.CollectBrowserHistory = true
+	}
+	if *collectProcessList {
+		policy.CollectProcessList = true
+	}
 	cfg := Config{
 		BackendURL:               strings.TrimRight(*backendURL, "/"),
 		TenantID:                 *tenantID,
@@ -280,8 +340,8 @@ func installCommand(args []string) error {
 		Department:               *department,
 		ManagerMembershipID:      *managerMembershipID,
 		Note:                     *note,
-		CollectWindowTitle:       *collectWindowTitle,
-		Policy:                   defaultAgentPolicy(*collectWindowTitle, maxInt(*syncInterval, 15), maxInt(*heartbeatInterval, 15)),
+		CollectWindowTitle:       *collectWindowTitle || *corporateMonitoring,
+		Policy:                   policy,
 		HeartbeatIntervalSeconds: maxInt(*heartbeatInterval, 15),
 		SyncIntervalSeconds:      maxInt(*syncInterval, 15),
 		InstalledAt:              time.Now().UTC().Format(time.RFC3339),
@@ -364,7 +424,14 @@ func statusCommand(args []string) error {
 	fmt.Printf("Department: %s\n", cfg.Department)
 	fmt.Printf("CollectWindowTitle: %t\n", effectivePolicy(cfg).CollectWindowTitle)
 	fmt.Printf("CollectIdleTime: %t\n", effectivePolicy(cfg).CollectIdleTime)
+	fmt.Printf("CollectBrowserDomain: %t\n", effectivePolicy(cfg).CollectBrowserDomain)
+	fmt.Printf("CollectBrowserUrl: %t\n", effectivePolicy(cfg).CollectBrowserURL)
+	fmt.Printf("CollectBrowserHistory: %t\n", effectivePolicy(cfg).CollectBrowserHistory)
 	fmt.Printf("CollectProcessList: %t\n", effectivePolicy(cfg).CollectProcessList)
+	fmt.Printf("PrivacyMode: %s\n", effectivePolicy(cfg).PrivacyMode)
+	machine, _ := machineHealth(effectivePolicy(cfg))
+	machineJSON, _ := json.Marshal(machine)
+	fmt.Printf("MachineHealth: %s\n", string(machineJSON))
 	fmt.Printf("QueueDepth: %d\n\n", depth)
 	output, _ := exec.Command("sc.exe", "query", serviceName).CombinedOutput()
 	fmt.Println(strings.TrimSpace(string(output)))
@@ -431,21 +498,26 @@ func runServiceLoop(ctx context.Context, cfg Config) {
 	for {
 		select {
 		case <-ctx.Done():
-			_ = sendHeartbeat(cfg, "offline", queueDepth(defaultQueuePath()), "", map[string]interface{}{"collectionQuality": "high", "localIp": localIP()})
+			machine, _ := machineHealth(policy)
+			_ = sendHeartbeat(cfg, "offline", queueDepth(defaultQueuePath()), "", map[string]interface{}{"collectionQuality": "high", "localIp": localIP(), "machine": machine})
 			logLocal("info", "service loop stopped", nil)
 			return
 		case <-heartbeatTicker.C:
+			machine, _ := machineHealth(policy)
 			if err := sendHeartbeat(cfg, "online", queueDepth(defaultQueuePath()), lastErr, map[string]interface{}{
 				"collectionQuality": "high",
 				"collectionMethod":  "win32-foreground-window",
 				"localIp":           localIP(),
 				"agentMemoryMb":     agentMemoryMb(),
+				"machine":           machine,
 				"policy": map[string]interface{}{
-					"collectWindowTitle": policy.CollectWindowTitle,
-					"collectIdleTime":    policy.CollectIdleTime,
-					"collectBrowserUrl":  policy.CollectBrowserURL,
-					"collectProcessList": policy.CollectProcessList,
-					"privacyMode":        policy.PrivacyMode,
+					"collectWindowTitle":    policy.CollectWindowTitle,
+					"collectIdleTime":       policy.CollectIdleTime,
+					"collectBrowserDomain":  policy.CollectBrowserDomain,
+					"collectBrowserUrl":     policy.CollectBrowserURL,
+					"collectBrowserHistory": policy.CollectBrowserHistory,
+					"collectProcessList":    policy.CollectProcessList,
+					"privacyMode":           policy.PrivacyMode,
 				},
 			}); err != nil {
 				lastErr = err.Error()
@@ -504,7 +576,9 @@ func heartbeatCommand() error {
 	if err != nil {
 		return err
 	}
-	return sendHeartbeat(cfg, "online", queueDepth(defaultQueuePath()), "", map[string]interface{}{"collectionQuality": "high", "collectionMethod": "manual"})
+	policy := effectivePolicy(cfg)
+	machine, _ := machineHealth(policy)
+	return sendHeartbeat(cfg, "online", queueDepth(defaultQueuePath()), "", map[string]interface{}{"collectionQuality": "high", "collectionMethod": "manual", "machine": machine})
 }
 
 func syncCommand() error {
@@ -525,6 +599,7 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 	startedAt := time.Now().UTC()
 	var idleStartedAt time.Time
 	wasIdle := false
+	lastBrowserHistory := time.Time{}
 
 	record := func(endedAt time.Time, eventType string, metadata map[string]interface{}) {
 		if lastApp == "" {
@@ -533,6 +608,30 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 		duration := int64(endedAt.Sub(startedAt).Seconds())
 		if duration < 1 && eventType != "context_switch" {
 			return
+		}
+		browserDomain, browserURL, adultSignal := normalizeBrowserURL(lastTitle, policy.CollectBrowserURL, policy.CollectBrowserDomain)
+		eventMetadata := map[string]interface{}{
+			"collector": "windows-session",
+			"quality":   "high",
+			"method":    "win32-foreground-window",
+			"privacy": map[string]interface{}{
+				"keystrokes":  false,
+				"screenshots": false,
+				"clipboard":   false,
+				"audio":       false,
+				"webcam":      false,
+			},
+		}
+		if browserDomain != "" {
+			eventMetadata["browserDomain"] = browserDomain
+		}
+		if browserURL != "" {
+			eventMetadata["browserUrl"] = browserURL
+			eventMetadata["urlQueryCollected"] = false
+			eventMetadata["urlFragmentCollected"] = false
+		}
+		if adultSignal {
+			eventMetadata["adultContentSignal"] = true
 		}
 		event := AgentEvent{
 			EventID:         uuidV4(),
@@ -544,18 +643,7 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 			EndedAt:         endedAt.Format(time.RFC3339),
 			DurationSeconds: duration,
 			OSUser:          cfg.OSUser,
-			Metadata: map[string]interface{}{
-				"collector": "windows-session",
-				"quality":   "high",
-				"method":    "win32-foreground-window",
-				"privacy": map[string]interface{}{
-					"keystrokes":  false,
-					"screenshots": false,
-					"clipboard":   false,
-					"audio":       false,
-					"webcam":      false,
-				},
-			},
+			Metadata:        eventMetadata,
 		}
 		for key, value := range metadata {
 			event.Metadata[key] = value
@@ -573,6 +661,18 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 			return nil
 		case <-ticker.C:
 			now := time.Now().UTC()
+			if policy.CollectBrowserHistory && (lastBrowserHistory.IsZero() || now.Sub(lastBrowserHistory) >= time.Duration(policy.BrowserHistoryInterval)*time.Second) {
+				events, err := collectBrowserHistoryEvents(cfg, policy, now)
+				if err != nil {
+					logLocal("warn", "browser history collection failed: "+err.Error(), nil)
+				}
+				for _, event := range events {
+					if err := appendEvent(defaultQueuePath(), event); err != nil {
+						logLocal("error", "failed to queue browser event: "+err.Error(), nil)
+					}
+				}
+				lastBrowserHistory = now
+			}
 			if policy.CollectIdleTime {
 				idle := idleSeconds()
 				isIdle := idle >= int64(policy.IdleThresholdSeconds)
@@ -699,6 +799,326 @@ func idleSeconds() int64 {
 		return 0
 	}
 	return int64((uint64(tick) - uint64(info.DwTime)) / 1000)
+}
+
+func collectBrowserHistoryEvents(cfg Config, policy AgentPolicy, now time.Time) ([]AgentEvent, error) {
+	if !policy.CollectBrowserHistory || (!policy.CollectBrowserDomain && !policy.CollectBrowserURL) {
+		return nil, nil
+	}
+	lookback := maxInt(policy.BrowserHistoryLookback, 60)
+	maxEvents := maxInt(policy.BrowserHistoryMaxEvents, 50)
+	if maxEvents > 250 {
+		maxEvents = 250
+	}
+	since := now.Add(-time.Duration(lookback) * time.Minute)
+	state := readBrowserHistoryState()
+	seen := map[string]bool{}
+	for _, key := range state.Seen {
+		seen[key] = true
+	}
+	var events []AgentEvent
+	for _, profile := range browserProfiles() {
+		remaining := maxEvents - len(events)
+		if remaining <= 0 {
+			break
+		}
+		var visits []browserVisit
+		var err error
+		if profile.Engine == "chromium" {
+			visits, err = fetchChromiumHistory(profile, since, remaining*3)
+		} else {
+			visits, err = fetchFirefoxHistory(profile, since, remaining*3)
+		}
+		if err != nil {
+			logLocal("warn", "browser history read failed: "+err.Error(), map[string]interface{}{"browser": profile.Browser, "profile": profile.Profile})
+			continue
+		}
+		for _, visit := range visits {
+			domain, safeURL, adultSignal := normalizeBrowserURL(visit.URL, policy.CollectBrowserURL, policy.CollectBrowserDomain)
+			if domain == "" && safeURL == "" {
+				continue
+			}
+			key := browserVisitKey(profile.Browser, profile.Profile, visit.VisitedAt, safeURL, domain)
+			if seen[key] {
+				continue
+			}
+			title := sanitizeTitle(visit.Title, policy.CollectBrowserPageTitle && policy.CollectWindowTitle)
+			event := AgentEvent{
+				EventID:         uuidV4(),
+				EventType:       "browser_history_visit",
+				AppName:         profile.Browser,
+				WindowTitle:     title,
+				Category:        map[bool]string{true: "navegador_adulto", false: "navegador"}[adultSignal],
+				StartedAt:       visit.VisitedAt.Format(time.RFC3339),
+				EndedAt:         visit.VisitedAt.Format(time.RFC3339),
+				DurationSeconds: 0,
+				OSUser:          cfg.OSUser,
+				Metadata: map[string]interface{}{
+					"collector":              "windows-browser-history",
+					"quality":                "high",
+					"method":                 profile.Engine + "-history",
+					"browser":                profile.Browser,
+					"browserProfile":         profile.Profile,
+					"browserDomain":          domain,
+					"browserUrl":             safeURL,
+					"adultContentSignal":     adultSignal,
+					"urlQueryCollected":      false,
+					"urlFragmentCollected":   false,
+					"historyLookbackMinutes": lookback,
+					"privacy": map[string]interface{}{
+						"keystrokes":  false,
+						"screenshots": false,
+						"clipboard":   false,
+						"audio":       false,
+						"webcam":      false,
+						"cookies":     false,
+						"tokens":      false,
+					},
+				},
+			}
+			events = append(events, event)
+			seen[key] = true
+			if len(events) >= maxEvents {
+				break
+			}
+		}
+	}
+	if len(events) > 0 {
+		state.Seen = keysFromSeen(seen, 10000)
+		state.LastCollectedAt = now.Format(time.RFC3339)
+		_ = saveBrowserHistoryState(state)
+		logLocal("info", "browser history collected", map[string]interface{}{"events": len(events)})
+	}
+	return events, nil
+}
+
+func browserProfiles() []browserProfile {
+	localAppData := os.Getenv("LOCALAPPDATA")
+	appData := os.Getenv("APPDATA")
+	var profiles []browserProfile
+	chromiumRoots := []struct {
+		browser string
+		root    string
+	}{
+		{"Google Chrome", filepath.Join(localAppData, "Google", "Chrome", "User Data")},
+		{"Microsoft Edge", filepath.Join(localAppData, "Microsoft", "Edge", "User Data")},
+		{"Brave", filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "User Data")},
+		{"Chromium", filepath.Join(localAppData, "Chromium", "User Data")},
+	}
+	for _, item := range chromiumRoots {
+		if item.root == "" {
+			continue
+		}
+		matches, _ := filepath.Glob(filepath.Join(item.root, "*", "History"))
+		for _, path := range matches {
+			profile := filepath.Base(filepath.Dir(path))
+			if strings.EqualFold(profile, "Crashpad") || strings.EqualFold(profile, "ShaderCache") {
+				continue
+			}
+			profiles = append(profiles, browserProfile{Browser: item.browser, Engine: "chromium", Profile: profile, Path: path})
+		}
+	}
+	if appData != "" {
+		matches, _ := filepath.Glob(filepath.Join(appData, "Mozilla", "Firefox", "Profiles", "*", "places.sqlite"))
+		for _, path := range matches {
+			profiles = append(profiles, browserProfile{Browser: "Firefox", Engine: "firefox", Profile: filepath.Base(filepath.Dir(path)), Path: path})
+		}
+	}
+	return profiles
+}
+
+func fetchChromiumHistory(profile browserProfile, since time.Time, limit int) ([]browserVisit, error) {
+	copied, cleanup, err := copySQLiteDatabase(profile.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	db, err := sql.Open("sqlite", copied)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	threshold := (since.Unix() + windowsEpochOffsetSeconds) * 1000000
+	rows, err := db.Query(`
+		select urls.url, coalesce(urls.title, ''), visits.visit_time
+		from visits
+		join urls on urls.id = visits.url
+		where visits.visit_time >= ?
+		order by visits.visit_time desc
+		limit ?`, threshold, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var visits []browserVisit
+	for rows.Next() {
+		var rawURL, title string
+		var visitedRaw int64
+		if err := rows.Scan(&rawURL, &title, &visitedRaw); err != nil {
+			continue
+		}
+		visits = append(visits, browserVisit{URL: rawURL, Title: title, VisitedAt: chromeTimeToTime(visitedRaw)})
+	}
+	return visits, rows.Err()
+}
+
+func fetchFirefoxHistory(profile browserProfile, since time.Time, limit int) ([]browserVisit, error) {
+	copied, cleanup, err := copySQLiteDatabase(profile.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	db, err := sql.Open("sqlite", copied)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	threshold := since.Unix() * 1000000
+	rows, err := db.Query(`
+		select moz_places.url, coalesce(moz_places.title, ''), moz_historyvisits.visit_date
+		from moz_historyvisits
+		join moz_places on moz_places.id = moz_historyvisits.place_id
+		where moz_historyvisits.visit_date >= ?
+		order by moz_historyvisits.visit_date desc
+		limit ?`, threshold, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var visits []browserVisit
+	for rows.Next() {
+		var rawURL, title string
+		var visitedRaw int64
+		if err := rows.Scan(&rawURL, &title, &visitedRaw); err != nil {
+			continue
+		}
+		visits = append(visits, browserVisit{URL: rawURL, Title: title, VisitedAt: time.UnixMicro(visitedRaw).UTC()})
+	}
+	return visits, rows.Err()
+}
+
+func copySQLiteDatabase(source string) (string, func(), error) {
+	if source == "" {
+		return "", func() {}, errors.New("empty sqlite source")
+	}
+	tmp, err := os.CreateTemp("", "vulcan-browser-*.sqlite")
+	if err != nil {
+		return "", func() {}, err
+	}
+	tmpPath := tmp.Name()
+	_ = tmp.Close()
+	if err := copyFile(source, tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", func() {}, err
+	}
+	return tmpPath, func() { _ = os.Remove(tmpPath) }, nil
+}
+
+func chromeTimeToTime(value int64) time.Time {
+	seconds := (value / 1000000) - windowsEpochOffsetSeconds
+	micros := value % 1000000
+	return time.Unix(seconds, micros*1000).UTC()
+}
+
+func normalizeBrowserURL(raw string, collectURL bool, collectDomain bool) (string, string, bool) {
+	if raw == "" || (!collectURL && !collectDomain) {
+		return "", "", false
+	}
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(strings.ToLower(raw), "http://") && !strings.HasPrefix(strings.ToLower(raw), "https://") {
+		if index := strings.Index(strings.ToLower(raw), "https://"); index >= 0 {
+			raw = raw[index:]
+		} else if index := strings.Index(strings.ToLower(raw), "http://"); index >= 0 {
+			raw = raw[index:]
+		} else {
+			return "", "", false
+		}
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", "", false
+	}
+	domain := strings.ToLower(parsed.Hostname())
+	if domain == "" {
+		return "", "", false
+	}
+	adultSignal := isAdultDomain(domain)
+	path := parsed.EscapedPath()
+	if containsSensitive(path) {
+		path = "/"
+	}
+	safeURL := ""
+	if collectURL {
+		safeURL = parsed.Scheme + "://" + domain + path
+		if len(safeURL) > 500 {
+			safeURL = safeURL[:500]
+		}
+	}
+	if !collectDomain {
+		domain = ""
+	}
+	return domain, safeURL, adultSignal
+}
+
+func containsSensitive(value string) bool {
+	lower := strings.ToLower(value)
+	for _, pattern := range sensitivePatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAdultDomain(domain string) bool {
+	normalized := strings.TrimPrefix(strings.ToLower(domain), "www.")
+	for _, pattern := range adultDomainPatterns {
+		if strings.Contains(normalized, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func browserVisitKey(browser string, profile string, visitedAt time.Time, safeURL string, domain string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{browser, profile, visitedAt.Format(time.RFC3339Nano), safeURL, domain}, "|")))
+	return hex.EncodeToString(sum[:])
+}
+
+func browserHistoryStatePath() string {
+	return filepath.Join(defaultDataDir(), "browser-history-state.json")
+}
+
+func readBrowserHistoryState() browserHistoryState {
+	data, err := os.ReadFile(browserHistoryStatePath())
+	if err != nil {
+		return browserHistoryState{}
+	}
+	var state browserHistoryState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return browserHistoryState{}
+	}
+	return state
+}
+
+func saveBrowserHistoryState(state browserHistoryState) error {
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(browserHistoryStatePath(), data, 0640)
+}
+
+func keysFromSeen(seen map[string]bool, max int) []string {
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > max {
+		keys = keys[len(keys)-max:]
+	}
+	return keys
 }
 
 func sendEnrollment(cfg Config) error {
@@ -1115,6 +1535,117 @@ func agentMemoryMb() uint64 {
 	return stats.Sys / 1024 / 1024
 }
 
+func machineHealth(policy AgentPolicy) (map[string]interface{}, error) {
+	health := map[string]interface{}{
+		"cpuCount": os.Getenv("NUMBER_OF_PROCESSORS"),
+	}
+	if runtime.NumCPU() > 0 {
+		health["cpuCount"] = runtime.NumCPU()
+	}
+	for key, value := range memoryHealth() {
+		health[key] = value
+	}
+	for key, value := range diskHealth() {
+		health[key] = value
+	}
+	if policy.CollectProcessList {
+		health["topProcesses"] = topProcesses(8)
+	}
+	return health, nil
+}
+
+func memoryHealth() map[string]interface{} {
+	type memoryStatusEx struct {
+		Length               uint32
+		MemoryLoad           uint32
+		TotalPhys            uint64
+		AvailPhys            uint64
+		TotalPageFile        uint64
+		AvailPageFile        uint64
+		TotalVirtual         uint64
+		AvailVirtual         uint64
+		AvailExtendedVirtual uint64
+	}
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	proc := kernel32.NewProc("GlobalMemoryStatusEx")
+	status := memoryStatusEx{Length: uint32(unsafe.Sizeof(memoryStatusEx{}))}
+	ret, _, _ := proc.Call(uintptr(unsafe.Pointer(&status)))
+	if ret == 0 || status.TotalPhys == 0 {
+		return map[string]interface{}{}
+	}
+	return map[string]interface{}{
+		"memoryTotalMb":     status.TotalPhys / 1024 / 1024,
+		"memoryAvailableMb": status.AvailPhys / 1024 / 1024,
+		"memoryUsedPercent": roundOne(float64(status.MemoryLoad)),
+		"pageFileTotalMb":   status.TotalPageFile / 1024 / 1024,
+		"pageFileUsedMb":    (status.TotalPageFile - status.AvailPageFile) / 1024 / 1024,
+	}
+}
+
+func diskHealth() map[string]interface{} {
+	root := os.Getenv("SystemDrive")
+	if root == "" {
+		root = "C:"
+	}
+	if !strings.HasSuffix(root, `\`) {
+		root += `\`
+	}
+	var freeAvailable, total, free uint64
+	err := windows.GetDiskFreeSpaceEx(windows.StringToUTF16Ptr(root), &freeAvailable, &total, &free)
+	if err != nil || total == 0 {
+		return map[string]interface{}{}
+	}
+	used := total - free
+	return map[string]interface{}{
+		"diskPath":        root,
+		"diskTotalGb":     roundOne(float64(total) / 1024 / 1024 / 1024),
+		"diskFreeGb":      roundOne(float64(free) / 1024 / 1024 / 1024),
+		"diskUsedPercent": roundOne(float64(used) * 100 / float64(total)),
+	}
+}
+
+func topProcesses(limit int) []map[string]interface{} {
+	cmd := exec.Command("tasklist.exe", "/FO", "CSV", "/NH")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	reader := csv.NewReader(strings.NewReader(string(output)))
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil
+	}
+	type processRow struct {
+		name string
+		mem  int
+	}
+	var rows []processRow
+	for _, record := range records {
+		if len(record) < 5 {
+			continue
+		}
+		memRaw := strings.NewReplacer("K", "", ".", "", ",", "", " ", "").Replace(record[4])
+		var mem int
+		fmt.Sscanf(memRaw, "%d", &mem)
+		if record[0] != "" {
+			rows = append(rows, processRow{name: record[0], mem: mem})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].mem > rows[j].mem })
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	result := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, map[string]interface{}{"name": row.name, "memoryKb": row.mem})
+	}
+	return result
+}
+
+func roundOne(value float64) float64 {
+	return float64(int(value*10+0.5)) / 10
+}
+
 func defaultInstallDir() string {
 	if value := os.Getenv("ProgramFiles"); value != "" {
 		return filepath.Join(value, "Vulcan", "Agent")
@@ -1194,17 +1725,22 @@ func maxInt(value int, minimum int) int {
 	return value
 }
 
-func defaultAgentPolicy(collectWindowTitle bool, syncInterval int, heartbeatInterval int) AgentPolicy {
-	return AgentPolicy{
+func defaultAgentPolicy(collectWindowTitle bool, syncInterval int, heartbeatInterval int, corporateMonitoring bool) AgentPolicy {
+	policy := AgentPolicy{
 		CollectAppName:           true,
 		CollectWindowTitle:       collectWindowTitle,
 		CollectIdleTime:          true,
 		CollectSessionEvents:     true,
 		CollectBrowserDomain:     false,
 		CollectBrowserURL:        false,
+		CollectBrowserHistory:    false,
+		CollectBrowserPageTitle:  false,
 		CollectProcessList:       false,
 		CollectSystemMetrics:     true,
 		RedactSensitiveTerms:     true,
+		BrowserHistoryInterval:   300,
+		BrowserHistoryLookback:   60,
+		BrowserHistoryMaxEvents:  50,
 		SyncIntervalSeconds:      maxInt(syncInterval, 15),
 		HeartbeatIntervalSeconds: maxInt(heartbeatInterval, 15),
 		OfflineQueueEnabled:      true,
@@ -1214,12 +1750,25 @@ func defaultAgentPolicy(collectWindowTitle bool, syncInterval int, heartbeatInte
 		PrivacyMode:              "standard",
 		IdleThresholdSeconds:     300,
 	}
+	if corporateMonitoring {
+		policy.CollectWindowTitle = true
+		policy.CollectBrowserDomain = true
+		policy.CollectBrowserURL = true
+		policy.CollectBrowserHistory = true
+		policy.CollectBrowserPageTitle = true
+		policy.CollectProcessList = true
+		policy.AllowUserPause = false
+		policy.PrivacyMode = "corporate"
+		policy.BrowserHistoryLookback = 120
+		policy.BrowserHistoryMaxEvents = 100
+	}
+	return policy
 }
 
 func effectivePolicy(cfg Config) AgentPolicy {
 	policy := cfg.Policy
 	if !policy.CollectAppName && policy.PrivacyMode == "" {
-		policy = defaultAgentPolicy(cfg.CollectWindowTitle, cfg.SyncIntervalSeconds, cfg.HeartbeatIntervalSeconds)
+		policy = defaultAgentPolicy(cfg.CollectWindowTitle, cfg.SyncIntervalSeconds, cfg.HeartbeatIntervalSeconds, false)
 	}
 	if cfg.CollectWindowTitle {
 		policy.CollectWindowTitle = true
@@ -1235,6 +1784,21 @@ func effectivePolicy(cfg Config) AgentPolicy {
 	}
 	if policy.IdleThresholdSeconds < 30 {
 		policy.IdleThresholdSeconds = 300
+	}
+	if policy.BrowserHistoryInterval < 60 {
+		policy.BrowserHistoryInterval = 300
+	}
+	if policy.BrowserHistoryLookback < 5 {
+		policy.BrowserHistoryLookback = 60
+	}
+	if policy.BrowserHistoryLookback > 1440 {
+		policy.BrowserHistoryLookback = 1440
+	}
+	if policy.BrowserHistoryMaxEvents < 1 {
+		policy.BrowserHistoryMaxEvents = 50
+	}
+	if policy.BrowserHistoryMaxEvents > 250 {
+		policy.BrowserHistoryMaxEvents = 250
 	}
 	return policy
 }
