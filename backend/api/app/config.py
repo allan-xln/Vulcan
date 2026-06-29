@@ -97,6 +97,8 @@ class Settings:
     fcm_server_key: str | None
     fcm_vapid_key: str | None
     agent_enrollment_token: str
+    agent_public_backend_url: str | None
+    agent_installer_package_url: str | None
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -277,4 +279,6 @@ def get_settings() -> Settings:
         fcm_server_key=getenv("FCM_SERVER_KEY") or None,
         fcm_vapid_key=getenv("FCM_VAPID_KEY") or None,
         agent_enrollment_token=getenv("AGENT_ENROLLMENT_TOKEN", "vulcan-local-enrollment-token"),
+        agent_public_backend_url=getenv("AGENT_PUBLIC_BACKEND_URL") or None,
+        agent_installer_package_url=getenv("AGENT_INSTALLER_PACKAGE_URL") or None,
     )

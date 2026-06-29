@@ -218,6 +218,20 @@ type Device = {
   teamName?: string | null;
 };
 
+type AgentDeploymentPrepareResponse = {
+  status: "ready" | "blocked";
+  message: string;
+  tenantId: string;
+  target: string;
+  backendUrl: string;
+  packageUrl: string;
+  remoteExecutionAvailable: boolean;
+  supportedExecutors: string[];
+  powershellCommand: string;
+  gpoCommand: string;
+  nextStep: string;
+};
+
 type Team = {
   id: string;
   tenantId: string;
@@ -2818,6 +2832,7 @@ function DashboardShell({
           {activeView === "hierarchy" && (
             <HierarchyView
               key="hierarchy"
+              token={token}
               hierarchy={hierarchy}
               devices={devices}
               departments={departments}
@@ -3102,6 +3117,7 @@ function CommandOverlay({
 }
 
 function HierarchyView({
+  token,
   hierarchy,
   devices,
   departments,
@@ -3113,6 +3129,7 @@ function HierarchyView({
   onHierarchyMemberDelete,
   onDeviceAdoption
 }: {
+  token: string;
   hierarchy: HierarchyNode[];
   devices: Device[];
   departments: DepartmentOption[];
@@ -3131,6 +3148,9 @@ function HierarchyView({
   const [adoptionFeedback, setAdoptionFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [adoptingDeviceId, setAdoptingDeviceId] = useState<string | null>(null);
+  const [deploymentPreparing, setDeploymentPreparing] = useState(false);
+  const [deploymentPlan, setDeploymentPlan] = useState<AgentDeploymentPrepareResponse | null>(null);
+  const [deploymentFeedback, setDeploymentFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [adoptionAssignments, setAdoptionAssignments] = useState<Record<string, { membershipId: string; teamId: string }>>({});
   const [form, setForm] = useState<HierarchyMemberFormPayload>({
     parentId: hierarchy[0]?.id ?? null,
@@ -3379,6 +3399,42 @@ function HierarchyView({
       setAdoptionFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível adotar o dispositivo." });
     } finally {
       setAdoptingDeviceId(null);
+    }
+  }
+
+  async function prepareCorporateDeployment() {
+    if (deploymentPreparing) {
+      return;
+    }
+    try {
+      setDeploymentPreparing(true);
+      setDeploymentFeedback(null);
+      const response = await fetch(`${API_URL}/agent/deployments/prepare`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-Tenant-Id": DEMO_TENANT_ID
+        },
+        body: JSON.stringify({
+          tenantId: DEMO_TENANT_ID,
+          target: "windows_corporate"
+        })
+      });
+      const data = await response.json().catch(() => null) as AgentDeploymentPrepareResponse | { detail?: string } | null;
+      if (!response.ok || !data || !("powershellCommand" in data)) {
+        const detail = data && "detail" in data ? data.detail : null;
+        throw new Error(String(detail ?? "Não foi possível preparar o disparo."));
+      }
+      setDeploymentPlan(data);
+      setDeploymentFeedback({
+        tone: data.remoteExecutionAvailable ? "ok" : "warn",
+        message: data.message
+      });
+    } catch (error) {
+      setDeploymentFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível preparar o disparo." });
+    } finally {
+      setDeploymentPreparing(false);
     }
   }
 
@@ -3656,6 +3712,55 @@ function HierarchyView({
                   </p>
                 </div>
                 <span className="text-2xl font-semibold text-orange-200">{pendingDevices.length}</span>
+              </div>
+              <div className="mt-4 border border-orange-400/15 bg-orange-950/10 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Rollout Windows corporativo</p>
+                    <p className="mt-2 text-sm leading-6 text-zinc-400">
+                      Pacote oficial, token de enrollment e modo corporativo prontos para executor autorizado.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void prepareCorporateDeployment()}
+                    disabled={deploymentPreparing}
+                    className="inline-flex h-11 items-center gap-2 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    {deploymentPreparing ? "Preparando..." : "Preparar disparo"}
+                  </button>
+                </div>
+                {deploymentFeedback ? <FeedbackBanner tone={deploymentFeedback.tone} message={deploymentFeedback.message} /> : null}
+                {deploymentPlan ? (
+                  <div className="mt-4 grid gap-3">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <ConnectionSummary label="Backend" value={deploymentPlan.backendUrl.replace(/^https?:\/\//, "")} tone="ok" />
+                      <ConnectionSummary label="Pacote" value={deploymentPlan.packageUrl.replace(/^https?:\/\//, "")} tone="ok" />
+                      <ConnectionSummary label="Executor remoto" value={deploymentPlan.remoteExecutionAvailable ? "ativo" : "pendente"} tone={deploymentPlan.remoteExecutionAvailable ? "ok" : "warn"} />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(deploymentPlan.powershellCommand)}
+                        className="inline-flex h-10 items-center gap-2 border border-zinc-700 px-3 text-sm text-zinc-200 transition hover:border-orange-400/50"
+                      >
+                        <FileText className="h-4 w-4" />
+                        Copiar PowerShell
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(deploymentPlan.gpoCommand)}
+                        className="inline-flex h-10 items-center gap-2 border border-zinc-700 px-3 text-sm text-zinc-200 transition hover:border-orange-400/50"
+                      >
+                        <ShieldCheck className="h-4 w-4" />
+                        Copiar GPO
+                      </button>
+                    </div>
+                    <pre className="max-h-56 overflow-auto whitespace-pre-wrap border border-zinc-800 bg-black/65 p-3 text-xs leading-5 text-zinc-300">{deploymentPlan.powershellCommand}</pre>
+                    <p className="text-xs leading-5 text-zinc-500">{deploymentPlan.nextStep}</p>
+                  </div>
+                ) : null}
               </div>
               {adoptionFeedback ? <div className="mt-3"><FeedbackBanner tone={adoptionFeedback.tone} message={adoptionFeedback.message} /></div> : null}
               <div className="mt-4 grid gap-3">

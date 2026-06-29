@@ -299,6 +299,29 @@ class AgentStatusResponse(ApiModel):
     enrollment_enabled: bool = Field(alias="enrollmentEnabled")
 
 
+class AgentDeploymentPrepareRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    target: Literal["windows_corporate", "linux_corporate"] = "windows_corporate"
+    backend_url: str | None = Field(default=None, alias="backendUrl")
+    package_url: str | None = Field(default=None, alias="packageUrl")
+
+
+class AgentDeploymentPrepareResponse(ApiModel):
+    status: Literal["ready", "blocked"]
+    message: str
+    tenant_id: UUID = Field(alias="tenantId")
+    target: str
+    backend_url: str = Field(alias="backendUrl")
+    package_url: str = Field(alias="packageUrl")
+    remote_execution_available: bool = Field(alias="remoteExecutionAvailable")
+    supported_executors: list[str] = Field(alias="supportedExecutors")
+    powershell_command: str = Field(alias="powershellCommand")
+    gpo_command: str = Field(alias="gpoCommand")
+    next_step: str = Field(alias="nextStep")
+
+
 class AgentEnrollRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

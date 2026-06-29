@@ -24,6 +24,8 @@ from app.schemas import (
     ActivityEventCreateResponse,
     AgentEnrollRequest,
     AgentEnrollResponse,
+    AgentDeploymentPrepareRequest,
+    AgentDeploymentPrepareResponse,
     AgentEventsRequest,
     AgentEventsResponse,
     AgentHeartbeatRequest,
@@ -172,6 +174,75 @@ def agent_status() -> AgentStatusResponse:
         service="vulcan-agent-gateway",
         version=AGENT_GATEWAY_VERSION,
         enrollmentEnabled=bool(settings.agent_enrollment_token),
+    )
+
+
+def _agent_deployment_urls(request: AgentDeploymentPrepareRequest, http_request: Request) -> tuple[str, str]:
+    settings = get_settings()
+    host = http_request.url.hostname or "localhost"
+    request_host = http_request.headers.get("x-forwarded-host") or http_request.headers.get("host")
+    backend_url = request.backend_url or settings.agent_public_backend_url or f"{http_request.url.scheme}://{request_host or host}"
+    package_url = request.package_url or settings.agent_installer_package_url or f"http://{host}:8099/VulcanAgent-Windows-x64.zip"
+    return backend_url.rstrip("/"), package_url
+
+
+@app.post("/agent/deployments/prepare", response_model=AgentDeploymentPrepareResponse)
+def prepare_agent_deployment(
+    request: AgentDeploymentPrepareRequest,
+    http_request: Request,
+    context: AuthContext = Authenticated,
+) -> AgentDeploymentPrepareResponse:
+    if context.role not in {"owner", "root", "tenant_admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
+    if context.role not in {"owner", "root"} and request.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant mismatch")
+
+    settings = get_settings()
+    backend_url, package_url = _agent_deployment_urls(request, http_request)
+    if request.target != "windows_corporate":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="only windows corporate deployment is available")
+
+    powershell_command = "\n".join(
+        [
+            '# Execute em PowerShell elevado ou por GPO/Intune/RMM autorizado.',
+            '$ProgressPreference = "SilentlyContinue"',
+            'New-Item -ItemType Directory -Force C:\\Temp\\Vulcan | Out-Null',
+            f'Invoke-WebRequest -Uri "{package_url}" -OutFile "C:\\Temp\\Vulcan\\VulcanAgent-Windows-x64.zip"',
+            'Expand-Archive -Path "C:\\Temp\\Vulcan\\VulcanAgent-Windows-x64.zip" -DestinationPath "C:\\Temp\\Vulcan\\Agent" -Force',
+            'cd C:\\Temp\\Vulcan\\Agent',
+            "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force",
+            ".\\install.ps1 `",
+            f'  -TenantId "{request.tenant_id}" `',
+            f'  -BackendUrl "{backend_url}" `',
+            f'  -EnrollmentToken "{settings.agent_enrollment_token}" `',
+            '  -LinkedUser "$env:COMPUTERNAME\\$env:USERNAME" `',
+            '  -RoleLevel "Colaborador" `',
+            '  -Department "Operacao" `',
+            "  -CorporateMonitoring `",
+            "  -NoElevationPrompt",
+        ]
+    )
+    gpo_command = (
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+        f"\"iwr '{package_url}' -OutFile C:\\Windows\\Temp\\VulcanAgent-Windows-x64.zip; "
+        "Expand-Archive C:\\Windows\\Temp\\VulcanAgent-Windows-x64.zip C:\\Windows\\Temp\\VulcanAgent -Force; "
+        "cd C:\\Windows\\Temp\\VulcanAgent; "
+        f".\\install.ps1 -TenantId '{request.tenant_id}' -BackendUrl '{backend_url}' "
+        f"-EnrollmentToken '{settings.agent_enrollment_token}' -LinkedUser '$env:COMPUTERNAME\\$env:USERNAME' "
+        "-RoleLevel 'Colaborador' -Department 'Operacao' -CorporateMonitoring -NoElevationPrompt\""
+    )
+    return AgentDeploymentPrepareResponse(
+        status="blocked",
+        message="Pacote e comando prontos. Execucao remota em massa depende de GPO, Intune, RMM ou WinRM administrativo configurado.",
+        tenantId=request.tenant_id,
+        target=request.target,
+        backendUrl=backend_url,
+        packageUrl=package_url,
+        remoteExecutionAvailable=False,
+        supportedExecutors=["manual", "gpo", "intune", "rmm", "winrm"],
+        powershellCommand=powershell_command,
+        gpoCommand=gpo_command,
+        nextStep="Configurar um executor corporativo autorizado para transformar este preparo em disparo automatico para todos os endpoints.",
     )
 
 
