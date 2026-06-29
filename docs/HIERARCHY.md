@@ -84,3 +84,30 @@ A equipe aparece na adoção do dispositivo, nos filtros de Comando/Métricas e 
 - `supervisor`: supervisor e árvore abaixo.
 - `lider`: líder e operadores.
 - `operador1`, `operador2`, `operador3`: apenas seus próprios dados.
+# Hierarquia ERS
+
+Hierarquia operacional esperada no piloto:
+
+```text
+ERS
+-> Diretor
+-> Coordenador
+-> Gerente
+-> Supervisor
+-> Líder
+-> Operador/Colaborador
+```
+
+Perfis com escopo `tenant` veem todo o tenant. Perfis com escopo `hierarchy` veem a própria subárvore via `membership_closure`. Perfis com escopo `self` veem somente o próprio membership/dispositivo/métricas.
+
+Ao criar ou editar uma pessoa no painel, defina:
+
+- superior direto;
+- nível na pirâmide;
+- perfil/permissão;
+- departamento;
+- contato;
+- equipe, quando aplicável;
+- dispositivo vinculado, quando aplicável.
+
+Mudanças de superior, cargo, equipe e perfil recalculam a árvore com `vulcan_refresh_membership_closure`.

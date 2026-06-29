@@ -51,6 +51,16 @@ class Role(ApiModel):
     is_system: bool = Field(alias="isSystem")
 
 
+class RoleCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    slug: str = Field(min_length=2)
+    name: str = Field(min_length=2)
+    description: str | None = None
+    scope: Literal["self", "hierarchy", "tenant", "global"] = "self"
+
+
 class User(ApiModel):
     id: UUID
     tenant_id: UUID = Field(alias="tenantId")
@@ -1032,6 +1042,7 @@ class HierarchyNode(ApiModel):
     id: UUID
     tenant_id: UUID = Field(alias="tenantId")
     user_id: UUID | None = Field(default=None, alias="userId")
+    role_id: UUID | None = Field(default=None, alias="roleId")
     parent_id: UUID | None = Field(default=None, alias="parentId")
     name: str
     title: str

@@ -283,3 +283,32 @@ operador3: hierarquia 1, dispositivos 1, eventos24h 14
 - Trocar o executor de migrations por controle real de versões aplicado uma vez por arquivo.
 - Adicionar CI/CD executando a matriz de QA automaticamente.
 - Adicionar observabilidade externa: tracing, dashboard de erros, métricas e alertas.
+# QA ERS
+
+Checklist mínimo para a etapa ERS:
+
+```bash
+corepack pnpm supabase:validate
+corepack pnpm supabase:migrate
+corepack pnpm seed:demo
+DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:55432/vulcan' ERS_INITIAL_PASSWORD='runtime' .venv/bin/python scripts/ensure_ers_admin.py
+corepack pnpm demo:validate
+corepack pnpm verify:phase2
+corepack pnpm lint
+corepack pnpm typecheck
+corepack pnpm build
+corepack pnpm test
+corepack pnpm agent:windows:build
+```
+
+Validações manuais:
+
+- login ERS;
+- ERS vê todo o tenant;
+- supervisor vê subordinado;
+- operador não vê outro operador;
+- dispositivo pendente aparece;
+- adoção existente funciona;
+- criar usuário e adotar funciona;
+- comando de deploy aponta para `192.168.200.4`;
+- descoberta ERS não instala nada.

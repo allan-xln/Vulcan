@@ -163,6 +163,41 @@ def _role_from_scope(scope: str) -> str:
     return "user"
 
 
+def _context_for_dynamic_local_user(user_id: str, settings: Settings, tenant_id: UUID | None = None) -> AuthContext | None:
+    if not settings.database_url:
+        return None
+    try:
+        with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+            row = conn.execute(
+                """
+                select au.email,
+                       m.tenant_id,
+                       coalesce(r.scope, 'self') as scope
+                from auth.users au
+                join public.memberships m on m.user_id = au.id and m.status = 'active'
+                left join public.roles r on r.id = m.role_id
+                where au.id = %s
+                  and (%s::uuid is null or m.tenant_id = %s::uuid)
+                order by
+                  case when %s::uuid is not null and m.tenant_id = %s::uuid then 0 else 1 end,
+                  m.created_at desc
+                limit 1
+                """,
+                (user_id, tenant_id, tenant_id, tenant_id, tenant_id),
+            ).fetchone()
+    except (psycopg.Error, RuntimeError):
+        return None
+    if not row:
+        return None
+    return AuthContext(
+        user_id=user_id,
+        email=row.get("email"),
+        tenant_id=row["tenant_id"],
+        role=_role_from_scope(str(row["scope"])),
+        provider="local",
+    )
+
+
 def _login_with_dynamic_local_user(request: LoginRequest, settings: Settings) -> LoginResponse | None:
     if not settings.database_url:
         return None
@@ -173,6 +208,7 @@ def _login_with_dynamic_local_user(request: LoginRequest, settings: Settings) ->
                 """
                 select au.id,
                        au.email,
+                       coalesce((au.raw_user_meta_data ->> 'passwordTemporary')::boolean, false) as password_temporary,
                        m.full_name,
                        m.tenant_id,
                        coalesce(r.scope, 'self') as scope
@@ -205,8 +241,14 @@ def _login_with_dynamic_local_user(request: LoginRequest, settings: Settings) ->
             "name": row["full_name"],
             "email": row["email"],
             "role": _role_from_scope(str(row["scope"])),
+            "tenantId": str(row["tenant_id"]),
+            "passwordTemporary": bool(row.get("password_temporary")),
         },
-        warning="Dynamic local auth is for commercial testing only. Replace with Supabase Auth before production.",
+        warning=(
+            "Senha temporária: troque a senha no primeiro uso operacional."
+            if row.get("password_temporary")
+            else "Dynamic local auth is for commercial testing only. Replace with Supabase Auth before production."
+        ),
     )
 
 
@@ -284,13 +326,10 @@ def require_auth(
             UUID(user_id)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid dynamic local token") from exc
-        return AuthContext(
-            user_id=user_id,
-            email=None,
-            tenant_id=tenant_id,
-            role="user",
-            provider="local",
-        )
+        dynamic_context = _context_for_dynamic_local_user(user_id, settings, tenant_id if x_tenant_id else None)
+        if dynamic_context:
+            return dynamic_context
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="dynamic local user is not active")
 
     if settings.auth_provider == "supabase":
         return _validate_supabase_token(token, settings, tenant_id)

@@ -88,6 +88,7 @@ from app.schemas import (
     OperationalMetric,
     ReportTemplate,
     Role,
+    RoleCreate,
     SettingsActionResponse,
     SettingsResponse,
     SettingsSection,
@@ -308,6 +309,18 @@ def list_departments(context: AuthContext = Authenticated, repo: VulcanRepositor
 @app.get("/roles", response_model=list[Role])
 def list_roles(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[Role]:
     return [Role.model_validate(item) for item in repo.list_roles(context)]
+
+
+@app.post("/roles", response_model=Role)
+def create_role(
+    request: RoleCreate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Role:
+    try:
+        return Role.model_validate(repo.create_role(context, request))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 @app.get("/teams", response_model=list[Team])

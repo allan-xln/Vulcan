@@ -535,3 +535,31 @@ drop policy if exists service_role_all_ai_provider_configs on public.ai_provider
 create policy service_role_all_ai_provider_configs on public.ai_provider_configs for all using (auth.role() = 'service_role') with check (auth.role() = 'service_role');
 drop policy if exists service_role_all_audit_logs on public.audit_logs;
 create policy service_role_all_audit_logs on public.audit_logs for all using (auth.role() = 'service_role') with check (auth.role() = 'service_role');
+
+grant select on public.departments to authenticated;
+grant select on public.roles to authenticated;
+grant select on public.user_profiles to authenticated;
+grant select on public.memberships to authenticated;
+grant select on public.membership_closure to authenticated;
+grant select on public.devices to authenticated;
+grant select on public.activity_events to authenticated;
+grant select on public.operational_metrics to authenticated;
+grant select on public.ai_insights to authenticated;
+grant select on public.notifications to authenticated;
+grant select on public.notification_preferences to authenticated;
+grant select on public.ai_provider_configs to authenticated;
+grant select on public.audit_logs to authenticated;
+
+grant all privileges on public.departments to service_role;
+grant all privileges on public.roles to service_role;
+grant all privileges on public.user_profiles to service_role;
+grant all privileges on public.memberships to service_role;
+grant all privileges on public.membership_closure to service_role;
+grant all privileges on public.devices to service_role;
+grant all privileges on public.activity_events to service_role;
+grant all privileges on public.operational_metrics to service_role;
+grant all privileges on public.ai_insights to service_role;
+grant all privileges on public.notifications to service_role;
+grant all privileges on public.notification_preferences to service_role;
+grant all privileges on public.ai_provider_configs to service_role;
+grant all privileges on public.audit_logs to service_role;

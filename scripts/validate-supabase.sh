@@ -5,9 +5,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ -f "$ROOT_DIR/.env" ]; then
-  set -a
-  source "$ROOT_DIR/.env"
-  set +a
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* || "$key" != *[A-Za-z0-9_]* ]] && continue
+    if [ -z "${!key:-}" ]; then
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      export "$key=$value"
+    fi
+  done < "$ROOT_DIR/.env"
 fi
 
 if [ -z "${SUPABASE_URL:-}" ]; then

@@ -44,3 +44,17 @@ Configuration writes are restricted to tenant/admin scope. Operators can read al
 ## AI Safety
 
 GPT must receive only structured operational evidence. It must not receive raw passwords, keystrokes, screenshots, clipboard content, or cross-tenant data.
+# Segurança ERS
+
+Regras operacionais:
+
+- não commitar senha ou secret;
+- senha inicial ERS só via variável de ambiente no runtime;
+- audit log mascara senha e tokens;
+- ERS é admin máximo do tenant, não root global;
+- root global continua reservado para operação da plataforma;
+- endpoints de escrita validam `tenant_id` e escopo;
+- escopo de leitura usa `membership_closure`;
+- instalação de agente exige executor corporativo autorizado.
+
+Deploy remoto em massa só depois de piloto aprovado e relatório de alvos.

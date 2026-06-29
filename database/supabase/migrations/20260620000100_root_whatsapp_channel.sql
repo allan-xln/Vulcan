@@ -167,6 +167,16 @@ on public.whatsapp_delivery_logs for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
+grant select on public.root_whatsapp_templates to authenticated;
+grant select on public.notification_schedules to authenticated;
+grant select on public.whatsapp_delivery_queue to authenticated;
+grant select on public.whatsapp_delivery_logs to authenticated;
+
+grant all privileges on public.root_whatsapp_templates to service_role;
+grant all privileges on public.notification_schedules to service_role;
+grant all privileges on public.whatsapp_delivery_queue to service_role;
+grant all privileges on public.whatsapp_delivery_logs to service_role;
+
 insert into public.root_whatsapp_templates (
   id, tenant_id, template_type, title, body, variables, language, version, active, metadata
 )

@@ -55,3 +55,31 @@ Use this wording in sales and onboarding:
 - Add deletion/anonymization flow.
 - Add admin audit review.
 - Add tenant-level collector flags.
+# LGPD e Coleta Operacional
+
+O Vulcan deve operar com finalidade clara, minimização e auditoria. O padrão seguro coleta dados operacionais, não conteúdo pessoal.
+
+Permitido por política:
+
+- app ativo;
+- duração;
+- troca de contexto;
+- status do agente;
+- hostname;
+- SO;
+- versão do agente;
+- heartbeat;
+- fila offline;
+- eventos operacionais.
+
+Bloqueado:
+
+- senhas;
+- teclas digitadas;
+- áudio;
+- webcam;
+- prints contínuos;
+- mensagens pessoais;
+- conteúdo sensível.
+
+Título de janela, URL/domínio e lista de processos devem permanecer configuráveis por política do tenant/dispositivo.

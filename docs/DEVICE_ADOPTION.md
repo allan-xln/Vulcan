@@ -97,3 +97,28 @@ Cada adoção registra:
 - criação de usuário dentro do modal de adoção ainda deve ser conectada à UI; o backend já aceita `mode=new_user`.
 - botão `ignorar temporariamente` ainda não foi exposto na interface.
 - app/tray macOS e Windows completo ainda são próximos passos de produto.
+# Adoção de Dispositivo
+
+Quando o agente aparece sem `owner_membership_id`, o dispositivo entra como pendente de adoção.
+
+Campos exibidos:
+
+- hostname;
+- usuário do SO;
+- sistema operacional;
+- versão do agente;
+- IP local, quando permitido;
+- última comunicação;
+- qualidade da coleta;
+- código de adoção.
+
+Fluxos suportados:
+
+- vincular a usuário existente;
+- criar usuário novo e adotar no mesmo fluxo;
+- adoção seca para completar depois;
+- trocar equipe;
+- trocar política de coleta;
+- mover o dispositivo para outro usuário depois.
+
+Após adoção, o dispositivo aparece em hierarquia, métricas, comando e configurações de agentes conforme o escopo do usuário.

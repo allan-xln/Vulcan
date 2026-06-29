@@ -343,6 +343,7 @@ type HierarchyNode = {
   id: string;
   tenantId: string;
   userId: string | null;
+  roleId?: string | null;
   parentId: string | null;
   name: string;
   title: string;
@@ -383,6 +384,7 @@ type HierarchyMemberFormPayload = {
   id?: string;
   parentId: string | null;
   level: number;
+  roleId: string | null;
   fullName: string;
   title: string;
   departmentId: string | null;
@@ -395,6 +397,22 @@ type HierarchyMemberFormPayload = {
   whatsappOptIn: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
+};
+
+type DeviceAdoptionNewUserPayload = {
+  fullName: string;
+  username: string;
+  workEmail: string;
+  password: string;
+  phone: string;
+  whatsapp: string;
+  title: string;
+  level: number;
+  roleId: string | null;
+  parentId: string | null;
+  departmentId: string | null;
+  teamId: string | null;
+  policy: string;
 };
 
 type SupabaseStatus = {
@@ -2310,7 +2328,7 @@ export default function HomePage() {
     if (!token) {
       throw new Error("Sessão expirada.");
     }
-    const roleId = roleIdForHierarchyLevel(payload.level);
+    const roleId = payload.roleId ?? roleIdForHierarchyLevel(payload.level);
     if (!roleId) {
       throw new Error("Perfis de acesso ainda não foram carregados.");
     }
@@ -2395,6 +2413,52 @@ export default function HomePage() {
     await refreshHierarchyData();
   }
 
+  async function handleDeviceAdoptionNewUser(deviceId: string, payload: DeviceAdoptionNewUserPayload) {
+    if (!token) {
+      throw new Error("Sessão expirada.");
+    }
+    const roleId = payload.roleId ?? roleIdForHierarchyLevel(payload.level);
+    if (!roleId) {
+      throw new Error("Perfis de acesso ainda não foram carregados.");
+    }
+    const response = await fetch(`${API_URL}/devices/${deviceId}/adopt`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Tenant-Id": DEMO_TENANT_ID
+      },
+      body: JSON.stringify({
+        tenantId: DEMO_TENANT_ID,
+        mode: "new_user",
+        teamId: payload.teamId,
+        policy: payload.policy,
+        user: {
+          tenantId: DEMO_TENANT_ID,
+          username: payload.username.trim(),
+          password: payload.password.trim(),
+          roleId,
+          departmentId: payload.departmentId,
+          directManagerMembershipId: payload.parentId,
+          fullName: payload.fullName.trim(),
+          workEmail: payload.workEmail.trim(),
+          phone: payload.phone.trim() || null,
+          whatsapp: payload.whatsapp.trim() || null,
+          whatsappEnabled: true,
+          whatsappOptIn: false,
+          whatsappNotificationTypes: [],
+          title: payload.title.trim(),
+          hierarchyLevel: payload.level
+        }
+      })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Não foi possível criar e adotar." }));
+      throw new Error(String(error.detail ?? "Não foi possível criar e adotar."));
+    }
+    await refreshHierarchyData();
+  }
+
   function openMetricsWithFilters(filters: Omit<MetricsIntent, "nonce">) {
     setMetricsIntent({ ...filters, nonce: Date.now() });
     setView("metrics");
@@ -2456,6 +2520,7 @@ export default function HomePage() {
             onHierarchyMemberSave={handleHierarchyMemberSave}
             onHierarchyMemberDelete={handleHierarchyMemberDelete}
             onDeviceAdoption={handleDeviceAdoption}
+            onDeviceAdoptionNewUser={handleDeviceAdoptionNewUser}
           />
         )}
       </AnimatePresence>
@@ -2737,7 +2802,8 @@ function DashboardShell({
   onDeviceOwnerChange,
   onHierarchyMemberSave,
   onHierarchyMemberDelete,
-  onDeviceAdoption
+  onDeviceAdoption,
+  onDeviceAdoptionNewUser
 }: {
   activeView: ViewKey;
   setView: (view: ViewKey) => void;
@@ -2778,6 +2844,7 @@ function DashboardShell({
   onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
   onDeviceAdoption: (deviceId: string, membershipId: string | null, teamId: string | null, mode?: "existing_user" | "dry") => Promise<void>;
+  onDeviceAdoptionNewUser: (deviceId: string, payload: DeviceAdoptionNewUserPayload) => Promise<void>;
 }) {
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -2843,6 +2910,7 @@ function DashboardShell({
               onHierarchyMemberSave={onHierarchyMemberSave}
               onHierarchyMemberDelete={onHierarchyMemberDelete}
               onDeviceAdoption={onDeviceAdoption}
+              onDeviceAdoptionNewUser={onDeviceAdoptionNewUser}
             />
           )}
           {activeView === "metrics" && (
@@ -3127,7 +3195,8 @@ function HierarchyView({
   onDeviceOwnerChange,
   onHierarchyMemberSave,
   onHierarchyMemberDelete,
-  onDeviceAdoption
+  onDeviceAdoption,
+  onDeviceAdoptionNewUser
 }: {
   token: string;
   hierarchy: HierarchyNode[];
@@ -3140,6 +3209,7 @@ function HierarchyView({
   onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
   onDeviceAdoption: (deviceId: string, membershipId: string | null, teamId: string | null, mode?: "existing_user" | "dry") => Promise<void>;
+  onDeviceAdoptionNewUser: (deviceId: string, payload: DeviceAdoptionNewUserPayload) => Promise<void>;
 }) {
   const [expandedNode, setExpandedNode] = useState<string | null>(null);
   const [selectedParentId, setSelectedParentId] = useState<string | null>(hierarchy[0]?.id ?? null);
@@ -3152,9 +3222,11 @@ function HierarchyView({
   const [deploymentPlan, setDeploymentPlan] = useState<AgentDeploymentPrepareResponse | null>(null);
   const [deploymentFeedback, setDeploymentFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [adoptionAssignments, setAdoptionAssignments] = useState<Record<string, { membershipId: string; teamId: string }>>({});
+  const [newUserAdoptions, setNewUserAdoptions] = useState<Record<string, DeviceAdoptionNewUserPayload>>({});
   const [form, setForm] = useState<HierarchyMemberFormPayload>({
     parentId: hierarchy[0]?.id ?? null,
     level: 1,
+    roleId: null,
     fullName: "",
     title: "Gerente",
     departmentId: departments[0]?.id ?? null,
@@ -3244,6 +3316,57 @@ function HierarchyView({
     return hierarchyLevelCatalog.find((item) => item.value === level)?.label ?? `Nível ${level}`;
   }
 
+  function roleIdForLevel(level: number) {
+    const desiredScope = hierarchyLevelCatalog.find((item) => item.value === level)?.scope ?? "self";
+    const scopedRole = roles.find((role) => role.scope === desiredScope);
+    return scopedRole?.id ?? roles.find((role) => role.scope === "hierarchy")?.id ?? roles[0]?.id ?? null;
+  }
+
+  function defaultNewUserAdoption(device: Device): DeviceAdoptionNewUserPayload {
+    const rawUser = (device.osUser || device.hostname || "usuario").replace(/.*\\/, "").replace(/[^a-zA-Z0-9._-]/g, ".").toLowerCase();
+    const parent = selectedParentId ?? hierarchy[0]?.id ?? null;
+    const parentNode = parent ? hierarchy.find((node) => node.id === parent) : null;
+    const level = parentNode ? Math.min(parentNode.hierarchyLevel + 1, 10) : 6;
+    return {
+      fullName: rawUser.split(/[._-]/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") || device.hostname,
+      username: rawUser || device.hostname.toLowerCase(),
+      workEmail: rawUser ? `${rawUser}@erstransportes.local` : "",
+      password: "",
+      phone: "",
+      whatsapp: "",
+      title: hierarchyLevelCatalog.find((item) => item.value === level)?.shortLabel ?? "Colaborador",
+      level,
+      roleId: roleIdForLevel(level),
+      parentId: parent,
+      departmentId: departments[0]?.id ?? null,
+      teamId: adoptionValue(device, "teamId") || teams[0]?.id || null,
+      policy: "corporate_standard"
+    };
+  }
+
+  function newUserAdoptionValue(device: Device) {
+    return newUserAdoptions[device.id] ?? defaultNewUserAdoption(device);
+  }
+
+  function updateNewUserAdoption<K extends keyof DeviceAdoptionNewUserPayload>(device: Device, key: K, value: DeviceAdoptionNewUserPayload[K]) {
+    setNewUserAdoptions((current) => {
+      const base = current[device.id] ?? defaultNewUserAdoption(device);
+      const next = { ...base, [key]: value };
+      if (key === "parentId") {
+        const parent = hierarchy.find((node) => node.id === value);
+        const level = parent ? Math.min(parent.hierarchyLevel + 1, 10) : next.level;
+        next.level = level;
+        next.roleId = roleIdForLevel(level);
+        next.title = hierarchyLevelCatalog.find((item) => item.value === level)?.shortLabel ?? next.title;
+      }
+      if (key === "level") {
+        next.roleId = roleIdForLevel(Number(value));
+        next.title = hierarchyLevelCatalog.find((item) => item.value === Number(value))?.shortLabel ?? next.title;
+      }
+      return { ...current, [device.id]: next };
+    });
+  }
+
   function startCreate(parent: HierarchyNode) {
     const nextLevel = hierarchyLevelCatalog.find((item) => item.value > parent.hierarchyLevel)?.value ?? parent.hierarchyLevel + 1;
     setSelectedParentId(parent.id);
@@ -3252,6 +3375,7 @@ function HierarchyView({
     setForm({
       parentId: parent.id,
       level: nextLevel,
+      roleId: roleIdForLevel(nextLevel),
       fullName: "",
       title: hierarchyLevelCatalog.find((item) => item.value === nextLevel)?.shortLabel ?? "Colaborador",
       departmentId: departments.find((department) => department.name === parent.department)?.id ?? departments[0]?.id ?? null,
@@ -3275,6 +3399,7 @@ function HierarchyView({
       id: node.id,
       parentId: node.parentId,
       level: node.hierarchyLevel,
+      roleId: node.roleId ?? roleIdForLevel(node.hierarchyLevel),
       fullName: node.name,
       title: node.title,
       departmentId: departments.find((department) => department.name === node.department)?.id ?? departments[0]?.id ?? null,
@@ -3342,6 +3467,7 @@ function HierarchyView({
           setForm({
             parentId: null,
             level: 1,
+            roleId: roleIdForLevel(1),
             fullName: "",
             title: "Gerente",
             departmentId: departments[0]?.id ?? null,
@@ -3397,6 +3523,28 @@ function HierarchyView({
       setAdoptionFeedback({ tone: "ok", message: `${device.hostname} adotado e vinculado à hierarquia.` });
     } catch (error) {
       setAdoptionFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível adotar o dispositivo." });
+    } finally {
+      setAdoptingDeviceId(null);
+    }
+  }
+
+  async function adoptPendingDeviceWithNewUser(device: Device) {
+    const payload = newUserAdoptionValue(device);
+    if (!payload.fullName.trim() || !payload.username.trim() || !payload.workEmail.trim() || !payload.password.trim()) {
+      setAdoptionFeedback({ tone: "warn", message: "Preencha nome, login, e-mail e senha inicial para criar usuário." });
+      return;
+    }
+    if (!payload.parentId && hierarchy.length > 0) {
+      setAdoptionFeedback({ tone: "warn", message: "Escolha o superior direto do novo usuário." });
+      return;
+    }
+    try {
+      setAdoptingDeviceId(device.id);
+      setAdoptionFeedback(null);
+      await onDeviceAdoptionNewUser(device.id, payload);
+      setAdoptionFeedback({ tone: "ok", message: `${device.hostname} adotado com novo usuário ${payload.fullName}.` });
+    } catch (error) {
+      setAdoptionFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível criar e adotar." });
     } finally {
       setAdoptingDeviceId(null);
     }
@@ -3610,7 +3758,7 @@ function HierarchyView({
                       const parent = hierarchy.find((node) => node.id === event.target.value) ?? null;
                       const nextLevel = hierarchyLevelCatalog.find((item) => !parent || item.value > parent.hierarchyLevel)?.value ?? form.level;
                       setSelectedParentId(parent?.id ?? null);
-                      setForm((current) => ({ ...current, parentId: parent?.id ?? null, level: nextLevel }));
+                      setForm((current) => ({ ...current, parentId: parent?.id ?? null, level: nextLevel, roleId: roleIdForLevel(nextLevel) }));
                     }}
                     className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
                   >
@@ -3627,6 +3775,7 @@ function HierarchyView({
                     onChange={(event) => {
                       const level = Number(event.target.value);
                       updateForm("level", level);
+                      updateForm("roleId", roleIdForLevel(level));
                       updateForm("title", hierarchyLevelCatalog.find((item) => item.value === level)?.shortLabel ?? form.title);
                     }}
                     className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
@@ -3637,6 +3786,20 @@ function HierarchyView({
                   </select>
                 </label>
               </div>
+
+              <label className="grid gap-2 text-sm text-zinc-300">
+                Perfil/permissão
+                <select
+                  value={form.roleId ?? ""}
+                  onChange={(event) => updateForm("roleId", event.target.value || null)}
+                  className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
+                >
+                  <option value="">Automático pelo nível</option>
+                  {roles.map((role) => (
+                    <option key={role.id} value={role.id}>{role.name} - {scopePt(role.scope === "hierarchy" ? "subtree" : role.scope)}</option>
+                  ))}
+                </select>
+              </label>
 
               <div className="grid gap-3 md:grid-cols-2">
                 <HierarchyInput label="Nome completo" value={form.fullName} onChange={(value) => updateForm("fullName", value)} />
@@ -3820,6 +3983,97 @@ function HierarchyView({
                           {adoptingDeviceId === device.id ? "Adotando..." : "Adotar"}
                         </button>
                       </div>
+                      <details className="border border-zinc-800 bg-black/35 p-3">
+                        <summary className="cursor-pointer text-xs uppercase tracking-[0.14em] text-orange-200">Criar usuário e adotar</summary>
+                        <div className="mt-3 grid gap-3">
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <HierarchyInput label="Nome" value={newUserAdoptionValue(device).fullName} onChange={(value) => updateNewUserAdoption(device, "fullName", value)} />
+                            <HierarchyInput label="Login" value={newUserAdoptionValue(device).username} onChange={(value) => updateNewUserAdoption(device, "username", value)} />
+                            <HierarchyInput label="E-mail" value={newUserAdoptionValue(device).workEmail} onChange={(value) => updateNewUserAdoption(device, "workEmail", value)} type="email" />
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <HierarchyInput label="Senha inicial" value={newUserAdoptionValue(device).password} onChange={(value) => updateNewUserAdoption(device, "password", value)} type="password" />
+                            <HierarchyInput label="Telefone" value={newUserAdoptionValue(device).phone} onChange={(value) => updateNewUserAdoption(device, "phone", value)} />
+                            <HierarchyInput label="WhatsApp" value={newUserAdoptionValue(device).whatsapp} onChange={(value) => updateNewUserAdoption(device, "whatsapp", value)} />
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <label className="grid gap-2 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                              Superior direto
+                              <select
+                                value={newUserAdoptionValue(device).parentId ?? ""}
+                                onChange={(event) => updateNewUserAdoption(device, "parentId", event.target.value || null)}
+                                className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
+                              >
+                                <option value="">Sem superior</option>
+                                {hierarchy.map((node) => (
+                                  <option key={node.id} value={node.id}>{node.name} - {node.title}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="grid gap-2 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                              Perfil
+                              <select
+                                value={newUserAdoptionValue(device).roleId ?? ""}
+                                onChange={(event) => updateNewUserAdoption(device, "roleId", event.target.value || null)}
+                                className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
+                              >
+                                <option value="">Automático</option>
+                                {roles.map((role) => (
+                                  <option key={role.id} value={role.id}>{role.name} - {scopePt(role.scope === "hierarchy" ? "subtree" : role.scope)}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="grid gap-2 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                              Equipe
+                              <select
+                                value={newUserAdoptionValue(device).teamId ?? ""}
+                                onChange={(event) => updateNewUserAdoption(device, "teamId", event.target.value || null)}
+                                className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
+                              >
+                                <option value="">Sem equipe</option>
+                                {teams.map((team) => (
+                                  <option key={team.id} value={team.id}>{team.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                            <label className="grid gap-2 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                              Departamento
+                              <select
+                                value={newUserAdoptionValue(device).departmentId ?? ""}
+                                onChange={(event) => updateNewUserAdoption(device, "departmentId", event.target.value || null)}
+                                className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
+                              >
+                                <option value="">Sem departamento</option>
+                                {departments.map((department) => (
+                                  <option key={department.id} value={department.id}>{department.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="grid gap-2 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                              Política
+                              <select
+                                value={newUserAdoptionValue(device).policy}
+                                onChange={(event) => updateNewUserAdoption(device, "policy", event.target.value)}
+                                className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
+                              >
+                                <option value="corporate_standard">Corporativa padrão</option>
+                                <option value="minimal">Mínima</option>
+                                <option value="high_visibility">Alta visibilidade autorizada</option>
+                              </select>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => void adoptPendingDeviceWithNewUser(device)}
+                              disabled={adoptingDeviceId === device.id}
+                              className="h-11 self-end border border-emerald-400/25 px-4 text-sm font-semibold text-emerald-100 transition hover:border-emerald-300/60 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {adoptingDeviceId === device.id ? "Criando..." : "Criar e adotar"}
+                            </button>
+                          </div>
+                        </div>
+                      </details>
                     </motion.div>
                   ))
                 ) : (

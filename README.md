@@ -79,6 +79,34 @@ Default local URLs:
 
 If `3000` is busy, the frontend automatically tries `3002`, `3003`, and `3004`. The local `teste/teste` login is enabled only outside production by `LOCAL_TEST_AUTH_ENABLED` and `NEXT_PUBLIC_LOCAL_TEST_AUTH`; Supabase Auth is the production path.
 
+## Piloto ERS
+
+Documentação da etapa ERS:
+
+- `docs/ERS_ADMIN.md`: usuário ERS, perfil total e criação idempotente.
+- `docs/HIERARCHY.md`: regras de escopo e árvore.
+- `docs/DEVICE_ADOPTION.md`: adoção de PC, usuário novo e usuário existente.
+- `docs/WINDOWS_AGENT.md`: serviço Windows e instalação piloto.
+- `docs/AGENT_DEPLOYMENT.md`: descoberta LAN, piloto e rollout autorizado.
+- `docs/LGPD.md`: limites de coleta.
+- `docs/SECURITY.md`: segurança e auditoria.
+
+Garantir o usuário ERS no banco local ativo:
+
+```bash
+DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:55432/vulcan' \
+ERS_INITIAL_PASSWORD='defina-em-runtime' \
+.venv/bin/python scripts/ensure_ers_admin.py
+```
+
+Descobrir alvos Windows ERS sem instalar agente:
+
+```bash
+ERS_WINRM_USER='usuario-autorizado' \
+ERS_WINRM_PASSWORD='senha-runtime' \
+.venv/bin/python scripts/discover_ers_windows_targets.py --network 192.168.200.0/24
+```
+
 ## Demo Comercial
 
 Gere a demo completa:

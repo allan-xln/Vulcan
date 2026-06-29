@@ -33,6 +33,7 @@ from app.schemas import (
     NotificationSendRequest,
     NotificationSendResponse,
     RootWhatsAppSendRequest,
+    RoleCreate,
     SettingsSectionUpdate,
     TeamCreate,
     TeamMemberCreate,
@@ -976,6 +977,32 @@ class VulcanRepository:
                 params,
             ).fetchall())
 
+    def create_role(self, context: AuthContext, request: RoleCreate) -> dict:
+        if not self.enabled:
+            raise ValueError("role writes require Supabase/Postgres")
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_tenant_write(access, request.tenant_id)
+            slug = request.slug.strip().lower().replace(" ", "-")
+            row = conn.execute(
+                """
+                insert into public.roles (tenant_id, slug, name, description, scope, is_system)
+                values (%s, %s, %s, %s, %s, false)
+                on conflict (tenant_id, slug) do update
+                set name = excluded.name,
+                    description = excluded.description,
+                    scope = excluded.scope,
+                    updated_at = timezone('utc', now())
+                returning id, tenant_id as "tenantId", slug, name, description,
+                          coalesce(scope, 'tenant') as scope,
+                          coalesce(is_system, false) as "isSystem"
+                """,
+                (request.tenant_id, slug, request.name.strip(), request.description, request.scope),
+            ).fetchone()
+            self.write_audit(conn, context, request.tenant_id, "role.upserted", "role", row["id"], {"slug": slug, "scope": request.scope})
+            conn.commit()
+            return dict(row)
+
     def _ensure_team_tables(self, conn: psycopg.Connection) -> None:
         conn.execute(
             """
@@ -1651,6 +1678,7 @@ class VulcanRepository:
                 select m.id,
                        m.tenant_id as "tenantId",
                        m.user_id as "userId",
+                       m.role_id as "roleId",
                        m.direct_manager_membership_id as "parentId",
                        m.full_name as name,
                        coalesce(m.title, 'Member') as title,
