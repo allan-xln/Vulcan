@@ -14,7 +14,9 @@ INSTALL_DEPS="false"
 COLLECT_WINDOW_TITLE="false"
 COLLECT_BROWSER_DOMAIN="false"
 COLLECT_BROWSER_URL="false"
+COLLECT_BROWSER_HISTORY="false"
 COLLECT_PROCESS_LIST="false"
+CORPORATE_MONITORING="false"
 
 usage() {
   cat <<USAGE
@@ -29,7 +31,9 @@ Opcoes:
   --collect-window-title  Coleta titulo da janela ativa quando o sistema permitir.
   --collect-browser-domain Coleta dominio do navegador somente quando a politica permitir.
   --collect-browser-url   Coleta URL sem querystring somente quando a politica permitir.
+  --collect-browser-history Coleta historico recente do navegador com URL sanitizada.
   --collect-process-list  Usa heuristica limitada de processos quando Wayland bloquear janela ativa.
+  --corporate-monitoring  Liga modo corporativo: titulo, URL sanitizada, historico, dominio e processos.
   -h, --help              Mostra esta ajuda.
 
 Este instalador vincula a maquina ao usuario local de teste:
@@ -46,7 +50,17 @@ while [[ $# -gt 0 ]]; do
     --collect-window-title) COLLECT_WINDOW_TITLE="true"; shift ;;
     --collect-browser-domain) COLLECT_BROWSER_DOMAIN="true"; shift ;;
     --collect-browser-url) COLLECT_BROWSER_URL="true"; shift ;;
+    --collect-browser-history) COLLECT_BROWSER_HISTORY="true"; shift ;;
     --collect-process-list) COLLECT_PROCESS_LIST="true"; shift ;;
+    --corporate-monitoring)
+      CORPORATE_MONITORING="true"
+      COLLECT_WINDOW_TITLE="true"
+      COLLECT_BROWSER_DOMAIN="true"
+      COLLECT_BROWSER_URL="true"
+      COLLECT_BROWSER_HISTORY="true"
+      COLLECT_PROCESS_LIST="true"
+      shift
+      ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Opcao desconhecida: $1" >&2; usage; exit 2 ;;
   esac
@@ -112,8 +126,14 @@ fi
 if [[ "$COLLECT_BROWSER_URL" == "true" ]]; then
   INSTALL_ARGS+=(--collect-browser-url)
 fi
+if [[ "$COLLECT_BROWSER_HISTORY" == "true" ]]; then
+  INSTALL_ARGS+=(--collect-browser-history)
+fi
 if [[ "$COLLECT_PROCESS_LIST" == "true" ]]; then
   INSTALL_ARGS+=(--collect-process-list)
+fi
+if [[ "$CORPORATE_MONITORING" == "true" ]]; then
+  INSTALL_ARGS+=(--corporate-monitoring)
 fi
 
 bash "$SCRIPT_DIR/install.sh" "${INSTALL_ARGS[@]}"

@@ -17,7 +17,9 @@ MEMBERSHIP_ID=""
 COLLECT_WINDOW_TITLE="false"
 COLLECT_BROWSER_DOMAIN="false"
 COLLECT_BROWSER_URL="false"
+COLLECT_BROWSER_HISTORY="false"
 COLLECT_PROCESS_LIST="false"
+CORPORATE_MONITORING="false"
 INSTALL_DEPS="false"
 DEMO_TEST_MEMBERSHIP_ID="00000000-0000-0000-0000-000000300005"
 
@@ -33,7 +35,17 @@ while [[ $# -gt 0 ]]; do
     --collect-window-title) COLLECT_WINDOW_TITLE="true"; shift ;;
     --collect-browser-domain) COLLECT_BROWSER_DOMAIN="true"; shift ;;
     --collect-browser-url) COLLECT_BROWSER_URL="true"; shift ;;
+    --collect-browser-history) COLLECT_BROWSER_HISTORY="true"; shift ;;
     --collect-process-list) COLLECT_PROCESS_LIST="true"; shift ;;
+    --corporate-monitoring)
+      CORPORATE_MONITORING="true"
+      COLLECT_WINDOW_TITLE="true"
+      COLLECT_BROWSER_DOMAIN="true"
+      COLLECT_BROWSER_URL="true"
+      COLLECT_BROWSER_HISTORY="true"
+      COLLECT_PROCESS_LIST="true"
+      shift
+      ;;
     --install-deps) INSTALL_DEPS="true"; shift ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -76,8 +88,14 @@ fi
 if [[ "$COLLECT_BROWSER_URL" == "true" ]]; then
   CONFIG_ARGS+=(--collect-browser-url)
 fi
+if [[ "$COLLECT_BROWSER_HISTORY" == "true" ]]; then
+  CONFIG_ARGS+=(--collect-browser-history)
+fi
 if [[ "$COLLECT_PROCESS_LIST" == "true" ]]; then
   CONFIG_ARGS+=(--collect-process-list)
+fi
+if [[ "$CORPORATE_MONITORING" == "true" ]]; then
+  CONFIG_ARGS+=(--corporate-monitoring)
 fi
 
 "$INSTALL_DIR/vulcan_agent.py" "${CONFIG_ARGS[@]}" >/dev/null

@@ -10,13 +10,15 @@ import platform
 import resource
 import re
 import shutil
+import sqlite3
 import socket
 import subprocess
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import error, request
+from urllib import error, parse, request
 
 
 VERSION = "0.2.0"
@@ -28,9 +30,14 @@ DEFAULT_POLICY = {
     "collectSessionEvents": True,
     "collectBrowserDomain": False,
     "collectBrowserUrl": False,
+    "collectBrowserHistory": False,
+    "collectBrowserPageTitle": False,
     "collectProcessList": False,
     "collectSystemMetrics": True,
     "redactSensitiveTerms": True,
+    "browserHistoryIntervalSeconds": 300,
+    "browserHistoryLookbackMinutes": 60,
+    "browserHistoryMaxEvents": 50,
     "syncIntervalSeconds": 30,
     "heartbeatIntervalSeconds": 60,
     "syncBatchSize": 100,
@@ -63,6 +70,22 @@ SENSITIVE_PATTERNS = [
     "confidential",
     "confidencial",
 ]
+ADULT_DOMAIN_PATTERNS = [
+    "porn",
+    "xvideos",
+    "xnxx",
+    "xhamster",
+    "redtube",
+    "youporn",
+    "tube8",
+    "spankbang",
+    "brazzers",
+    "sex",
+    "adult",
+    "onlyfans",
+    "privacy.com.br",
+]
+WINDOWS_EPOCH_OFFSET_SECONDS = 11644473600
 
 
 def utc_now() -> datetime:
@@ -91,6 +114,10 @@ def policy_path() -> Path:
 
 def queue_path() -> Path:
     return data_dir() / "queue" / "events.jsonl"
+
+
+def browser_state_path() -> Path:
+    return data_dir() / "browser-history-state.json"
 
 
 def log_path() -> Path:
@@ -143,12 +170,28 @@ def default_config(args: argparse.Namespace) -> dict:
 
 def default_policy(args: argparse.Namespace | None = None) -> dict:
     policy = dict(DEFAULT_POLICY)
+    if args and getattr(args, "corporate_monitoring", False):
+        policy.update(
+            {
+                "collectWindowTitle": True,
+                "collectBrowserDomain": True,
+                "collectBrowserUrl": True,
+                "collectBrowserHistory": True,
+                "collectBrowserPageTitle": True,
+                "collectProcessList": True,
+                "privacyMode": "corporate",
+                "showTrayStatus": True,
+                "allowUserPause": False,
+            }
+        )
     if args and getattr(args, "collect_window_title", False):
         policy["collectWindowTitle"] = True
     if args and getattr(args, "collect_browser_domain", False):
         policy["collectBrowserDomain"] = True
     if args and getattr(args, "collect_browser_url", False):
         policy["collectBrowserUrl"] = True
+    if args and getattr(args, "collect_browser_history", False):
+        policy["collectBrowserHistory"] = True
     if args and getattr(args, "collect_process_list", False):
         policy["collectProcessList"] = True
     return policy
@@ -187,6 +230,9 @@ def load_policy(config: dict | None = None) -> dict:
     policy["httpTimeoutSeconds"] = max(min(int(policy.get("httpTimeoutSeconds") or 30), 120), 5)
     policy["maxOfflineQueueSize"] = max(int(policy.get("maxOfflineQueueSize") or 10000), 100)
     policy["idleThresholdSeconds"] = max(int(policy.get("idleThresholdSeconds") or 300), 30)
+    policy["browserHistoryIntervalSeconds"] = max(int(policy.get("browserHistoryIntervalSeconds") or 300), 60)
+    policy["browserHistoryLookbackMinutes"] = max(min(int(policy.get("browserHistoryLookbackMinutes") or 60), 1440), 5)
+    policy["browserHistoryMaxEvents"] = max(min(int(policy.get("browserHistoryMaxEvents") or 50), 250), 1)
     return policy
 
 
@@ -202,19 +248,36 @@ def sanitize_title(title: str, collect: bool, redact: bool = True) -> str:
     return title[:180]
 
 
-def sanitize_url(value: str, collect_url: bool, collect_domain: bool) -> tuple[str, str]:
+def normalize_browser_url(value: str, collect_url: bool, collect_domain: bool) -> tuple[str, str, bool]:
     if not value or not (collect_url or collect_domain):
-        return "", ""
+        return "", "", False
     match = re.search(r"https?://[^\s)>\"]+", value)
-    if not match:
-        return "", ""
-    url = match.group(0)
-    if any(pattern in url.lower() for pattern in SENSITIVE_PATTERNS):
-        log("info", "browser url redacted by policy")
-        return "", ""
-    domain = re.sub(r"^https?://", "", url).split("/", 1)[0].split("?", 1)[0].lower()
-    safe_url = re.sub(r"[?#].*$", "", url) if collect_url else ""
-    return domain if collect_domain else "", safe_url
+    raw_url = match.group(0) if match else value
+    parsed = parse.urlsplit(raw_url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return "", "", False
+    domain = parsed.netloc.lower()
+    if "@" in domain:
+        domain = domain.rsplit("@", 1)[-1]
+    domain = domain.split(":", 1)[0].strip(".")
+    path = parsed.path or ""
+    adult_signal = is_adult_domain(domain)
+    path_lower = path.lower()
+    if any(pattern in path_lower for pattern in SENSITIVE_PATTERNS):
+        safe_url = f"{parsed.scheme}://{domain}/" if collect_url else ""
+    else:
+        safe_url = f"{parsed.scheme}://{domain}{path}" if collect_url else ""
+    return domain if collect_domain else "", safe_url[:500], adult_signal
+
+
+def sanitize_url(value: str, collect_url: bool, collect_domain: bool) -> tuple[str, str]:
+    domain, safe_url, _adult_signal = normalize_browser_url(value, collect_url, collect_domain)
+    return domain, safe_url
+
+
+def is_adult_domain(domain: str) -> bool:
+    normalized = domain.lower().removeprefix("www.")
+    return any(pattern in normalized for pattern in ADULT_DOMAIN_PATTERNS)
 
 
 def app_category(app: str) -> str:
@@ -250,6 +313,228 @@ def run_text(command: list[str], timeout: int = 3) -> str:
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
+
+
+def copy_sqlite_database(source: Path) -> Path | None:
+    if not source.exists() or not source.is_file():
+        return None
+    try:
+        temp = tempfile.NamedTemporaryFile(prefix="vulcan-browser-", suffix=".sqlite", delete=False)
+        temp_path = Path(temp.name)
+        temp.close()
+        shutil.copy2(source, temp_path)
+        return temp_path
+    except OSError as exc:
+        log("warning", "failed to copy browser history database", path=str(source), error=str(exc))
+        return None
+
+
+def chrome_time_to_datetime(value: int | float | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        timestamp = (float(value) / 1_000_000) - WINDOWS_EPOCH_OFFSET_SECONDS
+        return datetime.fromtimestamp(timestamp, timezone.utc)
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def firefox_time_to_datetime(value: int | float | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value) / 1_000_000, timezone.utc)
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def browser_profiles() -> list[dict]:
+    home = Path.home()
+    profiles: list[dict] = []
+    chromium_roots = [
+        ("Google Chrome", home / ".config" / "google-chrome"),
+        ("Chromium", home / ".config" / "chromium"),
+        ("Brave", home / ".config" / "BraveSoftware" / "Brave-Browser"),
+        ("Microsoft Edge", home / ".config" / "microsoft-edge"),
+    ]
+    for browser, root in chromium_roots:
+        if not root.exists():
+            continue
+        for history in root.glob("*/History"):
+            if history.parent.name in {"Crashpad", "CertificateRevocation", "ShaderCache"}:
+                continue
+            profiles.append({"browser": browser, "engine": "chromium", "profile": history.parent.name, "path": history})
+    firefox_root = home / ".mozilla" / "firefox"
+    if firefox_root.exists():
+        for places in firefox_root.glob("*/places.sqlite"):
+            profiles.append({"browser": "Firefox", "engine": "firefox", "profile": places.parent.name, "path": places})
+    return profiles
+
+
+def read_browser_state() -> dict:
+    path = browser_state_path()
+    if not path.exists():
+        return {"seen": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"seen": []}
+    if not isinstance(payload, dict):
+        return {"seen": []}
+    payload.setdefault("seen", [])
+    return payload
+
+
+def save_browser_state(state: dict) -> None:
+    state["seen"] = list(dict.fromkeys(state.get("seen", []) or []))[-10000:]
+    browser_state_path().parent.mkdir(parents=True, exist_ok=True)
+    browser_state_path().write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def browser_visit_key(browser: str, profile: str, visited_at: datetime, safe_url: str, domain: str) -> str:
+    source = "|".join([browser, profile, visited_at.isoformat(), safe_url or domain])
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def fetch_chromium_history(profile: dict, since: datetime, limit: int) -> list[dict]:
+    copied = copy_sqlite_database(Path(profile["path"]))
+    if not copied:
+        return []
+    threshold = int((since.timestamp() + WINDOWS_EPOCH_OFFSET_SECONDS) * 1_000_000)
+    rows: list[dict] = []
+    try:
+        conn = sqlite3.connect(f"file:{copied}?mode=ro", uri=True, timeout=2)
+        try:
+            cursor = conn.execute(
+                """
+                select urls.url, coalesce(urls.title, ''), visits.visit_time
+                from visits
+                join urls on urls.id = visits.url
+                where visits.visit_time >= ?
+                order by visits.visit_time desc
+                limit ?
+                """,
+                (threshold, limit),
+            )
+            for url, title, visited_raw in cursor.fetchall():
+                visited_at = chrome_time_to_datetime(visited_raw)
+                if visited_at:
+                    rows.append({"url": str(url or ""), "title": str(title or ""), "visitedAt": visited_at})
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        log("warning", "failed to read chromium history", browser=profile["browser"], profile=profile["profile"], error=str(exc))
+    finally:
+        try:
+            copied.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return rows
+
+
+def fetch_firefox_history(profile: dict, since: datetime, limit: int) -> list[dict]:
+    copied = copy_sqlite_database(Path(profile["path"]))
+    if not copied:
+        return []
+    threshold = int(since.timestamp() * 1_000_000)
+    rows: list[dict] = []
+    try:
+        conn = sqlite3.connect(f"file:{copied}?mode=ro", uri=True, timeout=2)
+        try:
+            cursor = conn.execute(
+                """
+                select moz_places.url, coalesce(moz_places.title, ''), moz_historyvisits.visit_date
+                from moz_historyvisits
+                join moz_places on moz_places.id = moz_historyvisits.place_id
+                where moz_historyvisits.visit_date >= ?
+                order by moz_historyvisits.visit_date desc
+                limit ?
+                """,
+                (threshold, limit),
+            )
+            for url, title, visited_raw in cursor.fetchall():
+                visited_at = firefox_time_to_datetime(visited_raw)
+                if visited_at:
+                    rows.append({"url": str(url or ""), "title": str(title or ""), "visitedAt": visited_at})
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        log("warning", "failed to read firefox history", browser=profile["browser"], profile=profile["profile"], error=str(exc))
+    finally:
+        try:
+            copied.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return rows
+
+
+def collect_browser_history_events(config: dict, policy: dict, now: datetime) -> list[dict]:
+    if not policy.get("collectBrowserHistory"):
+        return []
+    collect_domain = bool(policy.get("collectBrowserDomain"))
+    collect_url = bool(policy.get("collectBrowserUrl"))
+    if not (collect_domain or collect_url):
+        return []
+    max_events = int(policy.get("browserHistoryMaxEvents") or 50)
+    lookback = int(policy.get("browserHistoryLookbackMinutes") or 60)
+    since = now.timestamp() - (lookback * 60)
+    since_dt = datetime.fromtimestamp(since, timezone.utc)
+    state = read_browser_state()
+    seen = set(state.get("seen", []) or [])
+    collected: list[dict] = []
+    for profile in browser_profiles():
+        remaining = max_events - len(collected)
+        if remaining <= 0:
+            break
+        if profile["engine"] == "chromium":
+            visits = fetch_chromium_history(profile, since_dt, remaining * 3)
+        else:
+            visits = fetch_firefox_history(profile, since_dt, remaining * 3)
+        for visit in visits:
+            domain, safe_url, adult_signal = normalize_browser_url(str(visit["url"]), collect_url, collect_domain)
+            if not domain and not safe_url:
+                continue
+            visited_at = visit["visitedAt"]
+            key = browser_visit_key(str(profile["browser"]), str(profile["profile"]), visited_at, safe_url, domain)
+            if key in seen:
+                continue
+            page_title = sanitize_title(
+                str(visit.get("title") or ""),
+                bool(policy.get("collectBrowserPageTitle") and policy.get("collectWindowTitle")),
+                bool(policy.get("redactSensitiveTerms")),
+            )
+            event = event_for(
+                config,
+                str(profile["browser"]),
+                page_title,
+                visited_at,
+                visited_at,
+                "browser_history_visit",
+                {
+                    "quality": "high",
+                    "method": f"{profile['engine']}-history",
+                    "browser": profile["browser"],
+                    "browserProfile": profile["profile"],
+                    "browserDomain": domain,
+                    "browserUrl": safe_url,
+                    "adultContentSignal": adult_signal,
+                    "urlQueryCollected": False,
+                    "urlFragmentCollected": False,
+                    "historyLookbackMinutes": lookback,
+                },
+                "navegador_adulto" if adult_signal else "navegador",
+            )
+            if event:
+                collected.append(event)
+                seen.add(key)
+            if len(collected) >= max_events:
+                break
+    if collected:
+        state["seen"] = list(seen)
+        state["lastCollectedAt"] = now.isoformat().replace("+00:00", "Z")
+        save_browser_state(state)
+        log("info", "browser history collected", events=len(collected))
+    return collected
 
 
 def process_name(pid: str) -> str:
@@ -459,6 +744,80 @@ def agent_memory_mb() -> int:
     return int(usage.ru_maxrss / 1024)
 
 
+def system_memory_metrics() -> dict:
+    values: dict[str, int] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, raw_value = line.split(":", 1)
+            number = int(raw_value.strip().split()[0])
+            values[key] = number
+    except (OSError, ValueError, IndexError):
+        return {}
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", 0)
+    swap_total = values.get("SwapTotal", 0)
+    swap_free = values.get("SwapFree", 0)
+    return {
+        "memoryTotalMb": int(total / 1024),
+        "memoryAvailableMb": int(available / 1024),
+        "memoryUsedPercent": round(((total - available) / total) * 100, 1) if total else 0,
+        "swapTotalMb": int(swap_total / 1024),
+        "swapUsedMb": int((swap_total - swap_free) / 1024),
+    }
+
+
+def disk_metrics(path: str = "/") -> dict:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return {}
+    return {
+        "diskPath": path,
+        "diskTotalGb": round(usage.total / (1024**3), 1),
+        "diskFreeGb": round(usage.free / (1024**3), 1),
+        "diskUsedPercent": round((usage.used / usage.total) * 100, 1) if usage.total else 0,
+    }
+
+
+def load_metrics() -> dict:
+    try:
+        load1, load5, load15 = os.getloadavg()
+    except OSError:
+        return {}
+    return {"load1": round(load1, 2), "load5": round(load5, 2), "load15": round(load15, 2), "cpuCount": os.cpu_count() or 0}
+
+
+def top_processes(limit: int = 5) -> list[dict]:
+    output = run_text(["ps", "-eo", "comm=,%cpu=,%mem=", "--sort=-%cpu"], timeout=2)
+    rows: list[dict] = []
+    for line in output.splitlines():
+        if len(rows) >= limit:
+            break
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        try:
+            cpu = float(parts[-2])
+            mem = float(parts[-1])
+        except ValueError:
+            continue
+        name = " ".join(parts[:-2])[:80]
+        if name:
+            rows.append({"name": name, "cpuPercent": cpu, "memoryPercent": mem})
+    return rows
+
+
+def machine_health_metrics(policy: dict | None = None) -> dict:
+    metrics = {
+        **load_metrics(),
+        **system_memory_metrics(),
+        **disk_metrics("/"),
+    }
+    if policy and policy.get("collectProcessList"):
+        metrics["topProcesses"] = top_processes()
+    return metrics
+
+
 def append_event(event: dict, max_queue_size: int | None = None) -> None:
     if max_queue_size and queue_depth() >= max_queue_size:
         log("warning", "offline queue limit reached; dropping oldest event", maxOfflineQueueSize=max_queue_size)
@@ -572,9 +931,11 @@ def heartbeat(config: dict, status: str = "online", last_error: str = "", metada
                     "collectIdleTime": bool(policy.get("collectIdleTime")),
                     "collectBrowserDomain": bool(policy.get("collectBrowserDomain")),
                     "collectBrowserUrl": bool(policy.get("collectBrowserUrl")),
+                    "collectBrowserHistory": bool(policy.get("collectBrowserHistory")),
                     "collectProcessList": bool(policy.get("collectProcessList")),
                     "privacyMode": policy.get("privacyMode"),
                 },
+                "machine": machine_health_metrics(policy),
                 **(metadata or {}),
             },
         },
@@ -630,6 +991,7 @@ def event_for(
         "collection_quality",
         "agent_error",
         "agent_health",
+        "browser_history_visit",
     }
     if duration < 1 and event_type not in instant_events:
         return None
@@ -687,6 +1049,7 @@ def run_loop() -> None:
     last_heartbeat = 0.0
     last_sync = 0.0
     last_health = 0.0
+    last_browser_history = 0.0
     last_error = ""
     last_quality = str(last_snapshot["quality"])
     last_locked = session_locked_hint()
@@ -787,6 +1150,18 @@ def run_loop() -> None:
             started_at = now
 
         monotonic = time.monotonic()
+        if policy.get("collectBrowserHistory") and monotonic - last_browser_history >= int(policy.get("browserHistoryIntervalSeconds", 300)):
+            try:
+                for event in collect_browser_history_events(config, policy, now):
+                    append_event(event, policy["maxOfflineQueueSize"])
+            except Exception as exc:
+                last_error = str(exc)
+                event = event_for(config, "Vulcan Agent", "", now, now, "agent_error", {"error": last_error, "scope": "browser_history"}, "sistema")
+                if event:
+                    append_event(event, policy["maxOfflineQueueSize"])
+                log("warning", f"browser history collection failed: {exc}")
+            last_browser_history = monotonic
+
         if policy.get("collectSystemMetrics") and monotonic - last_health >= 60:
             event = event_for(
                 config,
@@ -801,6 +1176,7 @@ def run_loop() -> None:
                     "queueDepth": queue_depth(),
                     "localIp": local_ip(),
                     "quality": snapshot["quality"],
+                    "machine": machine_health_metrics(policy),
                 },
                 "sistema",
             )
@@ -857,8 +1233,12 @@ def print_status() -> None:
     print(f"CollectionMethod: {active_window_details(config).get('method')}")
     print(f"CollectWindowTitle: {policy.get('collectWindowTitle')}")
     print(f"CollectIdleTime: {policy.get('collectIdleTime')}")
+    print(f"CollectBrowserDomain: {policy.get('collectBrowserDomain')}")
     print(f"CollectBrowserUrl: {policy.get('collectBrowserUrl')}")
+    print(f"CollectBrowserHistory: {policy.get('collectBrowserHistory')}")
     print(f"CollectProcessList: {policy.get('collectProcessList')}")
+    print(f"PrivacyMode: {policy.get('privacyMode')}")
+    print(f"MachineHealth: {json.dumps(machine_health_metrics(policy), ensure_ascii=False)}")
     print(f"SyncBatchSize: {policy.get('syncBatchSize')}")
     print(f"HttpTimeoutSeconds: {policy.get('httpTimeoutSeconds')}")
     print(f"QueueDepth: {queue_depth()}")
@@ -880,7 +1260,9 @@ def main() -> int:
     config_cmd.add_argument("--collect-window-title", action="store_true")
     config_cmd.add_argument("--collect-browser-domain", action="store_true")
     config_cmd.add_argument("--collect-browser-url", action="store_true")
+    config_cmd.add_argument("--collect-browser-history", action="store_true")
     config_cmd.add_argument("--collect-process-list", action="store_true")
+    config_cmd.add_argument("--corporate-monitoring", action="store_true")
     config_cmd.add_argument("--heartbeat-interval", type=int)
     config_cmd.add_argument("--sync-interval", type=int)
 

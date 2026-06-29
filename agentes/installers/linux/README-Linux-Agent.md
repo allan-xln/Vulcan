@@ -11,6 +11,7 @@ Coletas sensíveis ficam desligadas por padrão e dependem de política:
 - `collectWindowTitle=false`
 - `collectBrowserDomain=false`
 - `collectBrowserUrl=false`
+- `collectBrowserHistory=false`
 - `collectProcessList=false`
 
 O arquivo de política fica em:
@@ -45,6 +46,30 @@ O arquivo de política fica em:
 - `eventId` idempotente no backend para evitar duplicidade quando houver retry;
 - categoria do aplicativo;
 - saúde do agente.
+- qualidade da máquina: carga, memória, swap, disco e processos mais pesados quando permitido;
+- histórico recente de navegador, somente quando `collectBrowserHistory=true`, com domínio e URL sanitizada sem querystring/fragmento;
+- alerta técnico de domínio adulto quando o domínio bater em padrões conhecidos.
+
+O modo corporativo liga a coleta máxima suportada sem keylogger, screenshot, áudio, webcam, clipboard, cookies ou tokens:
+
+```bash
+bash ./instalar-vulcan-teste.sh \
+  --backend-url "http://localhost:3001" \
+  --install-deps \
+  --corporate-monitoring
+```
+
+Esse modo habilita:
+
+- `collectWindowTitle=true`
+- `collectBrowserDomain=true`
+- `collectBrowserUrl=true`
+- `collectBrowserHistory=true`
+- `collectBrowserPageTitle=true`
+- `collectProcessList=true`
+- `privacyMode=corporate`
+
+As URLs coletadas removem querystring e fragmento. Exemplo: `https://site.com/pagina?token=...#x` vira `https://site.com/pagina`.
 
 ## Camadas De Detecção Linux
 
@@ -79,6 +104,7 @@ bash ./instalar-vulcan-teste.sh \
   --backend-url "http://localhost:3001" \
   --install-deps \
   --collect-window-title \
+  --collect-browser-history \
   --collect-process-list
 ```
 

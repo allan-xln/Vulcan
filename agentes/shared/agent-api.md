@@ -76,6 +76,9 @@ Cada evento pode conter:
 - `metadata.collectionMethod`
 - `metadata.browserDomain`, somente se permitido por politica
 - `metadata.browserUrl`, somente se permitido por politica e sem querystring por padrao
+- `metadata.adultContentSignal`, sinal tecnico por dominio, quando politica corporativa permitir
+- `metadata.machine`, metricas resumidas de maquina como carga, memoria, swap, disco e processos mais pesados
+- `browser_history_visit`, evento de historico recente de navegador quando `collectBrowserHistory=true`
 
 ## Sync
 
