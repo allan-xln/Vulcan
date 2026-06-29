@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
+from pathlib import Path
 
 from app.config import Settings, get_settings
+
+VULCAN_LOGO_CID = "vulcan-symbol"
+VULCAN_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "vulcan-symbol.png"
 
 
 @dataclass(frozen=True)
@@ -235,6 +239,7 @@ class EmailNotificationService:
             email["Subject"] = subject
             email.set_content(message)
             email.add_alternative(_render_vulcan_email_html(subject, message), subtype="html")
+            _attach_vulcan_logo(email)
             with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port or 587, timeout=12) as client:
                 client.ehlo()
                 client.starttls()
@@ -271,7 +276,9 @@ def _render_vulcan_email_html(subject: str, message: str) -> str:
                           <td style="vertical-align:middle;">
                             <table role="presentation" cellspacing="0" cellpadding="0">
                               <tr>
-                                <td style="width:54px;height:54px;border-radius:16px;background:linear-gradient(135deg,#ffb15e,#ff7a1a 48%,#d6026c);text-align:center;color:white;font-weight:900;font-size:30px;line-height:54px;box-shadow:0 10px 30px rgba(255,122,26,.32);">V</td>
+                                <td style="width:64px;height:64px;">
+                                  <img src="cid:{VULCAN_LOGO_CID}" width="64" height="64" alt="Vulcan" style="display:block;width:64px;height:64px;border:0;border-radius:12px;">
+                                </td>
                                 <td style="padding-left:14px;">
                                   <div style="font-size:28px;font-weight:900;letter-spacing:.2px;color:#ffffff;">Vulcan</div>
                                   <div style="font-size:11px;font-weight:700;letter-spacing:3px;color:#ff9a3c;text-transform:uppercase;">Operation Engine</div>
@@ -331,6 +338,18 @@ def _render_vulcan_email_html(subject: str, message: str) -> str:
     </table>
   </body>
 </html>"""
+
+
+def _attach_vulcan_logo(email: EmailMessage) -> None:
+    if not VULCAN_LOGO_PATH.exists():
+        return
+    try:
+        logo = VULCAN_LOGO_PATH.read_bytes()
+    except OSError:
+        return
+    html_part = email.get_payload()[-1] if email.is_multipart() else None
+    if isinstance(html_part, EmailMessage):
+        html_part.add_related(logo, maintype="image", subtype="png", cid=f"<{VULCAN_LOGO_CID}>", filename="vulcan-symbol.png")
 
 
 def _render_message_body_html(message: str) -> str:
