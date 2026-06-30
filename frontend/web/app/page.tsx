@@ -64,6 +64,44 @@ const SUPABASE_AUTH_READY = isSupabaseAuthAvailable();
 const LOCAL_TEST_AUTH_READY =
   process.env.NEXT_PUBLIC_LOCAL_TEST_AUTH !== "false" && process.env.NEXT_PUBLIC_ENVIRONMENT !== "production";
 const LOCAL_AUTH_READY = MOCK_AUTH || LOCAL_TEST_AUTH_READY;
+const SMART_NOTIFICATION_REFRESH_MS = 60_000;
+
+type PwaInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
+
+type DesktopNotificationRuntime = {
+  supported: boolean;
+  secureContext: boolean;
+  serviceWorkerSupported: boolean;
+  serviceWorkerReady: boolean;
+  permission: NotificationPermission | "unsupported";
+  canInstall: boolean;
+  installed: boolean;
+  soundEnabled: boolean;
+  lastToastAt: string | null;
+  lastToastTitle: string | null;
+  lastToastMessage: string | null;
+  status: "ready" | "attention" | "blocked";
+  detail: string;
+};
+
+const initialDesktopNotificationRuntime: DesktopNotificationRuntime = {
+  supported: false,
+  secureContext: false,
+  serviceWorkerSupported: false,
+  serviceWorkerReady: false,
+  permission: "unsupported",
+  canInstall: false,
+  installed: false,
+  soundEnabled: false,
+  lastToastAt: null,
+  lastToastTitle: null,
+  lastToastMessage: null,
+  status: "attention",
+  detail: "Aguardando inicialização do navegador."
+};
 
 type ViewKey = "dashboard" | "hierarchy" | "metrics" | "insights" | "notifications" | "settings";
 
@@ -458,6 +496,70 @@ function maskBrazilPhone(value: string) {
     return `(${ddd}) ${number.slice(0, 4)}-${number.slice(4)}`;
   }
   return `(${ddd}) ${number.slice(0, 5)}-${number.slice(5)}`;
+}
+
+function notificationRuntimeStatus(runtime: DesktopNotificationRuntime): Pick<DesktopNotificationRuntime, "status" | "detail"> {
+  if (!runtime.supported) {
+    return { status: "blocked", detail: "Este navegador não expõe notificações nativas." };
+  }
+  if (!runtime.secureContext || !runtime.serviceWorkerSupported) {
+    return { status: "blocked", detail: "Use localhost ou HTTPS para liberar PWA e notificações nativas no Windows." };
+  }
+  if (runtime.permission === "denied") {
+    return { status: "blocked", detail: "Permissão bloqueada no navegador. Libere notificações nas configurações do site." };
+  }
+  if (!runtime.serviceWorkerReady) {
+    return { status: "attention", detail: "Service worker ainda inicializando." };
+  }
+  if (runtime.permission !== "granted") {
+    return { status: "attention", detail: "Clique em Ativar avisos para liberar toast nativo e som." };
+  }
+  if (!runtime.soundEnabled) {
+    return { status: "attention", detail: "Toast nativo pronto; som do Vulcan ainda não foi ativado." };
+  }
+  return { status: "ready", detail: runtime.installed ? "PWA instalado e avisos inteligentes ativos." : "Avisos ativos. Instale o PWA para experiência de app no Windows." };
+}
+
+function shouldNotifyOnDesktop(item: NotificationItem) {
+  const priority = item.priority ?? "medio";
+  const importantPriority = priority === "critico" || priority === "alto";
+  const actionableStatus = ["failed", "missing_credentials", "provider_unavailable", "qr_required", "rate_limited", "queued", "retrying"].includes(item.status);
+  const operationalChannel = ["system", "windows", "push"].includes(item.channel);
+  return importantPriority || actionableStatus || item.requiresAck || operationalChannel;
+}
+
+function desktopNotificationBody(item: NotificationItem) {
+  const parts = [item.message];
+  if (item.recipient) parts.push(`Responsável: ${item.recipient}`);
+  if (item.error) parts.push(`Erro: ${item.error}`);
+  return parts.join("\n");
+}
+
+function playVulcanNotificationChime(audioContext: AudioContext) {
+  const now = audioContext.currentTime;
+  const master = audioContext.createGain();
+  master.gain.setValueAtTime(0.0001, now);
+  master.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.58);
+  master.connect(audioContext.destination);
+
+  [
+    { frequency: 880, start: 0, duration: 0.16 },
+    { frequency: 1174.66, start: 0.12, duration: 0.22 },
+    { frequency: 1567.98, start: 0.28, duration: 0.20 }
+  ].forEach(({ frequency, start, duration }) => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, now + start);
+    gain.gain.setValueAtTime(0.0001, now + start);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + start + duration);
+    oscillator.connect(gain);
+    gain.connect(master);
+    oscillator.start(now + start);
+    oscillator.stop(now + start + duration + 0.04);
+  });
 }
 
 type SupabaseStatus = {
@@ -2017,6 +2119,11 @@ export default function HomePage() {
   const [reportTemplates, setReportTemplates] = useState<ReportTemplate[]>(fallbackReportTemplates);
   const [lastRefreshAt, setLastRefreshAt] = useState<Date | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const [desktopNotifications, setDesktopNotifications] = useState<DesktopNotificationRuntime>(initialDesktopNotificationRuntime);
+  const deferredInstallPromptRef = useRef<PwaInstallPromptEvent | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const desktopNotifiedIdsRef = useRef<Set<string>>(new Set());
+  const notificationBaselineReadyRef = useRef(false);
 
   const liveTestMode = authMode === "local" && identity.toLowerCase() === "teste";
   const highImpact = useMemo(() => insights.filter((item) => item.impact === "high").length, [insights]);
@@ -2030,6 +2137,13 @@ export default function HomePage() {
     return dates.length ? new Date(Math.max(...dates)) : null;
   }, [devices, operationalMetrics, lastRefreshAt]);
   const liveStatusLabel = useMemo(() => formatRelativeTime(lastSyncAt, now), [lastSyncAt, now]);
+
+  function updateDesktopNotificationRuntime(patch: Partial<DesktopNotificationRuntime>) {
+    setDesktopNotifications((current) => {
+      const next = { ...current, ...patch };
+      return { ...next, ...notificationRuntimeStatus(next) };
+    });
+  }
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -2083,6 +2197,51 @@ export default function HomePage() {
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const supported = "Notification" in window;
+    const serviceWorkerSupported = "serviceWorker" in navigator;
+    const secureContext = window.isSecureContext;
+    const installed = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    const storedSoundEnabled = window.localStorage.getItem("vulcan.desktop.sound") === "enabled";
+
+    updateDesktopNotificationRuntime({
+      supported,
+      serviceWorkerSupported,
+      secureContext,
+      installed,
+      soundEnabled: storedSoundEnabled,
+      permission: supported ? Notification.permission : "unsupported"
+    });
+
+    const installPromptHandler = (event: Event) => {
+      event.preventDefault();
+      deferredInstallPromptRef.current = event as PwaInstallPromptEvent;
+      updateDesktopNotificationRuntime({ canInstall: true });
+    };
+    const installedHandler = () => updateDesktopNotificationRuntime({ installed: true, canInstall: false });
+
+    window.addEventListener("beforeinstallprompt", installPromptHandler);
+    window.addEventListener("appinstalled", installedHandler);
+
+    if (secureContext && serviceWorkerSupported) {
+      navigator.serviceWorker.register("/sw.js", { scope: "/" })
+        .then(() => navigator.serviceWorker.ready)
+        .then(() => updateDesktopNotificationRuntime({ serviceWorkerReady: true }))
+        .catch(() => updateDesktopNotificationRuntime({ serviceWorkerReady: false }));
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const requestedView = params.get("view");
+    if (requestedView && ["dashboard", "hierarchy", "metrics", "insights", "notifications", "settings"].includes(requestedView)) {
+      setView(requestedView as ViewKey);
+    }
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", installPromptHandler);
+      window.removeEventListener("appinstalled", installedHandler);
+    };
   }, []);
 
   useEffect(() => {
@@ -2221,6 +2380,153 @@ export default function HomePage() {
       cancelled = true;
     };
   }, [token, liveTestMode]);
+
+  useEffect(() => {
+    if (!token) {
+      notificationBaselineReadyRef.current = false;
+      desktopNotifiedIdsRef.current.clear();
+      return;
+    }
+    const interval = window.setInterval(() => {
+      void Promise.all([
+        fetchProtected<NotificationItem[]>("/notifications", token, liveTestMode ? [] : fallbackNotifications),
+        fetchProtected<NotificationSummary>("/notifications/summary", token, fallbackNotificationSummary)
+      ]).then(([nextNotifications, nextSummary]) => {
+        setNotifications(nextNotifications);
+        setNotificationSummary(nextSummary);
+        setLastRefreshAt(new Date());
+      });
+    }, SMART_NOTIFICATION_REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [token, liveTestMode]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    if (!notificationBaselineReadyRef.current) {
+      desktopNotifiedIdsRef.current = new Set(notifications.map((item) => item.id));
+      notificationBaselineReadyRef.current = true;
+      return;
+    }
+    const candidates = notifications
+      .filter((item) => !desktopNotifiedIdsRef.current.has(item.id))
+      .filter(shouldNotifyOnDesktop)
+      .slice(0, 3);
+    candidates.forEach((item) => {
+      desktopNotifiedIdsRef.current.add(item.id);
+      void showDesktopNotification(item);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications, token, desktopNotifications.permission, desktopNotifications.serviceWorkerReady, desktopNotifications.soundEnabled]);
+
+  async function ensureNotificationAudio(playTest = false) {
+    const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      return false;
+    }
+    audioContextRef.current ??= new AudioContextCtor();
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume();
+    }
+    window.localStorage.setItem("vulcan.desktop.sound", "enabled");
+    updateDesktopNotificationRuntime({ soundEnabled: true });
+    if (playTest) {
+      playVulcanNotificationChime(audioContextRef.current);
+    }
+    return true;
+  }
+
+  async function requestDesktopNotifications() {
+    if (!("Notification" in window)) {
+      updateDesktopNotificationRuntime({ supported: false, permission: "unsupported" });
+      return;
+    }
+    if (!window.isSecureContext) {
+      updateDesktopNotificationRuntime({ secureContext: false });
+      return;
+    }
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    updateDesktopNotificationRuntime({ permission });
+    if (permission === "granted") {
+      if ("serviceWorker" in navigator) {
+        await navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => null);
+        await navigator.serviceWorker.ready.then(() => updateDesktopNotificationRuntime({ serviceWorkerReady: true })).catch(() => null);
+      }
+      await ensureNotificationAudio(true);
+      await showDesktopNotification({
+        id: `desktop-ready-${Date.now()}`,
+        channel: "windows",
+        status: "ready",
+        title: "Vulcan ativo no Windows",
+        message: "Avisos inteligentes e som operacional foram ativados neste navegador/PWA.",
+        createdAt: new Date().toISOString(),
+        priority: "alto"
+      }, { force: true });
+    }
+  }
+
+  async function installPwa() {
+    if (deferredInstallPromptRef.current) {
+      const promptEvent = deferredInstallPromptRef.current;
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice.catch(() => ({ outcome: "dismissed" as const, platform: "" }));
+      deferredInstallPromptRef.current = null;
+      updateDesktopNotificationRuntime({ canInstall: false, installed: choice.outcome === "accepted" || desktopNotifications.installed });
+      return;
+    }
+    updateDesktopNotificationRuntime({
+      detail: desktopNotifications.installed
+        ? "O Vulcan já está aberto em modo app."
+        : "Use o botão de instalação do Chrome/Edge na barra de endereço quando ele aparecer."
+    });
+  }
+
+  async function showDesktopNotification(item: NotificationItem, options: { force?: boolean } = {}) {
+    if (!options.force && !shouldNotifyOnDesktop(item)) {
+      return;
+    }
+    const title = item.priority === "critico" ? `Crítico: ${item.title}` : item.title;
+    const body = desktopNotificationBody(item);
+    if ("Notification" in window && Notification.permission === "granted" && window.isSecureContext && "serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.ready.catch(() => null);
+      if (registration) {
+        await registration.showNotification(title, {
+          body,
+          tag: `vulcan-${item.id}`,
+          icon: "/vulcan-symbol.svg",
+          badge: "/vulcan-symbol.svg",
+          requireInteraction: item.priority === "critico" || item.requiresAck,
+          silent: false,
+          data: { url: item.actionUrl || "/?view=notifications" }
+        });
+      }
+    }
+    if ((desktopNotifications.soundEnabled || window.localStorage.getItem("vulcan.desktop.sound") === "enabled") && audioContextRef.current) {
+      playVulcanNotificationChime(audioContextRef.current);
+    }
+    updateDesktopNotificationRuntime({
+      lastToastAt: new Date().toISOString(),
+      lastToastTitle: title,
+      lastToastMessage: item.message
+    });
+  }
+
+  async function testDesktopNotification() {
+    await requestDesktopNotifications();
+    await showDesktopNotification({
+      id: `desktop-test-${Date.now()}`,
+      channel: "windows",
+      status: "queued",
+      title: "Alerta inteligente Vulcan",
+      message: "Exemplo real: ERS-SJP-061 ficou 12 minutos sem sincronizar e exige verificação do supervisor.",
+      createdAt: new Date().toISOString(),
+      recipient: identity,
+      priority: "alto",
+      requiresAck: true,
+      actionUrl: "/?view=notifications"
+    }, { force: true });
+  }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2585,10 +2891,14 @@ export default function HomePage() {
             highImpact={highImpact}
             onlineAgents={onlineAgents}
             liveStatusLabel={liveStatusLabel}
+            desktopNotifications={desktopNotifications}
             allowDemoFallback={!liveTestMode}
             token={token}
             metricsIntent={metricsIntent}
             onOpenMetrics={openMetricsWithFilters}
+            onInstallPwa={() => void installPwa()}
+            onEnableDesktopNotifications={() => void requestDesktopNotifications()}
+            onTestDesktopNotification={() => void testDesktopNotification()}
             onDeviceOwnerChange={handleDeviceOwnerChange}
             onHierarchyMemberSave={handleHierarchyMemberSave}
             onHierarchyMemberDelete={handleHierarchyMemberDelete}
@@ -2895,10 +3205,14 @@ function DashboardShell({
   highImpact,
   onlineAgents,
   liveStatusLabel,
+  desktopNotifications,
   allowDemoFallback,
   token,
   metricsIntent,
   onOpenMetrics,
+  onInstallPwa,
+  onEnableDesktopNotifications,
+  onTestDesktopNotification,
   onDeviceOwnerChange,
   onHierarchyMemberSave,
   onHierarchyMemberDelete,
@@ -2937,10 +3251,14 @@ function DashboardShell({
   highImpact: number;
   onlineAgents: number;
   liveStatusLabel: string;
+  desktopNotifications: DesktopNotificationRuntime;
   allowDemoFallback: boolean;
   token: string;
   metricsIntent: MetricsIntent | null;
   onOpenMetrics: (filters: Omit<MetricsIntent, "nonce">) => void;
+  onInstallPwa: () => void;
+  onEnableDesktopNotifications: () => void;
+  onTestDesktopNotification: () => void;
   onDeviceOwnerChange: (deviceId: string, ownerMembershipId: string | null) => void;
   onHierarchyMemberSave: (payload: HierarchyMemberFormPayload) => Promise<void>;
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
@@ -3054,9 +3372,13 @@ function DashboardShell({
               whatsAppStatus={whatsAppStatus}
               emailStatuses={emailStatuses}
               liveStatusLabel={liveStatusLabel}
+              desktopNotifications={desktopNotifications}
               schedules={schedules}
               token={token}
               userRole={userRole}
+              onInstallPwa={onInstallPwa}
+              onEnableDesktopNotifications={onEnableDesktopNotifications}
+              onTestDesktopNotification={onTestDesktopNotification}
             />
           )}
           {activeView === "settings" && (
@@ -6378,10 +6700,14 @@ function NotificationsView({
   whatsAppStatus,
   emailStatuses,
   liveStatusLabel = "agora",
+  desktopNotifications,
   schedules = [],
   compact = false,
   token,
-  userRole = "user"
+  userRole = "user",
+  onInstallPwa,
+  onEnableDesktopNotifications,
+  onTestDesktopNotification
 }: {
   notifications: NotificationItem[];
   summary: NotificationSummary;
@@ -6390,10 +6716,14 @@ function NotificationsView({
   whatsAppStatus: WhatsAppStatus;
   emailStatuses: EmailProviderStatus[];
   liveStatusLabel?: string;
+  desktopNotifications: DesktopNotificationRuntime;
   schedules?: NotificationSchedule[];
   compact?: boolean;
   token?: string;
   userRole?: string;
+  onInstallPwa: () => void;
+  onEnableDesktopNotifications: () => void;
+  onTestDesktopNotification: () => void;
 }) {
   const [items, setItems] = useState(notifications);
   const [types, setTypes] = useState(notificationTypes);
@@ -6430,6 +6760,7 @@ function NotificationsView({
   const priorities = ["informativo", "baixo", "medio", "alto", "critico"];
   const selectedTemplate = notificationTemplates.find((item) => item.id === selectedTemplateId) ?? notificationTemplates[0];
   const rootQueueIssues = rootQueue.filter((item) => ["failed", "provider_unavailable", "qr_required", "rate_limited", "retrying"].includes(item.status));
+  const desktopTone = desktopNotifications.status === "ready" ? "ok" : desktopNotifications.status === "blocked" ? "critical" : "warn";
 
   async function rootRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (!token) throw new Error("Sessão ausente.");
@@ -6664,6 +6995,58 @@ function NotificationsView({
               </div>
             </div>
           )}
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <Panel title="Windows e PWA" icon={Monitor}>
+          <div className="grid gap-4 md:grid-cols-3">
+            <ConnectionSummary label="Instalação" value={desktopNotifications.installed ? "modo app" : desktopNotifications.canInstall ? "instalável" : "navegador"} tone={desktopNotifications.installed || desktopNotifications.canInstall ? "ok" : "warn"} />
+            <ConnectionSummary label="Toast nativo" value={desktopNotifications.permission === "granted" ? "liberado" : desktopNotifications.permission === "denied" ? "bloqueado" : "pendente"} tone={desktopNotifications.permission === "granted" ? "ok" : "warn"} />
+            <ConnectionSummary label="Som Vulcan" value={desktopNotifications.soundEnabled ? "ativo" : "pendente"} tone={desktopNotifications.soundEnabled ? "ok" : "warn"} />
+          </div>
+          <div className={`mt-4 border p-4 ${desktopTone === "ok" ? "border-emerald-400/20 bg-emerald-950/10" : desktopTone === "critical" ? "border-rose-400/25 bg-rose-950/10" : "border-orange-400/20 bg-orange-950/10"}`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-zinc-100">{desktopNotifications.status === "ready" ? "Avisos inteligentes ativos" : "Configuração de avisos"}</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">{desktopNotifications.detail}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={onInstallPwa} className="h-10 border border-orange-400/30 px-4 text-sm text-orange-200 transition hover:border-orange-300/60">
+                  {desktopNotifications.installed ? "App instalado" : "Instalar no Windows"}
+                </button>
+                <button type="button" onClick={onEnableDesktopNotifications} className="h-10 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400">
+                  Ativar avisos
+                </button>
+                <button type="button" onClick={onTestDesktopNotification} className="h-10 border border-zinc-700 px-4 text-sm text-zinc-300 transition hover:border-orange-400/50">
+                  Testar toast
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <ConnectionSummary label="Service worker" value={desktopNotifications.serviceWorkerReady ? "pronto" : desktopNotifications.serviceWorkerSupported ? "iniciando" : "indisponível"} tone={desktopNotifications.serviceWorkerReady ? "ok" : "warn"} />
+              <ConnectionSummary label="Contexto seguro" value={desktopNotifications.secureContext ? "ok" : "exige HTTPS/localhost"} tone={desktopNotifications.secureContext ? "ok" : "warn"} />
+            </div>
+            {desktopNotifications.lastToastAt ? (
+              <div className="mt-4 border border-zinc-800 bg-black/35 p-3">
+                <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Último aviso Windows</p>
+                <p className="mt-2 font-semibold text-zinc-100">{desktopNotifications.lastToastTitle}</p>
+                <p className="mt-1 text-sm text-zinc-400">{desktopNotifications.lastToastMessage}</p>
+                <p className="mt-2 text-xs text-zinc-600">{formatDateTime(desktopNotifications.lastToastAt)}</p>
+              </div>
+            ) : null}
+          </div>
+        </Panel>
+
+        <Panel title="Regra inteligente" icon={Brain}>
+          <div className="grid gap-3">
+            <ConnectionSummary label="Dispara toast" value="alto, crítico ou ação necessária" tone="ok" />
+            <ConnectionSummary label="Anti-ruído" value="snapshot inicial silenciado" tone="ok" />
+            <ConnectionSummary label="Atualização" value={`${SMART_NOTIFICATION_REFRESH_MS / 1000}s enquanto logado`} tone="ok" />
+          </div>
+          <p className="mt-4 text-sm leading-6 text-zinc-400">
+            O Vulcan evita barulho inútil: só cria toast nativo para alerta alto/crítico, falha de provedor, fila/QR/credencial, confirmação obrigatória ou evento Windows/sistema. A primeira carga não apita para não despejar histórico antigo no usuário.
+          </p>
         </Panel>
       </div>
 

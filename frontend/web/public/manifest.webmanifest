@@ -1,0 +1,45 @@
+{
+  "name": "Vulcan - Inteligência Operacional",
+  "short_name": "Vulcan",
+  "description": "Central corporativa de inteligência operacional, agentes, alertas e notificações.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#050507",
+  "theme_color": "#f97316",
+  "orientation": "any",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/vulcan-symbol.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/vulcan-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Notificações",
+      "short_name": "Alertas",
+      "description": "Abrir a central de notificações Vulcan.",
+      "url": "/?view=notifications",
+      "icons": [{ "src": "/vulcan-symbol.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Métricas",
+      "short_name": "Métricas",
+      "description": "Abrir métricas operacionais.",
+      "url": "/?view=metrics",
+      "icons": [{ "src": "/vulcan-symbol.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}
