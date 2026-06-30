@@ -36,7 +36,7 @@ $policy | Add-Member -Force -MemberType NoteProperty -Name heartbeatIntervalSeco
 $policy | Add-Member -Force -MemberType NoteProperty -Name offlineQueueEnabled -Value $true
 $policy | Add-Member -Force -MemberType NoteProperty -Name maxOfflineQueueSize -Value 10000
 $policy | Add-Member -Force -MemberType NoteProperty -Name allowUserPause -Value $false
-$policy | Add-Member -Force -MemberType NoteProperty -Name showTrayStatus -Value $true
+$policy | Add-Member -Force -MemberType NoteProperty -Name showTrayStatus -Value $false
 $policy | Add-Member -Force -MemberType NoteProperty -Name privacyMode -Value "corporate"
 $policy | Add-Member -Force -MemberType NoteProperty -Name idleThresholdSeconds -Value 300
 
@@ -45,6 +45,7 @@ $config | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF
 
 Restart-Service VulcanAgent -ErrorAction SilentlyContinue
 schtasks.exe /Run /TN "Vulcan Session Collector" | Out-Null
+schtasks.exe /Delete /TN "Vulcan Tray" /F 2>$null | Out-Null
 
-Write-Host "Vulcan Windows Agent corporate monitoring enabled."
+Write-Host "Vulcan Windows Agent corporate background monitoring enabled."
 Write-Host "Backup: $backup"

@@ -40,6 +40,7 @@ from app.schemas import (
     ConnectionTestRequest,
     ConnectionTestResponse,
     Department,
+    DepartmentCreate,
     Device,
     DeviceAdoptionRequest,
     DeviceAdoptionResponse,
@@ -304,6 +305,18 @@ def list_tenants(context: AuthContext = Authenticated, repo: VulcanRepository = 
 @app.get("/departments", response_model=list[Department])
 def list_departments(context: AuthContext = Authenticated, repo: VulcanRepository = Depends(repository)) -> list[Department]:
     return [Department.model_validate(item) for item in repo.list_departments(context)]
+
+
+@app.post("/departments", response_model=Department)
+def create_department(
+    request: DepartmentCreate,
+    context: AuthContext = Authenticated,
+    repo: VulcanRepository = Depends(repository),
+) -> Department:
+    try:
+        return Department.model_validate(repo.create_department(context, request))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 @app.get("/roles", response_model=list[Role])

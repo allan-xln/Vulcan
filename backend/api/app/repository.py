@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import re
+import unicodedata
 from io import StringIO
 from collections import defaultdict
 from dataclasses import dataclass
@@ -24,6 +26,7 @@ from app.schemas import (
     AgentHeartbeatRequest,
     AgentHeartbeatResponse,
     AgentLogsRequest,
+    DepartmentCreate,
     DeviceAdoptionRequest,
     DeviceMoveRequest,
     DeviceOwnerUpdate,
@@ -44,6 +47,13 @@ from app.security import AuthContext
 
 DEMO_TEST_MEMBERSHIP_ID = UUID("00000000-0000-0000-0000-000000300005")
 DEMO_TENANT_ID = UUID("00000000-0000-0000-0000-000000000301")
+
+
+def slugify(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.strip().lower())
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_value).strip("-")
+    return slug or uuid4().hex[:8]
 
 
 NOTIFICATION_TYPES: list[dict] = [
@@ -288,6 +298,7 @@ class AccessScope:
     tenant_id: UUID
     user_id: str
     membership_id: UUID | None
+    department_id: UUID | None
     scope: str
     is_root: bool
     local_test: bool = False
@@ -310,7 +321,7 @@ class VulcanRepository:
         if context.provider == "local":
             membership = conn.execute(
                 """
-                select m.id, coalesce(r.scope, 'self') as scope
+                select m.id, m.department_id, coalesce(r.scope, 'self') as scope
                 from public.memberships m
                 left join public.roles r on r.id = m.role_id
                 where m.tenant_id = %s
@@ -325,6 +336,7 @@ class VulcanRepository:
                     tenant_id=context.tenant_id,
                     user_id=context.user_id,
                     membership_id=membership["id"],
+                    department_id=membership["department_id"],
                     scope="tenant" if context.role in {"tenant_admin", "owner", "root"} else membership["scope"],
                     is_root=False,
                     local_test=False,
@@ -334,6 +346,7 @@ class VulcanRepository:
                     tenant_id=context.tenant_id,
                     user_id=context.user_id,
                     membership_id=None,
+                    department_id=None,
                     scope="self",
                     is_root=False,
                     local_test=False,
@@ -342,6 +355,7 @@ class VulcanRepository:
                 tenant_id=context.tenant_id,
                 user_id=context.user_id,
                 membership_id=None,
+                department_id=None,
                 scope="tenant",
                 is_root=False,
             )
@@ -355,13 +369,14 @@ class VulcanRepository:
                 tenant_id=context.tenant_id,
                 user_id=context.user_id,
                 membership_id=None,
+                department_id=None,
                 scope="global",
                 is_root=True,
             )
 
         membership = conn.execute(
             """
-            select m.id, coalesce(r.scope, 'self') as scope
+            select m.id, m.department_id, coalesce(r.scope, 'self') as scope
             from public.memberships m
             left join public.roles r on r.id = m.role_id
             where m.tenant_id = %s
@@ -377,6 +392,7 @@ class VulcanRepository:
                 tenant_id=context.tenant_id,
                 user_id=context.user_id,
                 membership_id=None,
+                department_id=None,
                 scope="self",
                 is_root=False,
             )
@@ -385,6 +401,7 @@ class VulcanRepository:
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             membership_id=membership["id"],
+            department_id=membership["department_id"],
             scope=membership["scope"],
             is_root=False,
         )
@@ -396,13 +413,36 @@ class VulcanRepository:
             return f"{alias}.tenant_id = %s", (access.tenant_id,)
         if access.membership_id is None:
             return "false", ()
+        department_condition = ""
+        params: tuple[object, ...] = (access.tenant_id, access.tenant_id, access.membership_id)
+        if access.department_id is not None:
+            department_condition = f"""
+                and (
+                    {alias}.id = %s
+                    or {alias}.department_id in (
+                        with recursive visible_departments as (
+                            select id
+                            from public.departments
+                            where tenant_id = %s and id = %s
+                            union all
+                            select child.id
+                            from public.departments child
+                            join visible_departments parent on parent.id = child.parent_department_id
+                            where child.tenant_id = %s
+                        )
+                        select id from visible_departments
+                    )
+                )
+            """
+            params = (*params, access.membership_id, access.tenant_id, access.department_id, access.tenant_id)
         return (
             f"""{alias}.tenant_id = %s and {alias}.id in (
                 select descendant_membership_id
                 from public.membership_closure
                 where tenant_id = %s and ancestor_membership_id = %s
-            )""",
-            (access.tenant_id, access.tenant_id, access.membership_id),
+            )
+            {department_condition}""",
+            params,
         )
 
     def _owner_filter(self, access: AccessScope, owner_column: str, tenant_column: str = "tenant_id") -> tuple[str, tuple[object, ...]]:
@@ -412,16 +452,78 @@ class VulcanRepository:
             return f"{tenant_column} = %s", (access.tenant_id,)
         if access.membership_id is None:
             return "false", ()
+        department_condition = ""
+        params: tuple[object, ...] = (access.tenant_id, access.tenant_id, access.membership_id)
+        if access.department_id is not None:
+            department_condition = """
+                    and (
+                        scoped_memberships.id = %s
+                        or scoped_memberships.department_id in (
+                            with recursive visible_departments as (
+                                select id
+                                from public.departments
+                                where tenant_id = %s and id = %s
+                                union all
+                                select child.id
+                                from public.departments child
+                                join visible_departments parent on parent.id = child.parent_department_id
+                                where child.tenant_id = %s
+                            )
+                            select id from visible_departments
+                        )
+                    )
+            """
+            params = (*params, access.membership_id, access.tenant_id, access.department_id, access.tenant_id)
         return (
             f"""{tenant_column} = %s and (
                 {owner_column} in (
-                    select descendant_membership_id
-                    from public.membership_closure
-                    where tenant_id = %s and ancestor_membership_id = %s
+                    select closure.descendant_membership_id
+                    from public.membership_closure closure
+                    join public.memberships scoped_memberships
+                      on scoped_memberships.id = closure.descendant_membership_id
+                     and scoped_memberships.tenant_id = closure.tenant_id
+                    where closure.tenant_id = %s
+                      and closure.ancestor_membership_id = %s
+                      {department_condition}
                 )
             )""",
-            (access.tenant_id, access.tenant_id, access.membership_id),
+            params,
         )
+
+    def _department_visibility_filter(self, access: AccessScope, alias: str = "d") -> tuple[str, tuple[object, ...]]:
+        if access.is_root:
+            return "true", ()
+        if access.scope in {"tenant", "global"}:
+            return f"{alias}.tenant_id = %s", (access.tenant_id,)
+        if access.department_id is None:
+            return "false", ()
+        return (
+            f"""{alias}.tenant_id = %s and {alias}.id in (
+                with recursive visible_departments as (
+                    select id
+                    from public.departments
+                    where tenant_id = %s and id = %s
+                    union all
+                    select child.id
+                    from public.departments child
+                    join visible_departments parent on parent.id = child.parent_department_id
+                    where child.tenant_id = %s
+                )
+                select id from visible_departments
+            )""",
+            (access.tenant_id, access.tenant_id, access.department_id, access.tenant_id),
+        )
+
+    def _assert_department_visible(self, conn: psycopg.Connection, access: AccessScope, department_id: UUID | None) -> None:
+        if department_id is None or access.is_root or access.scope in {"tenant", "global"}:
+            return
+        condition, params = self._department_visibility_filter(access, "d")
+        row = conn.execute(
+            f"select id from public.departments d where d.id = %s and {condition}",
+            (department_id, *params),
+        ).fetchone()
+        if not row:
+            raise ValueError("department outside visible scope")
 
     def _real_agent_data_filter(self, access: AccessScope, alias: str) -> str:
         if not access.local_test:
@@ -942,18 +1044,49 @@ class VulcanRepository:
             return []
         with self._connect() as conn:
             access = self._access(conn, context)
-            condition = "true" if access.is_root else "tenant_id = %s"
-            params = () if access.is_root else (access.tenant_id,)
+            condition, params = self._department_visibility_filter(access, "d")
             return list(conn.execute(
                 f"""
                 select id, tenant_id as "tenantId", parent_department_id as "parentDepartmentId",
                        name, slug, description
-                from public.departments
+                from public.departments d
                 where {condition}
-                order by name
+                order by coalesce(parent_department_id::text, ''), name
                 """,
                 params,
             ).fetchall())
+
+    def create_department(self, context: AuthContext, request: DepartmentCreate) -> dict:
+        if not self.enabled:
+            raise ValueError("department writes require Supabase/Postgres")
+        with self._connect() as conn:
+            access = self._access(conn, context)
+            self._ensure_tenant_write(access, request.tenant_id)
+            if request.parent_department_id:
+                parent = conn.execute(
+                    "select id from public.departments where tenant_id = %s and id = %s",
+                    (request.tenant_id, request.parent_department_id),
+                ).fetchone()
+                if not parent:
+                    raise ValueError("parent department not found")
+            slug = slugify(request.slug or request.name)
+            row = conn.execute(
+                """
+                insert into public.departments (tenant_id, parent_department_id, name, slug, description)
+                values (%s, %s, %s, %s, %s)
+                on conflict (tenant_id, slug) do update
+                set parent_department_id = excluded.parent_department_id,
+                    name = excluded.name,
+                    description = excluded.description,
+                    updated_at = timezone('utc', now())
+                returning id, tenant_id as "tenantId", parent_department_id as "parentDepartmentId",
+                          name, slug, description
+                """,
+                (request.tenant_id, request.parent_department_id, request.name.strip(), slug, request.description),
+            ).fetchone()
+            self.write_audit(conn, context, request.tenant_id, "department.upserted", "department", row["id"], {"slug": slug, "name": request.name})
+            conn.commit()
+            return dict(row)
 
     def list_roles(self, context: AuthContext) -> list[dict]:
         if not self.enabled:
@@ -983,7 +1116,7 @@ class VulcanRepository:
         with self._connect() as conn:
             access = self._access(conn, context)
             self._ensure_tenant_write(access, request.tenant_id)
-            slug = request.slug.strip().lower().replace(" ", "-")
+            slug = slugify(request.slug)
             row = conn.execute(
                 """
                 insert into public.roles (tenant_id, slug, name, description, scope, is_system)
@@ -1433,6 +1566,7 @@ class VulcanRepository:
                 request.direct_manager_membership_id,
                 request.hierarchy_level,
             )
+            self._assert_department_visible(conn, access, request.department_id)
             self._assert_manager_is_safe(conn, request.tenant_id, None, request.direct_manager_membership_id)
             user_id = self._upsert_auth_user(
                 conn,
@@ -1502,6 +1636,7 @@ class VulcanRepository:
             manager_id = request.direct_manager_membership_id if manager_was_sent else existing["direct_manager_membership_id"]
             hierarchy_level = request.hierarchy_level if request.hierarchy_level is not None else existing["hierarchy_level"]
             self._ensure_hierarchy_write(conn, access, tenant_id, membership_id, manager_id, hierarchy_level)
+            self._assert_department_visible(conn, access, request.department_id)
             self._assert_manager_is_safe(conn, tenant_id, membership_id, manager_id)
             if request.username or request.password or request.work_email or request.full_name:
                 self._upsert_auth_user(
@@ -1763,7 +1898,7 @@ class VulcanRepository:
             ]
         with self._connect() as conn:
             access = self._access(conn, context)
-            if access.scope == "self" and not access.is_root:
+            if access.scope not in {"tenant", "global"} and not access.is_root:
                 return []
             self._ensure_team_tables(conn)
             condition = "d.tenant_id = %s" if not access.is_root else "true"
@@ -2227,7 +2362,7 @@ class VulcanRepository:
             )
             on conflict (tenant_id, device_fingerprint) do update
             set hostname = excluded.hostname,
-                os = coalesce(public.devices.os, excluded.os),
+                os = excluded.os,
                 status = case when public.devices.owner_membership_id is null then 'pending' else public.devices.status end,
                 last_seen_at = timezone('utc', now()),
                 metadata = public.devices.metadata || excluded.metadata,
@@ -2255,11 +2390,13 @@ class VulcanRepository:
     def agent_heartbeat(self, request: AgentHeartbeatRequest) -> AgentHeartbeatResponse:
         if self.enabled:
             with self._connect() as conn:
+                heartbeat_os = str(request.metadata.get("osVersion") or ("Windows" if request.metadata.get("computerName") else "Linux"))
                 row = conn.execute(
                     """
                     update public.devices
                     set status = case when owner_membership_id is null then 'pending' else %s end,
                         hostname = %s,
+                        os = %s,
                         last_seen_at = timezone('utc', now()),
                         metadata = metadata || %s,
                         updated_at = timezone('utc', now())
@@ -2273,6 +2410,7 @@ class VulcanRepository:
                     (
                         request.status if request.status in {"online", "offline", "syncing"} else "online",
                         request.hostname,
+                        heartbeat_os,
                         Jsonb(
                             {
                                 "agentVersion": request.agent_version,
@@ -2294,6 +2432,7 @@ class VulcanRepository:
                         request.device_id,
                         request.machine_fingerprint,
                         request.hostname,
+                        os_name=heartbeat_os,
                         metadata={
                             "agentVersion": request.agent_version,
                             "queueDepth": request.queue_depth,

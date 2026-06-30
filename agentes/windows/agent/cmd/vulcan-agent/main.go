@@ -354,7 +354,7 @@ func installCommand(args []string) error {
 	if err := installOrUpdateService(exePath); err != nil {
 		return err
 	}
-	if err := installScheduledTasks(exePath); err != nil {
+	if err := installScheduledTasks(exePath, policy.ShowTrayStatus); err != nil {
 		return err
 	}
 	if err := sendEnrollment(cfg); err != nil {
@@ -397,7 +397,7 @@ func repairCommand(args []string) error {
 	if err := installOrUpdateService(exePath); err != nil {
 		return err
 	}
-	if err := installScheduledTasks(exePath); err != nil {
+	if err := installScheduledTasks(exePath, cfg.Policy.ShowTrayStatus); err != nil {
 		return err
 	}
 	if err := sendEnrollment(cfg); err != nil {
@@ -499,7 +499,7 @@ func runServiceLoop(ctx context.Context, cfg Config) {
 		select {
 		case <-ctx.Done():
 			machine, _ := machineHealth(policy)
-			_ = sendHeartbeat(cfg, "offline", queueDepth(defaultQueuePath()), "", map[string]interface{}{"collectionQuality": "high", "localIp": localIP(), "machine": machine})
+			_ = sendHeartbeat(cfg, "offline", queueDepth(defaultQueuePath()), "", map[string]interface{}{"collectionQuality": "high", "machine": machine})
 			logLocal("info", "service loop stopped", nil)
 			return
 		case <-heartbeatTicker.C:
@@ -507,7 +507,6 @@ func runServiceLoop(ctx context.Context, cfg Config) {
 			if err := sendHeartbeat(cfg, "online", queueDepth(defaultQueuePath()), lastErr, map[string]interface{}{
 				"collectionQuality": "high",
 				"collectionMethod":  "win32-foreground-window",
-				"localIp":           localIP(),
 				"agentMemoryMb":     agentMemoryMb(),
 				"machine":           machine,
 				"policy": map[string]interface{}{
@@ -1163,6 +1162,10 @@ func sendEnrollment(cfg Config) error {
 }
 
 func sendHeartbeat(cfg Config, status string, depth int, lastErr string, metadata map[string]interface{}) error {
+	mergedMetadata := identityMetadata(cfg)
+	for key, value := range metadata {
+		mergedMetadata[key] = value
+	}
 	req := heartbeatRequest{
 		TenantID:           cfg.TenantID,
 		EnrollmentToken:    cfg.EnrollmentToken,
@@ -1173,7 +1176,7 @@ func sendHeartbeat(cfg Config, status string, depth int, lastErr string, metadat
 		Status:             status,
 		QueueDepth:         depth,
 		LastError:          lastErr,
-		Metadata:           metadata,
+		Metadata:           mergedMetadata,
 	}
 	return postJSON(cfg.BackendURL+"/agent/heartbeat", req, &map[string]interface{}{})
 }
@@ -1345,13 +1348,17 @@ func installOrUpdateService(exePath string) error {
 	return nil
 }
 
-func installScheduledTasks(exePath string) error {
+func installScheduledTasks(exePath string, showTrayStatus bool) error {
 	collectorCmd := fmt.Sprintf(`"%s" collector`, exePath)
-	trayCmd := fmt.Sprintf(`"%s" tray`, exePath)
 	if err := runCommand("schtasks.exe", "/Create", "/TN", "Vulcan Session Collector", "/SC", "ONLOGON", "/TR", collectorCmd, "/RL", "LIMITED", "/F"); err != nil {
 		return err
 	}
-	_ = runCommand("schtasks.exe", "/Create", "/TN", "Vulcan Tray", "/SC", "ONLOGON", "/TR", trayCmd, "/RL", "LIMITED", "/F")
+	if showTrayStatus {
+		trayCmd := fmt.Sprintf(`"%s" tray`, exePath)
+		_ = runCommand("schtasks.exe", "/Create", "/TN", "Vulcan Tray", "/SC", "ONLOGON", "/TR", trayCmd, "/RL", "LIMITED", "/F")
+	} else {
+		_ = runCommand("schtasks.exe", "/Delete", "/TN", "Vulcan Tray", "/F")
+	}
 	return nil
 }
 
@@ -1527,6 +1534,62 @@ func localIP() string {
 		return addr.IP.String()
 	}
 	return ""
+}
+
+func localIPs() []string {
+	var values []string
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return values
+	}
+	for _, item := range interfaces {
+		if item.Flags&net.FlagUp == 0 || item.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := item.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch value := addr.(type) {
+			case *net.IPNet:
+				ip = value.IP
+			case *net.IPAddr:
+				ip = value.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ipv4 := ip.To4(); ipv4 != nil {
+				values = append(values, ipv4.String())
+			}
+		}
+	}
+	sort.Strings(values)
+	return values
+}
+
+func identityMetadata(cfg Config) map[string]interface{} {
+	return map[string]interface{}{
+		"hostname":             cfg.Hostname,
+		"computerName":         os.Getenv("COMPUTERNAME"),
+		"domain":               os.Getenv("USERDOMAIN"),
+		"userDnsDomain":        os.Getenv("USERDNSDOMAIN"),
+		"osUser":               cfg.OSUser,
+		"currentUser":          currentUser(),
+		"linkedUser":           cfg.LinkedUser,
+		"osVersion":            cfg.OSVersion,
+		"localIp":              localIP(),
+		"localIps":             localIPs(),
+		"agentVersion":         version,
+		"roleLevel":            cfg.RoleLevel,
+		"department":           cfg.Department,
+		"managerMembershipId":  cfg.ManagerMembershipID,
+		"installedAt":          cfg.InstalledAt,
+		"machineFingerprint":   cfg.MachineFingerprint,
+		"windowsSessionSource": "service-heartbeat",
+	}
 }
 
 func agentMemoryMb() uint64 {
@@ -1758,6 +1821,7 @@ func defaultAgentPolicy(collectWindowTitle bool, syncInterval int, heartbeatInte
 		policy.CollectBrowserPageTitle = true
 		policy.CollectProcessList = true
 		policy.AllowUserPause = false
+		policy.ShowTrayStatus = false
 		policy.PrivacyMode = "corporate"
 		policy.BrowserHistoryLookback = 120
 		policy.BrowserHistoryMaxEvents = 100

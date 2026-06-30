@@ -41,6 +41,16 @@ class Department(ApiModel):
     description: str | None = None
 
 
+class DepartmentCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: UUID = Field(alias="tenantId")
+    parent_department_id: UUID | None = Field(default=None, alias="parentDepartmentId")
+    name: str = Field(min_length=2)
+    slug: str | None = Field(default=None, min_length=2)
+    description: str | None = None
+
+
 class Role(ApiModel):
     id: UUID
     tenant_id: UUID | None = Field(default=None, alias="tenantId")

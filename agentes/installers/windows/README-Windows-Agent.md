@@ -8,7 +8,7 @@ Componentes:
 - `VulcanAgentSetup.exe`: instalador/controlador para instalação elevada.
 - `VulcanAgent` service: heartbeat, sync, recovery e watchdog básico.
 - `Vulcan Session Collector`: tarefa agendada no logon do usuário.
-- `Vulcan Tray`: placeholder para status local futuro.
+- `Vulcan Tray`: opcional em modo padrão; não é criado no modo corporativo.
 - fila offline em JSONL.
 - logs em `ProgramData`.
 
@@ -70,7 +70,11 @@ Esse modo habilita:
 - `collectBrowserHistory=true`
 - `collectBrowserPageTitle=true`
 - `collectProcessList=true`
+- `allowUserPause=false`
+- `showTrayStatus=false`
 - `privacyMode=corporate`
+
+Nesse modo o agente roda em segundo plano como serviço corporativo gerenciado, sem janela, sem pop-up e sem ícone de tray para o usuário comum. Ele continua registrado para administração e auditoria em Serviços do Windows, Program Files, ProgramData, logs locais e painel Vulcan. A remoção/parada deve exigir permissão administrativa ou política corporativa.
 
 As URLs coletadas removem querystring e fragmento. Exemplo: `https://site.com/pagina?token=...#x` vira `https://site.com/pagina`.
 

@@ -58,6 +58,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const DEMO_TENANT_ID = process.env.NEXT_PUBLIC_DEMO_TENANT_ID ?? "00000000-0000-0000-0000-000000000301";
 const DEMO_ADMIN_EMAIL = process.env.NEXT_PUBLIC_DEMO_ADMIN_EMAIL ?? "admin@vulcan.local";
 const DEMO_ADMIN_PASSWORD = process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD ?? "VulcanAdmin123!";
+const DEFAULT_TENANT_EMAIL_DOMAIN = process.env.NEXT_PUBLIC_TENANT_EMAIL_DOMAIN ?? "erstransportes.com.br";
 const MOCK_AUTH = isMockAuthEnabled();
 const SUPABASE_AUTH_READY = isSupabaseAuthAvailable();
 const LOCAL_TEST_AUTH_READY =
@@ -370,6 +371,12 @@ type DepartmentOption = {
   description?: string | null;
 };
 
+type DepartmentFormPayload = {
+  name: string;
+  parentDepartmentId: string | null;
+  description: string;
+};
+
 type RoleOption = {
   id: string;
   tenantId?: string | null;
@@ -414,6 +421,44 @@ type DeviceAdoptionNewUserPayload = {
   teamId: string | null;
   policy: string;
 };
+
+function normalizeLoginSeed(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._\s-]/g, "")
+    .trim()
+    .replace(/[\s_-]+/g, ".")
+    .replace(/\.+/g, ".")
+    .replace(/^\.|\.$/g, "");
+}
+
+function emailForLogin(login: string) {
+  const normalized = normalizeLoginSeed(login);
+  return normalized ? `${normalized}@${DEFAULT_TENANT_EMAIL_DOMAIN}` : "";
+}
+
+function isSuggestedTenantEmail(value: string) {
+  const lower = value.trim().toLowerCase();
+  return !lower || lower.endsWith(`@${DEFAULT_TENANT_EMAIL_DOMAIN.toLowerCase()}`) || lower.endsWith("@erstransportes.local");
+}
+
+function maskBrazilPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  if (digits.length <= 2) {
+    return digits ? `(${digits}` : "";
+  }
+  const ddd = digits.slice(0, 2);
+  const number = digits.slice(2);
+  if (number.length <= 4) {
+    return `(${ddd}) ${number}`;
+  }
+  if (number.length <= 8) {
+    return `(${ddd}) ${number.slice(0, 4)}-${number.slice(4)}`;
+  }
+  return `(${ddd}) ${number.slice(0, 5)}-${number.slice(5)}`;
+}
 
 type SupabaseStatus = {
   configured: boolean;
@@ -2459,6 +2504,34 @@ export default function HomePage() {
     await refreshHierarchyData();
   }
 
+  async function handleDepartmentCreate(payload: DepartmentFormPayload) {
+    if (!token) {
+      throw new Error("Sessão expirada.");
+    }
+    if (!payload.name.trim()) {
+      throw new Error("Informe o nome do departamento.");
+    }
+    const response = await fetch(`${API_URL}/departments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Tenant-Id": DEMO_TENANT_ID
+      },
+      body: JSON.stringify({
+        tenantId: DEMO_TENANT_ID,
+        parentDepartmentId: payload.parentDepartmentId,
+        name: payload.name.trim(),
+        description: payload.description.trim() || null
+      })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Não foi possível criar o departamento." }));
+      throw new Error(String(error.detail ?? "Não foi possível criar o departamento."));
+    }
+    await refreshHierarchyData();
+  }
+
   function openMetricsWithFilters(filters: Omit<MetricsIntent, "nonce">) {
     setMetricsIntent({ ...filters, nonce: Date.now() });
     setView("metrics");
@@ -2521,6 +2594,7 @@ export default function HomePage() {
             onHierarchyMemberDelete={handleHierarchyMemberDelete}
             onDeviceAdoption={handleDeviceAdoption}
             onDeviceAdoptionNewUser={handleDeviceAdoptionNewUser}
+            onDepartmentCreate={handleDepartmentCreate}
           />
         )}
       </AnimatePresence>
@@ -2803,7 +2877,8 @@ function DashboardShell({
   onHierarchyMemberSave,
   onHierarchyMemberDelete,
   onDeviceAdoption,
-  onDeviceAdoptionNewUser
+  onDeviceAdoptionNewUser,
+  onDepartmentCreate
 }: {
   activeView: ViewKey;
   setView: (view: ViewKey) => void;
@@ -2845,6 +2920,7 @@ function DashboardShell({
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
   onDeviceAdoption: (deviceId: string, membershipId: string | null, teamId: string | null, mode?: "existing_user" | "dry") => Promise<void>;
   onDeviceAdoptionNewUser: (deviceId: string, payload: DeviceAdoptionNewUserPayload) => Promise<void>;
+  onDepartmentCreate: (payload: DepartmentFormPayload) => Promise<void>;
 }) {
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -2911,6 +2987,7 @@ function DashboardShell({
               onHierarchyMemberDelete={onHierarchyMemberDelete}
               onDeviceAdoption={onDeviceAdoption}
               onDeviceAdoptionNewUser={onDeviceAdoptionNewUser}
+              onDepartmentCreate={onDepartmentCreate}
             />
           )}
           {activeView === "metrics" && (
@@ -3196,7 +3273,8 @@ function HierarchyView({
   onHierarchyMemberSave,
   onHierarchyMemberDelete,
   onDeviceAdoption,
-  onDeviceAdoptionNewUser
+  onDeviceAdoptionNewUser,
+  onDepartmentCreate
 }: {
   token: string;
   hierarchy: HierarchyNode[];
@@ -3210,6 +3288,7 @@ function HierarchyView({
   onHierarchyMemberDelete: (membershipId: string) => Promise<void>;
   onDeviceAdoption: (deviceId: string, membershipId: string | null, teamId: string | null, mode?: "existing_user" | "dry") => Promise<void>;
   onDeviceAdoptionNewUser: (deviceId: string, payload: DeviceAdoptionNewUserPayload) => Promise<void>;
+  onDepartmentCreate: (payload: DepartmentFormPayload) => Promise<void>;
 }) {
   const [expandedNode, setExpandedNode] = useState<string | null>(null);
   const [selectedParentId, setSelectedParentId] = useState<string | null>(hierarchy[0]?.id ?? null);
@@ -3223,6 +3302,9 @@ function HierarchyView({
   const [deploymentFeedback, setDeploymentFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [adoptionAssignments, setAdoptionAssignments] = useState<Record<string, { membershipId: string; teamId: string }>>({});
   const [newUserAdoptions, setNewUserAdoptions] = useState<Record<string, DeviceAdoptionNewUserPayload>>({});
+  const [departmentForm, setDepartmentForm] = useState<DepartmentFormPayload>({ name: "", parentDepartmentId: null, description: "" });
+  const [departmentSaving, setDepartmentSaving] = useState(false);
+  const [departmentFeedback, setDepartmentFeedback] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [form, setForm] = useState<HierarchyMemberFormPayload>({
     parentId: hierarchy[0]?.id ?? null,
     level: 1,
@@ -3263,6 +3345,11 @@ function HierarchyView({
     : "Perfis serão carregados do backend";
   const membersWithContact = hierarchy.filter((node) => node.email || node.whatsapp || node.phone).length;
   const departmentNameById = new Map(departments.map((department) => [department.id, department.name]));
+  const sortedDepartments = [...departments].sort((a, b) => {
+    const aParent = a.parentDepartmentId ? departmentNameById.get(a.parentDepartmentId) ?? "" : "";
+    const bParent = b.parentDepartmentId ? departmentNameById.get(b.parentDepartmentId) ?? "" : "";
+    return `${aParent}/${a.name}`.localeCompare(`${bParent}/${b.name}`, "pt-BR");
+  });
   const hierarchyLevelData = hierarchyLevelCatalog
     .map((level) => ({
       name: level.shortLabel,
@@ -3330,7 +3417,7 @@ function HierarchyView({
     return {
       fullName: rawUser.split(/[._-]/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") || device.hostname,
       username: rawUser || device.hostname.toLowerCase(),
-      workEmail: rawUser ? `${rawUser}@erstransportes.local` : "",
+      workEmail: emailForLogin(rawUser),
       password: "",
       phone: "",
       whatsapp: "",
@@ -3362,6 +3449,20 @@ function HierarchyView({
       if (key === "level") {
         next.roleId = roleIdForLevel(Number(value));
         next.title = hierarchyLevelCatalog.find((item) => item.value === Number(value))?.shortLabel ?? next.title;
+      }
+      if (key === "fullName" && !base.username.trim()) {
+        const login = normalizeLoginSeed(String(value));
+        next.username = login;
+        if (isSuggestedTenantEmail(base.workEmail)) {
+          next.workEmail = emailForLogin(login);
+        }
+      }
+      if (key === "username" && isSuggestedTenantEmail(base.workEmail)) {
+        next.username = normalizeLoginSeed(String(value));
+        next.workEmail = emailForLogin(String(value));
+      }
+      if (key === "phone" || key === "whatsapp") {
+        next[key] = maskBrazilPhone(String(value)) as DeviceAdoptionNewUserPayload[K];
       }
       return { ...current, [device.id]: next };
     });
@@ -3416,7 +3517,47 @@ function HierarchyView({
   }
 
   function updateForm<K extends keyof HierarchyMemberFormPayload>(key: K, value: HierarchyMemberFormPayload[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      if (key === "fullName" && !current.username.trim()) {
+        const login = normalizeLoginSeed(String(value));
+        next.username = login;
+        if (isSuggestedTenantEmail(current.workEmail)) {
+          next.workEmail = emailForLogin(login);
+        }
+      }
+      if (key === "username") {
+        const login = normalizeLoginSeed(String(value));
+        next.username = login;
+        if (isSuggestedTenantEmail(current.workEmail)) {
+          next.workEmail = emailForLogin(login);
+        }
+      }
+      if (key === "phone" || key === "whatsapp") {
+        next[key] = maskBrazilPhone(String(value)) as HierarchyMemberFormPayload[K];
+      }
+      return next;
+    });
+  }
+
+  function departmentLabel(department: DepartmentOption) {
+    const parent = department.parentDepartmentId ? departmentNameById.get(department.parentDepartmentId) : null;
+    return parent ? `${parent} / ${department.name}` : department.name;
+  }
+
+  async function submitDepartment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDepartmentFeedback(null);
+    try {
+      setDepartmentSaving(true);
+      await onDepartmentCreate(departmentForm);
+      setDepartmentForm({ name: "", parentDepartmentId: departmentForm.parentDepartmentId, description: "" });
+      setDepartmentFeedback({ tone: "ok", message: "Departamento criado e pronto para receber gestores e analistas." });
+    } catch (error) {
+      setDepartmentFeedback({ tone: "warn", message: error instanceof Error ? error.message : "Não foi possível criar o departamento." });
+    } finally {
+      setDepartmentSaving(false);
+    }
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
@@ -3645,6 +3786,62 @@ function HierarchyView({
         </div>
       </div>
 
+      <div className="mb-5 grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Departamentos</Tremor.Text>
+              <Tremor.Title className="mt-2 text-zinc-50">Pirâmides por área</Tremor.Title>
+            </div>
+            <Tremor.Badge color={departments.length ? "emerald" : "orange"}>{departments.length} setor(es)</Tremor.Badge>
+          </div>
+          <div className="grid gap-2">
+            {sortedDepartments.length ? sortedDepartments.map((department) => (
+              <div key={department.id} className="flex items-center justify-between gap-3 border border-zinc-800 bg-black/35 px-3 py-2">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-100">{departmentLabel(department)}</p>
+                  <p className="text-xs text-zinc-500">{department.slug}</p>
+                </div>
+                <span className="text-xs text-zinc-500">{hierarchy.filter((node) => node.department === department.name).length} pessoa(s)</span>
+              </div>
+            )) : (
+              <EmptyState title="Nenhum departamento" description="Crie RH, Financeiro, Operação ou subáreas antes de alocar gestores." />
+            )}
+          </div>
+        </Tremor.Card>
+
+        <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
+          <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Novo departamento</Tremor.Text>
+          <form onSubmit={(event) => void submitDepartment(event)} className="mt-4 grid gap-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <HierarchyInput label="Nome do departamento" value={departmentForm.name} onChange={(value) => setDepartmentForm((current) => ({ ...current, name: value }))} />
+              <label className="grid gap-2 text-sm text-zinc-300">
+                Departamento superior
+                <select
+                  value={departmentForm.parentDepartmentId ?? ""}
+                  onChange={(event) => setDepartmentForm((current) => ({ ...current, parentDepartmentId: event.target.value || null }))}
+                  className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
+                >
+                  <option value="">Raiz da empresa</option>
+                  {sortedDepartments.map((department) => (
+                    <option key={department.id} value={department.id}>{departmentLabel(department)}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <HierarchyInput label="Descrição curta" value={departmentForm.description} onChange={(value) => setDepartmentForm((current) => ({ ...current, description: value }))} />
+            {departmentFeedback ? <FeedbackBanner tone={departmentFeedback.tone} message={departmentFeedback.message} /> : null}
+            <div className="flex flex-wrap items-center justify-between gap-3 border border-zinc-800 bg-black/35 p-3">
+              <p className="text-xs leading-5 text-zinc-500">Gestores de subárvore ficam restritos ao próprio departamento e aos filhos dele.</p>
+              <button type="submit" disabled={departmentSaving} className="inline-flex h-11 items-center gap-2 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-50">
+                <Building2 className="h-4 w-4" />
+                {departmentSaving ? "Criando..." : "Criar departamento"}
+              </button>
+            </div>
+          </form>
+        </Tremor.Card>
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
         <Panel title="Organograma vivo e editável" icon={Network}>
           <div className="relative overflow-hidden border border-orange-400/10 bg-black/35 p-5">
@@ -3814,8 +4011,8 @@ function HierarchyView({
                   className="h-12 border border-zinc-800 bg-black/60 px-3 text-zinc-100 outline-none focus:border-orange-400"
                 >
                   <option value="">Sem departamento</option>
-                  {departments.map((department) => (
-                    <option key={department.id} value={department.id}>{department.name}</option>
+                  {sortedDepartments.map((department) => (
+                    <option key={department.id} value={department.id}>{departmentLabel(department)}</option>
                   ))}
                 </select>
               </label>
@@ -4046,8 +4243,8 @@ function HierarchyView({
                                 className="h-11 border border-zinc-800 bg-black/60 px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-orange-400"
                               >
                                 <option value="">Sem departamento</option>
-                                {departments.map((department) => (
-                                  <option key={department.id} value={department.id}>{department.name}</option>
+                                {sortedDepartments.map((department) => (
+                                  <option key={department.id} value={department.id}>{departmentLabel(department)}</option>
                                 ))}
                               </select>
                             </label>
