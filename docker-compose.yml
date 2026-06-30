@@ -181,7 +181,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: ["bash", "-lc", "psql \"$$DATABASE_URL\" -v ON_ERROR_STOP=1 -f /app/database/supabase/local/init/001_supabase_compat.sql >/dev/null && /app/scripts/apply-supabase-migrations.sh && python /app/scripts/seed_demo.py"]
+    command: ["bash", "-lc", "psql \"$$DATABASE_URL\" -v ON_ERROR_STOP=1 -f /app/database/supabase/local/init/001_supabase_compat.sql >/dev/null && /app/scripts/apply-supabase-migrations.sh && python /app/scripts/seed_demo.py && python /app/scripts/seed_ers_structure.py"]
 
   backend:
     image: vulcan-backend:local

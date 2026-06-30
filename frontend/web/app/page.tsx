@@ -2732,8 +2732,8 @@ function LoginExperience({
   supabaseReady: boolean;
   mockAuth: boolean;
 }) {
-  const defaultUser = supabaseReady && !mockAuth ? DEMO_ADMIN_EMAIL : "teste";
-  const defaultPassword = supabaseReady && !mockAuth ? DEMO_ADMIN_PASSWORD : "teste";
+  const defaultUser = "";
+  const defaultPassword = "";
 
   return (
     <motion.section
@@ -2762,7 +2762,7 @@ function LoginExperience({
             ].map(([value, label], index) => (
               <motion.div
                 key={label}
-                className="border border-orange-400/20 bg-zinc-950/70 p-5 shadow-[0_0_24px_rgba(249,115,22,0.08)] backdrop-blur"
+                className="group relative overflow-hidden border border-orange-400/20 bg-zinc-950/70 p-5 shadow-[0_0_24px_rgba(249,115,22,0.08)] backdrop-blur"
                 initial={{ y: 35, opacity: 0 }}
                 animate={{
                   y: [0, -5, 0],
@@ -2773,8 +2773,14 @@ function LoginExperience({
                     "0 0 18px rgba(249,115,22,0.08)"
                   ]
                 }}
+                whileHover={{ y: -8, scale: 1.035, borderColor: "rgba(251,146,60,0.62)" }}
                 transition={{ delay: 0.2 + index * 0.12, duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
               >
+                <motion.span
+                  className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
+                  animate={{ x: ["-100%", "100%"] }}
+                  transition={{ duration: 2.8 + index * 0.35, repeat: Infinity, ease: "easeInOut" }}
+                />
                 <p className="text-3xl font-semibold text-orange-300">{value}</p>
                 <p className="mt-2 text-xs uppercase tracking-[0.25em] text-zinc-500">{label}</p>
               </motion.div>
@@ -2790,9 +2796,25 @@ function LoginExperience({
           transition={{ duration: 0.75, delay: 0.15 }}
         >
           <motion.div
+            className="pointer-events-none absolute inset-0"
+            animate={{
+              boxShadow: [
+                "inset 0 0 0 rgba(249,115,22,0), 0 0 42px rgba(249,115,22,0.10)",
+                "inset 0 0 26px rgba(249,115,22,0.06), 0 0 68px rgba(249,115,22,0.16)",
+                "inset 0 0 0 rgba(249,115,22,0), 0 0 42px rgba(249,115,22,0.10)"
+              ]
+            }}
+            transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
             className="absolute right-0 top-8 h-px w-40 bg-gradient-to-r from-transparent via-orange-300 to-transparent"
             animate={{ x: [-90, 20, -90], opacity: [0.2, 1, 0.2] }}
             transition={{ duration: 3.6, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
+            className="absolute inset-y-0 left-0 w-px bg-gradient-to-b from-transparent via-orange-400/70 to-transparent"
+            animate={{ y: ["-45%", "45%", "-45%"], opacity: [0.15, 0.75, 0.15] }}
+            transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
           />
           <div className="relative">
             <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-orange-400/30 px-4 py-2 text-sm text-orange-200">
@@ -2805,21 +2827,25 @@ function LoginExperience({
                 ? "Sessão Supabase Auth com acesso isolado por tenant."
                 : "Autenticação local temporária para desenvolvimento isolado."}
             </p>
-            <div className="mt-8 grid gap-4">
+            <motion.div className="mt-8 grid gap-4" initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}>
+              <motion.div variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>
               <input
                 name="username"
                 defaultValue={defaultUser}
-                className="h-14 border border-zinc-800 bg-black/70 px-5 text-zinc-100 outline-none transition focus:border-orange-400 focus:shadow-[0_0_16px_rgba(249,115,22,0.12)]"
+                className="h-14 w-full border border-zinc-800 bg-black/70 px-5 text-zinc-100 outline-none transition focus:border-orange-400 focus:shadow-[0_0_16px_rgba(249,115,22,0.12)]"
                 placeholder="E-mail ou usuário"
               />
+              </motion.div>
+              <motion.div variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>
               <input
                 name="password"
                 type="password"
                 defaultValue={defaultPassword}
-                className="h-14 border border-zinc-800 bg-black/70 px-5 text-zinc-100 outline-none transition focus:border-orange-400 focus:shadow-[0_0_16px_rgba(249,115,22,0.12)]"
+                className="h-14 w-full border border-zinc-800 bg-black/70 px-5 text-zinc-100 outline-none transition focus:border-orange-400 focus:shadow-[0_0_16px_rgba(249,115,22,0.12)]"
                 placeholder="Senha"
               />
-            </div>
+              </motion.div>
+            </motion.div>
             {error ? <p className="mt-4 text-sm text-orange-300">{error}</p> : null}
             <motion.button
               type="submit"
@@ -3790,10 +3816,10 @@ function HierarchyView({
         <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Departamentos</Tremor.Text>
-              <Tremor.Title className="mt-2 text-zinc-50">Pirâmides por área</Tremor.Title>
+              <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Unidades e setores</Tremor.Text>
+              <Tremor.Title className="mt-2 text-zinc-50">Pirâmides por filial e área</Tremor.Title>
             </div>
-            <Tremor.Badge color={departments.length ? "emerald" : "orange"}>{departments.length} setor(es)</Tremor.Badge>
+            <Tremor.Badge color={departments.length ? "emerald" : "orange"}>{departments.length} nó(s)</Tremor.Badge>
           </div>
           <div className="grid gap-2">
             {sortedDepartments.length ? sortedDepartments.map((department) => (
@@ -3805,18 +3831,18 @@ function HierarchyView({
                 <span className="text-xs text-zinc-500">{hierarchy.filter((node) => node.department === department.name).length} pessoa(s)</span>
               </div>
             )) : (
-              <EmptyState title="Nenhum departamento" description="Crie RH, Financeiro, Operação ou subáreas antes de alocar gestores." />
+              <EmptyState title="Nenhuma unidade ou setor" description="Crie a raiz, filiais e setores antes de alocar gestores." />
             )}
           </div>
         </Tremor.Card>
 
         <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card">
-          <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Novo departamento</Tremor.Text>
+          <Tremor.Text className="text-xs uppercase tracking-[0.2em] text-orange-200">Nova unidade ou setor</Tremor.Text>
           <form onSubmit={(event) => void submitDepartment(event)} className="mt-4 grid gap-3">
             <div className="grid gap-3 md:grid-cols-2">
-              <HierarchyInput label="Nome do departamento" value={departmentForm.name} onChange={(value) => setDepartmentForm((current) => ({ ...current, name: value }))} />
+              <HierarchyInput label="Nome da unidade ou setor" value={departmentForm.name} onChange={(value) => setDepartmentForm((current) => ({ ...current, name: value }))} />
               <label className="grid gap-2 text-sm text-zinc-300">
-                Departamento superior
+                Nó superior
                 <select
                   value={departmentForm.parentDepartmentId ?? ""}
                   onChange={(event) => setDepartmentForm((current) => ({ ...current, parentDepartmentId: event.target.value || null }))}
@@ -3832,10 +3858,10 @@ function HierarchyView({
             <HierarchyInput label="Descrição curta" value={departmentForm.description} onChange={(value) => setDepartmentForm((current) => ({ ...current, description: value }))} />
             {departmentFeedback ? <FeedbackBanner tone={departmentFeedback.tone} message={departmentFeedback.message} /> : null}
             <div className="flex flex-wrap items-center justify-between gap-3 border border-zinc-800 bg-black/35 p-3">
-              <p className="text-xs leading-5 text-zinc-500">Gestores de subárvore ficam restritos ao próprio departamento e aos filhos dele.</p>
+              <p className="text-xs leading-5 text-zinc-500">Gestores de subárvore ficam restritos à própria unidade/setor e aos filhos dela.</p>
               <button type="submit" disabled={departmentSaving} className="inline-flex h-11 items-center gap-2 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-50">
                 <Building2 className="h-4 w-4" />
-                {departmentSaving ? "Criando..." : "Criar departamento"}
+                {departmentSaving ? "Criando..." : "Criar nó"}
               </button>
             </div>
           </form>
