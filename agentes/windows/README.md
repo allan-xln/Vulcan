@@ -29,6 +29,7 @@ Coletas sensíveis ficam desligadas por padrão:
 - título da janela, somente com `-CollectWindowTitle`;
 - tempo por aplicativo;
 - tempo por janela quando permitido;
+- amostra do aplicativo ativo em tempo quase real;
 - trocas de contexto;
 - tempo ativo;
 - tempo ocioso via Win32 `GetLastInputInfo`;
@@ -44,6 +45,8 @@ Coletas sensíveis ficam desligadas por padrão:
 - memória aproximada do agente;
 - política de coleta em uso;
 - qualidade da máquina: memória, pagefile, disco, CPU count e top processos quando permitido;
+- snapshots periódicos de saúde da máquina;
+- snapshots periódicos dos processos mais relevantes por memória;
 - domínio e URL sanitizada, sem querystring/fragmento, quando permitido;
 - histórico recente de Chrome, Edge, Brave, Chromium e Firefox, quando permitido;
 - sinal técnico de domínio adulto por padrões conhecidos.
@@ -73,6 +76,13 @@ Esse modo habilita:
 - `allowUserPause=false`
 - `showTrayStatus=false`
 - `privacyMode=corporate`
+- `collectionIntervalSeconds=1`
+- `activeSampleIntervalSeconds=10`
+- `syncIntervalSeconds=15`
+- `heartbeatIntervalSeconds=30`
+- `browserHistoryIntervalSeconds=60`
+- `systemMetricsIntervalSeconds=60`
+- `processSnapshotIntervalSeconds=60`
 
 Nesse modo o agente roda em segundo plano como serviço corporativo gerenciado, sem janela, sem pop-up e sem ícone de tray para o usuário comum. Ele continua registrado para administração e auditoria em Serviços do Windows, Program Files, ProgramData, logs locais e painel Vulcan. A remoção/parada deve exigir permissão administrativa ou política corporativa.
 

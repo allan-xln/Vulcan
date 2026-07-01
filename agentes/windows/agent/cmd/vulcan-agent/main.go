@@ -42,28 +42,32 @@ const (
 )
 
 type AgentPolicy struct {
-	CollectAppName           bool   `json:"collectAppName"`
-	CollectWindowTitle       bool   `json:"collectWindowTitle"`
-	CollectIdleTime          bool   `json:"collectIdleTime"`
-	CollectSessionEvents     bool   `json:"collectSessionEvents"`
-	CollectBrowserDomain     bool   `json:"collectBrowserDomain"`
-	CollectBrowserURL        bool   `json:"collectBrowserUrl"`
-	CollectBrowserHistory    bool   `json:"collectBrowserHistory"`
-	CollectBrowserPageTitle  bool   `json:"collectBrowserPageTitle"`
-	CollectProcessList       bool   `json:"collectProcessList"`
-	CollectSystemMetrics     bool   `json:"collectSystemMetrics"`
-	RedactSensitiveTerms     bool   `json:"redactSensitiveTerms"`
-	BrowserHistoryInterval   int    `json:"browserHistoryIntervalSeconds"`
-	BrowserHistoryLookback   int    `json:"browserHistoryLookbackMinutes"`
-	BrowserHistoryMaxEvents  int    `json:"browserHistoryMaxEvents"`
-	SyncIntervalSeconds      int    `json:"syncIntervalSeconds"`
-	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds"`
-	OfflineQueueEnabled      bool   `json:"offlineQueueEnabled"`
-	MaxOfflineQueueSize      int    `json:"maxOfflineQueueSize"`
-	AllowUserPause           bool   `json:"allowUserPause"`
-	ShowTrayStatus           bool   `json:"showTrayStatus"`
-	PrivacyMode              string `json:"privacyMode"`
-	IdleThresholdSeconds     int    `json:"idleThresholdSeconds"`
+	CollectAppName            bool   `json:"collectAppName"`
+	CollectWindowTitle        bool   `json:"collectWindowTitle"`
+	CollectIdleTime           bool   `json:"collectIdleTime"`
+	CollectSessionEvents      bool   `json:"collectSessionEvents"`
+	CollectBrowserDomain      bool   `json:"collectBrowserDomain"`
+	CollectBrowserURL         bool   `json:"collectBrowserUrl"`
+	CollectBrowserHistory     bool   `json:"collectBrowserHistory"`
+	CollectBrowserPageTitle   bool   `json:"collectBrowserPageTitle"`
+	CollectProcessList        bool   `json:"collectProcessList"`
+	CollectSystemMetrics      bool   `json:"collectSystemMetrics"`
+	RedactSensitiveTerms      bool   `json:"redactSensitiveTerms"`
+	BrowserHistoryInterval    int    `json:"browserHistoryIntervalSeconds"`
+	BrowserHistoryLookback    int    `json:"browserHistoryLookbackMinutes"`
+	BrowserHistoryMaxEvents   int    `json:"browserHistoryMaxEvents"`
+	SyncIntervalSeconds       int    `json:"syncIntervalSeconds"`
+	HeartbeatIntervalSeconds  int    `json:"heartbeatIntervalSeconds"`
+	OfflineQueueEnabled       bool   `json:"offlineQueueEnabled"`
+	MaxOfflineQueueSize       int    `json:"maxOfflineQueueSize"`
+	AllowUserPause            bool   `json:"allowUserPause"`
+	ShowTrayStatus            bool   `json:"showTrayStatus"`
+	PrivacyMode               string `json:"privacyMode"`
+	IdleThresholdSeconds      int    `json:"idleThresholdSeconds"`
+	CollectionIntervalSeconds int    `json:"collectionIntervalSeconds"`
+	ActiveSampleInterval      int    `json:"activeSampleIntervalSeconds"`
+	SystemMetricsInterval     int    `json:"systemMetricsIntervalSeconds"`
+	ProcessSnapshotInterval   int    `json:"processSnapshotIntervalSeconds"`
 }
 
 type Config struct {
@@ -591,7 +595,7 @@ func syncCommand() error {
 func collectForegroundLoop(ctx context.Context, cfg Config) error {
 	policy := effectivePolicy(cfg)
 	logLocal("info", "session collector started", map[string]interface{}{"collectWindowTitle": policy.CollectWindowTitle})
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(time.Duration(maxInt(policy.CollectionIntervalSeconds, 1)) * time.Second)
 	defer ticker.Stop()
 
 	var lastApp, lastTitle string
@@ -599,6 +603,9 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 	var idleStartedAt time.Time
 	wasIdle := false
 	lastBrowserHistory := time.Time{}
+	lastActiveSample := time.Time{}
+	lastSystemMetrics := time.Time{}
+	lastProcessSnapshot := time.Time{}
 
 	record := func(endedAt time.Time, eventType string, metadata map[string]interface{}) {
 		if lastApp == "" {
@@ -650,6 +657,108 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 		if err := appendEvent(defaultQueuePath(), event); err != nil {
 			logLocal("error", "failed to queue event: "+err.Error(), nil)
 		}
+	}
+
+	activeSample := func(now time.Time, app string, title string) {
+		if app == "" {
+			return
+		}
+		browserDomain, browserURL, adultSignal := normalizeBrowserURL(title, policy.CollectBrowserURL, policy.CollectBrowserDomain)
+		metadata := map[string]interface{}{
+			"collector":    "windows-session",
+			"quality":      "high",
+			"method":       "win32-active-sample",
+			"idleSeconds":  idleSeconds(),
+			"samplePeriod": maxInt(policy.ActiveSampleInterval, 10),
+			"privacy": map[string]interface{}{
+				"keystrokes":  false,
+				"screenshots": false,
+				"clipboard":   false,
+				"audio":       false,
+				"webcam":      false,
+				"cookies":     false,
+				"tokens":      false,
+			},
+		}
+		if browserDomain != "" {
+			metadata["browserDomain"] = browserDomain
+		}
+		if browserURL != "" {
+			metadata["browserUrl"] = browserURL
+			metadata["urlQueryCollected"] = false
+			metadata["urlFragmentCollected"] = false
+		}
+		if adultSignal {
+			metadata["adultContentSignal"] = true
+		}
+		_ = appendEvent(defaultQueuePath(), AgentEvent{
+			EventID:         uuidV4(),
+			EventType:       "active_app_sample",
+			AppName:         app,
+			WindowTitle:     sanitizeTitle(title, policy.CollectWindowTitle),
+			Category:        appCategory(app),
+			StartedAt:       now.Format(time.RFC3339),
+			EndedAt:         now.Format(time.RFC3339),
+			DurationSeconds: 0,
+			OSUser:          cfg.OSUser,
+			Metadata:        metadata,
+		})
+	}
+
+	systemMetricsEvent := func(now time.Time) {
+		machine, _ := machineHealth(policy)
+		_ = appendEvent(defaultQueuePath(), AgentEvent{
+			EventID:         uuidV4(),
+			EventType:       "machine_health",
+			AppName:         "Sistema",
+			Category:        "sistema",
+			StartedAt:       now.Format(time.RFC3339),
+			EndedAt:         now.Format(time.RFC3339),
+			DurationSeconds: 0,
+			OSUser:          cfg.OSUser,
+			Metadata: map[string]interface{}{
+				"collector":     "windows-system",
+				"quality":       "high",
+				"machine":       machine,
+				"agentMemoryMb": agentMemoryMb(),
+				"localIps":      localIPs(),
+				"privacy": map[string]interface{}{
+					"keystrokes":  false,
+					"screenshots": false,
+					"clipboard":   false,
+					"audio":       false,
+					"webcam":      false,
+				},
+			},
+		})
+	}
+
+	processSnapshotEvent := func(now time.Time) {
+		if !policy.CollectProcessList {
+			return
+		}
+		_ = appendEvent(defaultQueuePath(), AgentEvent{
+			EventID:         uuidV4(),
+			EventType:       "process_snapshot",
+			AppName:         "Sistema",
+			Category:        "sistema",
+			StartedAt:       now.Format(time.RFC3339),
+			EndedAt:         now.Format(time.RFC3339),
+			DurationSeconds: 0,
+			OSUser:          cfg.OSUser,
+			Metadata: map[string]interface{}{
+				"collector":    "windows-process-list",
+				"quality":      "high",
+				"topProcesses": topProcesses(20),
+				"privacy": map[string]interface{}{
+					"keystrokes":  false,
+					"screenshots": false,
+					"clipboard":   false,
+					"audio":       false,
+					"webcam":      false,
+				},
+			},
+		})
 	}
 
 	for {
@@ -713,6 +822,18 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 				continue
 			}
 			title = sanitizeTitle(title, policy.CollectWindowTitle)
+			if lastActiveSample.IsZero() || now.Sub(lastActiveSample) >= time.Duration(maxInt(policy.ActiveSampleInterval, 10))*time.Second {
+				activeSample(now, app, title)
+				lastActiveSample = now
+			}
+			if policy.CollectSystemMetrics && (lastSystemMetrics.IsZero() || now.Sub(lastSystemMetrics) >= time.Duration(maxInt(policy.SystemMetricsInterval, 60))*time.Second) {
+				systemMetricsEvent(now)
+				lastSystemMetrics = now
+			}
+			if policy.CollectProcessList && (lastProcessSnapshot.IsZero() || now.Sub(lastProcessSnapshot) >= time.Duration(maxInt(policy.ProcessSnapshotInterval, 60))*time.Second) {
+				processSnapshotEvent(now)
+				lastProcessSnapshot = now
+			}
 			if lastApp == "" {
 				lastApp, lastTitle, startedAt = app, title, now
 				continue
@@ -1612,8 +1733,12 @@ func machineHealth(policy AgentPolicy) (map[string]interface{}, error) {
 		health[key] = value
 	}
 	if policy.CollectProcessList {
-		health["topProcesses"] = topProcesses(8)
+		health["topProcesses"] = topProcesses(12)
 	}
+	health["localIps"] = localIPs()
+	health["computerName"] = os.Getenv("COMPUTERNAME")
+	health["userDomain"] = os.Getenv("USERDOMAIN")
+	health["userDnsDomain"] = os.Getenv("USERDNSDOMAIN")
 	return health, nil
 }
 
@@ -1679,8 +1804,10 @@ func topProcesses(limit int) []map[string]interface{} {
 		return nil
 	}
 	type processRow struct {
-		name string
-		mem  int
+		name    string
+		pid     string
+		session string
+		mem     int
 	}
 	var rows []processRow
 	for _, record := range records {
@@ -1691,7 +1818,15 @@ func topProcesses(limit int) []map[string]interface{} {
 		var mem int
 		fmt.Sscanf(memRaw, "%d", &mem)
 		if record[0] != "" {
-			rows = append(rows, processRow{name: record[0], mem: mem})
+			pid := ""
+			session := ""
+			if len(record) > 1 {
+				pid = record[1]
+			}
+			if len(record) > 2 {
+				session = record[2]
+			}
+			rows = append(rows, processRow{name: record[0], pid: pid, session: session, mem: mem})
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].mem > rows[j].mem })
@@ -1700,7 +1835,7 @@ func topProcesses(limit int) []map[string]interface{} {
 	}
 	result := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, map[string]interface{}{"name": row.name, "memoryKb": row.mem})
+		result = append(result, map[string]interface{}{"name": row.name, "pid": row.pid, "session": row.session, "memoryKb": row.mem})
 	}
 	return result
 }
@@ -1790,28 +1925,32 @@ func maxInt(value int, minimum int) int {
 
 func defaultAgentPolicy(collectWindowTitle bool, syncInterval int, heartbeatInterval int, corporateMonitoring bool) AgentPolicy {
 	policy := AgentPolicy{
-		CollectAppName:           true,
-		CollectWindowTitle:       collectWindowTitle,
-		CollectIdleTime:          true,
-		CollectSessionEvents:     true,
-		CollectBrowserDomain:     false,
-		CollectBrowserURL:        false,
-		CollectBrowserHistory:    false,
-		CollectBrowserPageTitle:  false,
-		CollectProcessList:       false,
-		CollectSystemMetrics:     true,
-		RedactSensitiveTerms:     true,
-		BrowserHistoryInterval:   300,
-		BrowserHistoryLookback:   60,
-		BrowserHistoryMaxEvents:  50,
-		SyncIntervalSeconds:      maxInt(syncInterval, 15),
-		HeartbeatIntervalSeconds: maxInt(heartbeatInterval, 15),
-		OfflineQueueEnabled:      true,
-		MaxOfflineQueueSize:      10000,
-		AllowUserPause:           true,
-		ShowTrayStatus:           true,
-		PrivacyMode:              "standard",
-		IdleThresholdSeconds:     300,
+		CollectAppName:            true,
+		CollectWindowTitle:        collectWindowTitle,
+		CollectIdleTime:           true,
+		CollectSessionEvents:      true,
+		CollectBrowserDomain:      false,
+		CollectBrowserURL:         false,
+		CollectBrowserHistory:     false,
+		CollectBrowserPageTitle:   false,
+		CollectProcessList:        false,
+		CollectSystemMetrics:      true,
+		RedactSensitiveTerms:      true,
+		BrowserHistoryInterval:    300,
+		BrowserHistoryLookback:    60,
+		BrowserHistoryMaxEvents:   50,
+		SyncIntervalSeconds:       maxInt(syncInterval, 15),
+		HeartbeatIntervalSeconds:  maxInt(heartbeatInterval, 15),
+		OfflineQueueEnabled:       true,
+		MaxOfflineQueueSize:       10000,
+		AllowUserPause:            true,
+		ShowTrayStatus:            true,
+		PrivacyMode:               "standard",
+		IdleThresholdSeconds:      300,
+		CollectionIntervalSeconds: 2,
+		ActiveSampleInterval:      30,
+		SystemMetricsInterval:     120,
+		ProcessSnapshotInterval:   120,
 	}
 	if corporateMonitoring {
 		policy.CollectWindowTitle = true
@@ -1823,8 +1962,15 @@ func defaultAgentPolicy(collectWindowTitle bool, syncInterval int, heartbeatInte
 		policy.AllowUserPause = false
 		policy.ShowTrayStatus = false
 		policy.PrivacyMode = "corporate"
-		policy.BrowserHistoryLookback = 120
-		policy.BrowserHistoryMaxEvents = 100
+		policy.SyncIntervalSeconds = maxInt(minInt(syncInterval, 15), 15)
+		policy.HeartbeatIntervalSeconds = maxInt(minInt(heartbeatInterval, 30), 15)
+		policy.BrowserHistoryInterval = 60
+		policy.BrowserHistoryLookback = 240
+		policy.BrowserHistoryMaxEvents = 200
+		policy.CollectionIntervalSeconds = 1
+		policy.ActiveSampleInterval = 10
+		policy.SystemMetricsInterval = 60
+		policy.ProcessSnapshotInterval = 60
 	}
 	return policy
 }
@@ -1849,6 +1995,18 @@ func effectivePolicy(cfg Config) AgentPolicy {
 	if policy.IdleThresholdSeconds < 30 {
 		policy.IdleThresholdSeconds = 300
 	}
+	if policy.CollectionIntervalSeconds < 1 {
+		policy.CollectionIntervalSeconds = 2
+	}
+	if policy.ActiveSampleInterval < 5 {
+		policy.ActiveSampleInterval = 10
+	}
+	if policy.SystemMetricsInterval < 30 {
+		policy.SystemMetricsInterval = 60
+	}
+	if policy.ProcessSnapshotInterval < 30 {
+		policy.ProcessSnapshotInterval = 60
+	}
 	if policy.BrowserHistoryInterval < 60 {
 		policy.BrowserHistoryInterval = 300
 	}
@@ -1865,4 +2023,11 @@ func effectivePolicy(cfg Config) AgentPolicy {
 		policy.BrowserHistoryMaxEvents = 250
 	}
 	return policy
+}
+
+func minInt(value int, maximum int) int {
+	if value > maximum {
+		return maximum
+	}
+	return value
 }
