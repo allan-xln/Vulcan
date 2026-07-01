@@ -36,9 +36,12 @@ import (
 )
 
 const (
-	serviceName = "VulcanAgent"
-	displayName = "Vulcan Agent Service"
-	version     = "0.2.0"
+	serviceName                    = "VulcanAgent"
+	displayName                    = "Vulcan Agent Service"
+	version                        = "0.2.0"
+	defaultOneClickBackendURL      = "http://192.168.200.160:3001"
+	defaultOneClickTenantID        = "00000000-0000-0000-0000-000000000301"
+	defaultOneClickEnrollmentToken = "vulcan-local-enrollment-token"
 )
 
 type AgentPolicy struct {
@@ -212,11 +215,17 @@ type agentService struct {
 
 func main() {
 	if len(os.Args) < 2 {
+		if strings.Contains(strings.ToLower(filepath.Base(os.Args[0])), "setup") {
+			exit(autoInstallCommand())
+			return
+		}
 		printUsage()
 		return
 	}
 
 	switch strings.ToLower(os.Args[1]) {
+	case "autoinstall":
+		exit(autoInstallCommand())
 	case "install":
 		exit(installCommand(os.Args[2:]))
 	case "uninstall":
@@ -259,6 +268,7 @@ func printUsage() {
 
 Commands:
   install     Install service, session collector task and local config.
+  autoinstall One-click corporate install using embedded Vulcan LAN defaults.
   uninstall   Stop and remove service and scheduled tasks.
   repair      Recreate service recovery and scheduled tasks from current config.
   status      Print agent config, queue depth and service status.
@@ -269,6 +279,74 @@ Commands:
   heartbeat   Send a heartbeat once.
   sync        Sync queued events once.
   run         Run collector in foreground for local diagnostics.`)
+}
+
+func autoInstallCommand() error {
+	if !isRunningAsAdmin() {
+		if err := relaunchElevated([]string{"autoinstall"}); err != nil {
+			return err
+		}
+		return nil
+	}
+	args := []string{
+		"-TenantId", defaultOneClickTenantID,
+		"-BackendUrl", defaultOneClickBackendURL,
+		"-EnrollmentToken", defaultOneClickEnrollmentToken,
+		"-LinkedUser", currentUser(),
+		"-RoleLevel", "Aguardando adoção",
+		"-Department", "Aguardando adoção",
+		"-Note", "Instalação one-click para adoção posterior no painel Vulcan",
+		"-CorporateMonitoring",
+		"-SyncInterval", "15",
+		"-HeartbeatInterval", "30",
+		"-InstallDir", filepath.Join(defaultDataDir(), "bin"),
+		"-DataDir", defaultDataDir(),
+	}
+	return installCommand(args)
+}
+
+func isRunningAsAdmin() bool {
+	cmd := exec.Command("cmd.exe", "/C", "net session >nul 2>&1")
+	return cmd.Run() == nil
+}
+
+func relaunchElevated(args []string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	operation, _ := syscall.UTF16PtrFromString("runas")
+	file, _ := syscall.UTF16PtrFromString(exe)
+	parameters, _ := syscall.UTF16PtrFromString(quoteArgs(args))
+	directory, _ := syscall.UTF16PtrFromString(filepath.Dir(exe))
+	ret, _, callErr := procShellExecuteW.Call(
+		0,
+		uintptr(unsafe.Pointer(operation)),
+		uintptr(unsafe.Pointer(file)),
+		uintptr(unsafe.Pointer(parameters)),
+		uintptr(unsafe.Pointer(directory)),
+		1,
+	)
+	if ret <= 32 {
+		return fmt.Errorf("failed to request administrator elevation: %w", callErr)
+	}
+	return nil
+}
+
+func quoteArgs(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "" {
+			quoted = append(quoted, `""`)
+			continue
+		}
+		if strings.ContainsAny(arg, " \t\"") {
+			quoted = append(quoted, `"`+strings.ReplaceAll(arg, `"`, `\"`)+`"`)
+		} else {
+			quoted = append(quoted, arg)
+		}
+	}
+	return strings.Join(quoted, " ")
 }
 
 func installCommand(args []string) error {
@@ -859,6 +937,8 @@ func collectForegroundLoop(ctx context.Context, cfg Config) error {
 
 var (
 	user32                       = syscall.NewLazyDLL("user32.dll")
+	shell32                      = syscall.NewLazyDLL("shell32.dll")
+	procShellExecuteW            = shell32.NewProc("ShellExecuteW")
 	procGetForegroundWindow      = user32.NewProc("GetForegroundWindow")
 	procGetWindowTextW           = user32.NewProc("GetWindowTextW")
 	procGetWindowTextLengthW     = user32.NewProc("GetWindowTextLengthW")
