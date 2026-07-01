@@ -48,3 +48,4 @@ agentes/**/*.exe
 agentes/**/*.msi
 agentes/**/*.zip
 agentes/**/*.log
+frontend/web/public/agents/
