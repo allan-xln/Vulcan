@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vulcan.lanfuture.dev/schemas/vulcan-event.v1.json",
+  "title": "VulcanEventV1",
+  "description": "Canonical tenant-scoped event shared by Vulcan Workforce and Infrastructure.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "tenantId",
+    "schemaVersion",
+    "source",
+    "sourceType",
+    "sourceEventId",
+    "eventType",
+    "category",
+    "severity",
+    "occurredAt",
+    "receivedAt",
+    "message",
+    "fingerprint",
+    "privacyClassification",
+    "retentionPolicy",
+    "trustedOrigin",
+    "dataOrigin"
+  ],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "schemaVersion": { "const": "2026-07-vulcan-event.v1" },
+    "siteId": { "type": ["string", "null"], "format": "uuid" },
+    "assetId": { "type": ["string", "null"], "format": "uuid" },
+    "agentId": { "type": ["string", "null"], "format": "uuid" },
+    "source": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sourceType": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "sourceEventId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "eventType": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "severity": {
+      "type": "string",
+      "enum": ["debug", "info", "notice", "warning", "error", "critical"]
+    },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "deviceOccurredAt": { "type": ["string", "null"], "format": "date-time" },
+    "receivedAt": { "type": "string", "format": "date-time" },
+    "clockDriftMs": { "type": ["integer", "null"] },
+    "offlineBuffered": { "type": "boolean", "default": false },
+    "actor": { "$ref": "#/$defs/objectPayload" },
+    "device": { "$ref": "#/$defs/objectPayload" },
+    "context": { "$ref": "#/$defs/objectPayload" },
+    "metrics": { "$ref": "#/$defs/objectPayload" },
+    "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "technicalMessage": { "type": ["string", "null"], "maxLength": 4000 },
+    "fingerprint": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "correlationId": { "type": ["string", "null"], "maxLength": 256 },
+    "causationId": { "type": ["string", "null"], "maxLength": 256 },
+    "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "privacyClassification": {
+      "type": "string",
+      "enum": ["public", "operational", "personal", "sensitive", "restricted"]
+    },
+    "retentionPolicy": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "trustedOrigin": { "type": "boolean" },
+    "dataOrigin": { "type": "string", "enum": ["real", "simulated", "imported"] },
+    "extensions": { "$ref": "#/$defs/objectPayload" }
+  },
+  "$defs": {
+    "jsonValue": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } }
+      ]
+    },
+    "objectPayload": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" },
+      "default": {}
+    }
+  }
+}
