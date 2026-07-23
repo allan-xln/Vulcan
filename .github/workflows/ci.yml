@@ -8,6 +8,20 @@ on:
 jobs:
   web-and-api:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vulcan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vulcan"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +47,31 @@ jobs:
         run: |
           ./.venv/bin/pip install -e ./ai/api[dev]
           ./.venv/bin/pip install -e ./backend/api[dev]
+          ./.venv/bin/pip install -e ./backend/discovery[dev]
+          ./.venv/bin/pip install -e ./backend/ingestion-gateway[dev]
+          ./.venv/bin/pip install -e ./backend/jobs[dev]
+          ./.venv/bin/pip install -e ./backend/query-api[dev]
 
       - name: Verify Phase 1
         run: ./scripts/verify-phase1.sh
+
+      - name: Verify read-only discovery
+        run: pnpm test:discovery
+
+      - name: Verify ingestion, jobs and query services
+        run: |
+          PYTHONPATH=backend/ingestion-gateway ./.venv/bin/python -m pytest backend/ingestion-gateway/tests -q
+          PYTHONPATH=backend/jobs ./.venv/bin/python -m pytest backend/jobs/tests -q
+          PYTHONPATH=backend/query-api ./.venv/bin/python -m pytest backend/query-api/tests -q
+
+      - name: Apply migrations on a clean PostgreSQL
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vulcan
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/supabase/local/init/001_supabase_compat.sql
+          ./scripts/apply-supabase-migrations.sh
+
+      - name: Verify platform RLS
+        env:
+          VULCAN_PLATFORM_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vulcan
+        run: ./scripts/verify-platform-expansion.sh

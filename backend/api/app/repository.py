@@ -302,6 +302,7 @@ class AccessScope:
     scope: str
     is_root: bool
     local_test: bool = False
+    role_slug: str | None = None
 
 
 class VulcanRepository:
@@ -321,7 +322,7 @@ class VulcanRepository:
         if context.provider == "local":
             membership = conn.execute(
                 """
-                select m.id, m.department_id, coalesce(r.scope, 'self') as scope
+                select m.id, m.department_id, coalesce(r.scope, 'self') as scope, r.slug as role_slug
                 from public.memberships m
                 left join public.roles r on r.id = m.role_id
                 where m.tenant_id = %s
@@ -340,6 +341,7 @@ class VulcanRepository:
                     scope="tenant" if context.role in {"tenant_admin", "owner", "root"} else membership["scope"],
                     is_root=False,
                     local_test=False,
+                    role_slug=membership["role_slug"],
                 )
             if context.role == "user":
                 return AccessScope(
@@ -376,7 +378,7 @@ class VulcanRepository:
 
         membership = conn.execute(
             """
-            select m.id, m.department_id, coalesce(r.scope, 'self') as scope
+            select m.id, m.department_id, coalesce(r.scope, 'self') as scope, r.slug as role_slug
             from public.memberships m
             left join public.roles r on r.id = m.role_id
             where m.tenant_id = %s
@@ -404,6 +406,7 @@ class VulcanRepository:
             department_id=membership["department_id"],
             scope=membership["scope"],
             is_root=False,
+            role_slug=membership["role_slug"],
         )
 
     def _membership_filter(self, access: AccessScope, alias: str = "m") -> tuple[str, tuple[object, ...]]:

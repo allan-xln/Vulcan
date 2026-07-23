@@ -10,11 +10,11 @@ x-vulcan-env: &vulcan-env
     MOCK_DATA: ${MOCK_DATA:-false}
     LOCAL_ADMIN_USERNAME: ${LOCAL_ADMIN_USERNAME:-admin}
     LOCAL_ADMIN_PASSWORD: ${LOCAL_ADMIN_PASSWORD:-admin}
-    LOCAL_TEST_AUTH_ENABLED: ${LOCAL_TEST_AUTH_ENABLED:-true}
+    LOCAL_TEST_AUTH_ENABLED: ${LOCAL_TEST_AUTH_ENABLED:-false}
     LOCAL_TEST_USERNAME: ${LOCAL_TEST_USERNAME:-teste}
     LOCAL_TEST_PASSWORD: ${LOCAL_TEST_PASSWORD:-teste}
     SUPABASE_DEMO_ADMIN_EMAIL: ${SUPABASE_DEMO_ADMIN_EMAIL:-admin@vulcan.local}
-    SUPABASE_DEMO_ADMIN_PASSWORD: ${SUPABASE_DEMO_ADMIN_PASSWORD:-VulcanAdmin123!}
+    SUPABASE_DEMO_ADMIN_PASSWORD: ${SUPABASE_DEMO_ADMIN_PASSWORD:-replace-local-demo-password}
     DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/vulcan
     DIRECT_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/vulcan
     API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS:-http://localhost:3002,http://127.0.0.1:3002}
@@ -54,6 +54,10 @@ x-vulcan-env: &vulcan-env
     LLAMA_BASE_URL: ${LLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
     LLAMA_MODEL: ${LLAMA_MODEL:-llama-4-maverick}
     LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+    VULCAN_BUILD_VERSION: ${VULCAN_BUILD_VERSION:-0.2.0-dev}
+    VULCAN_COMMIT_SHA: ${VULCAN_COMMIT_SHA:-local}
+    VULCAN_BUILD_ID: ${VULCAN_BUILD_ID:-development}
+    VULCAN_REALTIME_POLL_SECONDS: ${VULCAN_REALTIME_POLL_SECONDS:-2}
 
 services:
   db:
@@ -74,6 +78,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    networks:
+      - data
 
   evolution-db:
     image: postgres:15-alpine
@@ -91,6 +97,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    networks:
+      - internal
 
   evolution-redis:
     image: redis:7.4-alpine
@@ -104,6 +112,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    networks:
+      - internal
 
   evolution:
     image: evoapicloud/evolution-api:v2.3.7
@@ -170,6 +180,9 @@ services:
       timeout: 8s
       retries: 20
       start_period: 45s
+    networks:
+      - edge
+      - internal
 
   migrate:
     build:
@@ -182,6 +195,8 @@ services:
       db:
         condition: service_healthy
     command: ["bash", "-lc", "psql \"$$DATABASE_URL\" -v ON_ERROR_STOP=1 -f /app/database/supabase/local/init/001_supabase_compat.sql >/dev/null && /app/scripts/apply-supabase-migrations.sh && python /app/scripts/seed_demo.py && python /app/scripts/seed_ers_structure.py"]
+    networks:
+      - data
 
   backend:
     image: vulcan-backend:local
@@ -203,11 +218,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3001/health >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3001/readyz >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 20
       start_period: 20s
+    networks:
+      - edge
+      - application
+      - data
+      - internal
 
   whatsapp-worker:
     image: vulcan-backend:local
@@ -222,6 +242,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "-m", "app.whatsapp_worker"]
+    networks:
+      - edge
+      - application
+      - data
+      - internal
 
   frontend:
     build:
@@ -230,11 +255,10 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
         NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-local}
-        NEXT_PUBLIC_LOCAL_TEST_AUTH: ${NEXT_PUBLIC_LOCAL_TEST_AUTH:-true}
+        NEXT_PUBLIC_LOCAL_TEST_AUTH: ${NEXT_PUBLIC_LOCAL_TEST_AUTH:-false}
         NEXT_PUBLIC_MOCK_AUTH: ${NEXT_PUBLIC_MOCK_AUTH:-false}
         NEXT_PUBLIC_DEMO_TENANT_ID: ${NEXT_PUBLIC_DEMO_TENANT_ID:-00000000-0000-0000-0000-000000000301}
         NEXT_PUBLIC_DEMO_ADMIN_EMAIL: ${NEXT_PUBLIC_DEMO_ADMIN_EMAIL:-admin@vulcan.local}
-        NEXT_PUBLIC_DEMO_ADMIN_PASSWORD: ${NEXT_PUBLIC_DEMO_ADMIN_PASSWORD:-VulcanAdmin123!}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://your-project.supabase.co}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-replace-me}
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-replace-me}
@@ -259,6 +283,52 @@ services:
       timeout: 5s
       retries: 20
       start_period: 20s
+    networks:
+      - edge
+      - application
+
+  discovery:
+    profiles: ["network"]
+    build:
+      context: .
+      dockerfile: backend/discovery/Dockerfile
+    image: vulcan-discovery:local
+    container_name: vulcan-discovery
+    restart: unless-stopped
+    env_file:
+      - ./docker/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/vulcan
+      DISCOVERY_ENABLED: ${DISCOVERY_ENABLED:-false}
+      DISCOVERY_WORKER_POLL_SECONDS: ${DISCOVERY_WORKER_POLL_SECONDS:-10}
+      DISCOVERY_MAX_TARGETS_PER_RUN: ${DISCOVERY_MAX_TARGETS_PER_RUN:-256}
+      DISCOVERY_MAX_CONCURRENCY: ${DISCOVERY_MAX_CONCURRENCY:-16}
+      DISCOVERY_ALLOW_PUBLIC_NETWORKS: ${DISCOVERY_ALLOW_PUBLIC_NETWORKS:-false}
+      DISCOVERY_MAX_TIMEOUT_MS: ${DISCOVERY_MAX_TIMEOUT_MS:-2000}
+      DISCOVERY_ALLOWED_TCP_PORTS: ${DISCOVERY_ALLOWED_TCP_PORTS:-22,53,80,443,445,515,631,9100}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import json,pathlib,sys;p=pathlib.Path('/tmp/vulcan-discovery-health.json');d=json.loads(p.read_text()) if p.exists() else {};sys.exit(0 if d.get('checkedAt') else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+    networks:
+      - telemetry
+      - data
+      - internal
 
 volumes:
   vulcan_postgres:
@@ -266,3 +336,17 @@ volumes:
   evolution_instances:
   evolution_postgres:
   evolution_redis:
+
+networks:
+  edge:
+    driver: bridge
+  application:
+    driver: bridge
+  telemetry:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true
+  internal:
+    driver: bridge
+    internal: true

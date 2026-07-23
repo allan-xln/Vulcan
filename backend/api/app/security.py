@@ -101,6 +101,8 @@ class AuthContext:
 
 
 def _local_development_auth_enabled(settings: Settings) -> bool:
+    if settings.environment == "production":
+        return False
     return settings.auth_provider == "local" or settings.mock_auth or settings.local_test_auth_enabled
 
 

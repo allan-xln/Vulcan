@@ -114,6 +114,7 @@ from app.whatsapp import (
     WhatsAppNotificationService,
     normalize_evolution_webhook,
 )
+from app.platform_routes import router as platform_router
 
 
 app = FastAPI(title="Vulcan API", version="0.1.0")
@@ -130,6 +131,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(platform_router)
 
 
 @app.exception_handler(PsycopgError)

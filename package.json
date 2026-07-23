@@ -33,12 +33,15 @@
     "build": "corepack pnpm build:web",
     "test": "corepack pnpm test:web",
     "test:api": "PYTHONPATH=backend/api .venv/bin/python -m pytest backend/api/tests/test_api.py -q",
+    "test:platform": "AUTH_PROVIDER=supabase MOCK_AUTH=true MOCK_DATA=true PYTHONPATH=backend/api .venv/bin/python -m pytest backend/api/tests/test_platform_expansion.py -q",
+    "test:discovery": "PYTHONPATH=backend/discovery .venv/bin/python -m pytest backend/discovery/tests -q",
     "verify:phase1": "./scripts/verify-phase1.sh",
     "verify:phase2": "./scripts/verify-phase2.sh",
     "verify:phase3": "./scripts/verify-phase3.sh",
     "verify:phase4": "./scripts/verify-phase4.sh",
     "verify:phase5": "./scripts/verify-phase5.sh",
     "verify:phase6": "./scripts/verify-phase6.sh",
-    "verify:phase7": "./scripts/verify-phase7.sh"
+    "verify:phase7": "./scripts/verify-phase7.sh",
+    "verify:platform": "./scripts/verify-platform-expansion.sh"
   }
 }

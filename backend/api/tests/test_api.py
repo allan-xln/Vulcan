@@ -12,6 +12,18 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_local_auth_is_always_disabled_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("NEXT_PUBLIC_ENVIRONMENT", "production")
+    monkeypatch.setenv("AUTH_PROVIDER", "local")
+    monkeypatch.setenv("MOCK_AUTH", "true")
+    monkeypatch.setenv("LOCAL_TEST_AUTH_ENABLED", "true")
+
+    response = client.post("/auth/login", json={"username": "admin", "password": "admin"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "local development auth is disabled"
+
+
 def test_local_admin_login_and_protected_metrics() -> None:
     login_response = client.post("/auth/login", json={"username": "admin", "password": "admin"})
     assert login_response.status_code == 200
