@@ -46,6 +46,7 @@ x-vulcan-env: &vulcan-env
     VULCAN_ALLOW_RUNTIME_INTEGRATION_CONFIG: ${VULCAN_ALLOW_RUNTIME_INTEGRATION_CONFIG:-true}
     VULCAN_RUNTIME_CONFIG_FILE: /app/.runtime/integration-secrets.json
     AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-vulcan-local-enrollment-token}
+    VULCAN_AGENT_POLICY_SIGNING_KEY_FILE: /app/.runtime/agent-policy-signing.key
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
     AI_COMPLEX_MODEL: ${AI_COMPLEX_MODEL:-gpt-5.5}

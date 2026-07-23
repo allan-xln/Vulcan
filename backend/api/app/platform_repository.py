@@ -739,7 +739,10 @@ class PlatformRepository:
             if context.role == "user":
                 return TimelinePage(items=[], hasMore=False, dataOrigin="simulated")
             return self._simulated_timeline(context, limit)
-        conditions = ["event.tenant_id = %s"]
+        conditions = [
+            "event.tenant_id = %s",
+            "coalesce(event.extensions ->> 'compatibilityMirrorSuperseded', 'false') <> 'true'",
+        ]
         params: list[object] = [context.tenant_id]
         filters = {
             "event.site_id": site_id,
@@ -810,6 +813,7 @@ class PlatformRepository:
             conditions = [
                 "event.tenant_id = %s",
                 "(event.created_at, event.id) > (%s, %s)",
+                "coalesce(event.extensions ->> 'compatibilityMirrorSuperseded', 'false') <> 'true'",
             ]
             params: list[object] = [
                 context.tenant_id,
