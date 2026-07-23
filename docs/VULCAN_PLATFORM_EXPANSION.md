@@ -594,7 +594,7 @@ no start e diretório de trabalho incorreto — corrigidas e retestadas no conta
 - [x] Containers atualizados respondem aos health checks.
 - [x] Logs são revisados.
 - [x] Escopo preparado sem secrets ou alterações locais preexistentes.
-- [ ] Push do branch correto é confirmado.
+- [x] Push do branch correto é confirmado.
 
 ## Status de execução
 
@@ -608,7 +608,7 @@ no start e diretório de trabalho incorreto — corrigidas e retestadas no conta
 | UI integrada | concluído |
 | Discovery | concluído em modo seguro/fase 2 |
 | Validação final | concluída |
-| Commits e push | pendente |
+| Commits e push | concluídos em `main` |
 
 ## Limitações conhecidas e próximos passos
 
