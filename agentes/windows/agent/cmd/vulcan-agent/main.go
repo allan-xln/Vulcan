@@ -443,6 +443,7 @@ func installCommand(args []string) error {
 		logLocal("warn", "enrollment will retry from service: "+err.Error(), nil)
 	}
 	_ = runCommand("sc.exe", "start", serviceName)
+	_ = runCommand("schtasks.exe", "/Run", "/TN", "Vulcan Session Collector")
 	fmt.Println("Vulcan Agent installed.")
 	return nil
 }
