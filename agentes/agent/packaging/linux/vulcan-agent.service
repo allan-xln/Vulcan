@@ -1,0 +1,37 @@
+[Unit]
+Description=Vulcan Agent - operational intelligence agent
+Documentation=https://docs.vulcan.local/agent/linux
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=vulcan-agent
+Group=vulcan-agent
+Environment=VULCAN_AGENT_CONFIG_DIR=/etc/vulcan-agent
+Environment=VULCAN_AGENT_DATA_DIR=/var/lib/vulcan-agent
+Environment=VULCAN_AGENT_LOG_DIR=/var/log/vulcan-agent
+ExecStart=/usr/bin/vulcan-agent run
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/etc/vulcan-agent /var/lib/vulcan-agent /var/log/vulcan-agent
+
+[Install]
+WantedBy=multi-user.target

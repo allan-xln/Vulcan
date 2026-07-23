@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+if ! getent group vulcan-agent >/dev/null 2>&1; then
+  addgroup --system vulcan-agent >/dev/null
+fi
+
+if ! getent passwd vulcan-agent >/dev/null 2>&1; then
+  adduser \
+    --system \
+    --ingroup vulcan-agent \
+    --home /var/lib/vulcan-agent \
+    --no-create-home \
+    --shell /usr/sbin/nologin \
+    vulcan-agent >/dev/null
+fi
+
+install -d -m 0750 -o vulcan-agent -g vulcan-agent /etc/vulcan-agent
+install -d -m 0750 -o vulcan-agent -g vulcan-agent /var/lib/vulcan-agent
+install -d -m 0750 -o vulcan-agent -g vulcan-agent /var/log/vulcan-agent
+
+systemctl daemon-reload >/dev/null 2>&1 || true
+
+cat <<'NOTICE'
+Vulcan Agent instalado, ainda não habilitado.
+
+Server/Collector:
+  sudo -u vulcan-agent env \
+    VULCAN_AGENT_CONFIG_DIR=/etc/vulcan-agent \
+    VULCAN_AGENT_DATA_DIR=/var/lib/vulcan-agent \
+    VULCAN_AGENT_LOG_DIR=/var/log/vulcan-agent \
+    VULCAN_ENROLLMENT_TOKEN='<TOKEN>' \
+    /usr/bin/vulcan-agent enroll --server 'https://vulcan.exemplo.com' --profile server
+  sudo systemctl enable --now vulcan-agent
+
+Workstation:
+  VULCAN_ENROLLMENT_TOKEN='<TOKEN>' vulcan-agent enroll \
+    --server 'https://vulcan.exemplo.com' --profile workstation
+  systemctl --user enable --now vulcan-agent-user
+NOTICE
+
+exit 0

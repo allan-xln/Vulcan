@@ -1,0 +1,22 @@
+[Unit]
+Description=Vulcan Workstation Agent - user session context
+Documentation=https://docs.vulcan.local/agent/linux
+Wants=network-online.target
+After=network-online.target graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vulcan-agent run
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=default.target

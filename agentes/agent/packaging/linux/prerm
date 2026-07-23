@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-}" = "remove" ]; then
+  systemctl disable --now vulcan-agent >/dev/null 2>&1 || true
+fi
+
+exit 0

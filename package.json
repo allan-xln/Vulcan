@@ -42,6 +42,7 @@
     "verify:phase5": "./scripts/verify-phase5.sh",
     "verify:phase6": "./scripts/verify-phase6.sh",
     "verify:phase7": "./scripts/verify-phase7.sh",
-    "verify:platform": "./scripts/verify-platform-expansion.sh"
+    "verify:platform": "./scripts/verify-platform-expansion.sh",
+    "verify:agent": "./scripts/verify-agent-v2.sh"
   }
 }

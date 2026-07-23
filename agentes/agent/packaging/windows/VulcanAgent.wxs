@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="Vulcan Agent"
+    Language="1046"
+    Version="@VERSION@"
+    Manufacturer="LanFuture"
+    UpgradeCode="D49EB411-936F-44CE-87CB-758E28CF2669">
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perMachine"
+      Description="Vulcan operational intelligence agent" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="Uma versão mais nova do Vulcan Agent já está instalada." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="VULCAN_SERVER" Secure="yes" Hidden="yes" />
+    <Property Id="ENROLLMENT_TOKEN" Secure="yes" Hidden="yes" />
+    <Property Id="AGENT_PROFILE" Value="workstation" Secure="yes" />
+    <Property Id="SITE" Secure="yes" />
+    <Condition Message="Informe VULCAN_SERVER, ENROLLMENT_TOKEN e AGENT_PROFILE para uma instalação nova.">
+      Installed OR WIX_UPGRADE_DETECTED OR (VULCAN_SERVER AND ENROLLMENT_TOKEN AND AGENT_PROFILE)
+    </Condition>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="VulcanProgramFolder" Name="Vulcan">
+          <Directory Id="INSTALLFOLDER" Name="Agent" />
+        </Directory>
+      </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="VulcanDataRoot" Name="Vulcan">
+          <Directory Id="VulcanDataFolder" Name="Agent" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="AgentBinary" Guid="7BE5E9C4-C676-4282-83A2-50BEA7420828" Win64="yes">
+        <File Id="VulcanAgentExe" Source="@BINARY@" KeyPath="yes" />
+        <ServiceInstall
+          Id="VulcanAgentService"
+          Name="VulcanAgent"
+          DisplayName="Vulcan Agent"
+          Description="Vulcan operational intelligence, health and inventory agent."
+          Type="ownProcess"
+          Start="auto"
+          ErrorControl="normal"
+          Account="NT AUTHORITY\LocalService"
+          Arguments="run"
+          Vital="yes" />
+        <ServiceControl
+          Id="VulcanAgentServiceControl"
+          Name="VulcanAgent"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="VulcanDataFolder">
+      <Component Id="AgentDataDirectory" Guid="26D02D20-8FF9-44C7-BDE5-8B28D6498274" Win64="yes">
+        <CreateFolder />
+      </Component>
+    </DirectoryRef>
+
+    <CustomAction
+      Id="SetEnrollAgentData"
+      Property="EnrollAgent"
+      Value="enroll --server &quot;[VULCAN_SERVER]&quot; --token &quot;[ENROLLMENT_TOKEN]&quot; --profile &quot;[AGENT_PROFILE]&quot;"
+      HideTarget="yes" />
+    <CustomAction
+      Id="EnrollAgent"
+      FileKey="VulcanAgentExe"
+      ExeCommand="[CustomActionData]"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check"
+      HideTarget="yes" />
+    <CustomAction
+      Id="ProtectAgentData"
+      FileKey="VulcanAgentExe"
+      ExeCommand="protect-data"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+    <CustomAction
+      Id="ConfigureServiceRecovery"
+      FileKey="VulcanAgentExe"
+      ExeCommand="configure-recovery"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <InstallExecuteSequence>
+      <Custom Action="SetEnrollAgentData" After="InstallFiles">
+        NOT Installed AND NOT WIX_UPGRADE_DETECTED
+      </Custom>
+      <Custom Action="EnrollAgent" After="SetEnrollAgentData">
+        NOT Installed AND NOT WIX_UPGRADE_DETECTED
+      </Custom>
+      <Custom Action="ProtectAgentData" After="EnrollAgent">
+        NOT Installed AND NOT WIX_UPGRADE_DETECTED
+      </Custom>
+      <Custom Action="ConfigureServiceRecovery" After="InstallServices">
+        NOT REMOVE
+      </Custom>
+    </InstallExecuteSequence>
+
+    <Feature Id="Complete" Title="Vulcan Agent" Level="1">
+      <ComponentRef Id="AgentBinary" />
+      <ComponentRef Id="AgentDataDirectory" />
+    </Feature>
+  </Product>
+</Wix>

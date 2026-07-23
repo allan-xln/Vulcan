@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+systemctl daemon-reload >/dev/null 2>&1 || true
+
+if [ "${1:-}" = "purge" ]; then
+  if getent passwd vulcan-agent >/dev/null 2>&1; then
+    deluser --system vulcan-agent >/dev/null 2>&1 || true
+  fi
+  if getent group vulcan-agent >/dev/null 2>&1; then
+    delgroup --system vulcan-agent >/dev/null 2>&1 || true
+  fi
+  echo "Dados em /etc/vulcan-agent, /var/lib/vulcan-agent e /var/log/vulcan-agent foram preservados. Remova-os apenas após revogar a identidade e guardar o diagnóstico necessário."
+fi
+
+exit 0

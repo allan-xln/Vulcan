@@ -1,0 +1,11 @@
+Package: vulcan-agent
+Version: @VERSION@
+Section: admin
+Priority: optional
+Architecture: amd64
+Maintainer: LanFuture <contato@lanfuture.com.br>
+Depends: ca-certificates
+Homepage: https://vulcan.lanfuture.dev
+Description: Vulcan operational intelligence agent
+ Policy-controlled workstation, server and infrastructure collector agent
+ for Vulcan Workforce and Vulcan Infrastructure.
