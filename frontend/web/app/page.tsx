@@ -54,6 +54,7 @@ import {
 } from "recharts";
 import { getSupabaseClient, isMockAuthEnabled, isSupabaseAuthAvailable } from "@/lib/supabase";
 import { InfrastructureView, UnifiedTimelineView } from "@/components/platform-expansion";
+import { AgentsManagement } from "@/components/agents-management";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const DEMO_TENANT_ID = process.env.NEXT_PUBLIC_DEMO_TENANT_ID ?? "00000000-0000-0000-0000-000000000301";
@@ -108,6 +109,7 @@ type ViewKey =
   | "hierarchy"
   | "metrics"
   | "insights"
+  | "agents"
   | "infrastructure"
   | "timeline"
   | "notifications"
@@ -1406,6 +1408,7 @@ const commands: { key: ViewKey; label: string; icon: typeof Gauge }[] = [
   { key: "hierarchy", label: "Hierarquia", icon: Network },
   { key: "metrics", label: "Métricas", icon: Activity },
   { key: "insights", label: "Insights", icon: Brain },
+  { key: "agents", label: "Agentes", icon: RadioTower },
   { key: "infrastructure", label: "Infrastructure", icon: DatabaseZap },
   { key: "timeline", label: "Timeline", icon: CalendarClock },
   { key: "notifications", label: "Notificações", icon: BellRing },
@@ -1417,6 +1420,7 @@ const commandSummary: Record<ViewKey, string> = {
   hierarchy: "Organograma dinâmico com visibilidade por tenant e subárvore.",
   metrics: "Concentração de uso, setores, tendências e carga de contexto.",
   insights: "Recomendações de IA híbrida e oportunidades de automação.",
+  agents: "Estações, servidores, coletores, políticas e instalação segura.",
   infrastructure: "Sites, redes, ativos, descoberta segura e integrações.",
   timeline: "Pessoas, dispositivos e infraestrutura em uma sequência unificada.",
   notifications: "Sistema, Windows, WhatsApp, e-mail e agendamentos.",
@@ -3377,6 +3381,14 @@ function DashboardShell({
           {activeView === "infrastructure" && (
             <InfrastructureView
               key="infrastructure"
+              apiUrl={API_URL}
+              tenantId={DEMO_TENANT_ID}
+              token={token}
+            />
+          )}
+          {activeView === "agents" && (
+            <AgentsManagement
+              key="agents"
               apiUrl={API_URL}
               tenantId={DEMO_TENANT_ID}
               token={token}

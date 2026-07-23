@@ -22,4 +22,22 @@ test("logs into the Vulcan command dashboard", async ({ page }) => {
   await page.getByRole("button", { name: "Infrastructure" }).click();
   await page.getByRole("button", { name: /^Timeline/ }).click();
   await expect(page.getByRole("heading", { name: /Tudo o que aconteceu/i })).toBeVisible();
+
+  await expect(page.getByRole("heading", { name: "Visões operacionais" })).not.toBeVisible();
+  await page.locator("header").getByRole("button", { name: "Timeline", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Visões operacionais" })).toBeVisible();
+  await page.getByRole("button", { name: /^Agentes/ }).click();
+  await expect(page.getByRole("heading", { name: "Agentes", exact: true })).toBeVisible();
+  await expect(page.getByText("identidades v2")).toBeVisible();
+
+  await page.getByRole("button", { name: "Instalação", exact: true }).click();
+  await expect(page.getByText("Instalar Vulcan Agent", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "MSI Windows" })).toHaveAttribute(
+    "href",
+    "/agent-v2/VulcanAgent-Windows-x64.msi"
+  );
+  await expect(page.getByRole("link", { name: "DEB Linux" })).toHaveAttribute(
+    "href",
+    "/agent-v2/vulcan-agent_amd64.deb"
+  );
 });
