@@ -32,7 +32,8 @@ Vulcan is not a surveillance, espionage, or monitoring product. The agent must n
 - `backend/query-api`: tenant-scoped read API.
 - `backend/jobs`: deterministic normalization, fact derivation, and metric rollup jobs.
 - `ai/api`: Vulcan AI API backed by hybrid GPT + Llama routing.
-- `agentes`: Linux and Windows privacy-safe agents, installers and shared API contract. macOS remains a future placeholder.
+- `agentes/agent`: unified Go Workstation, Server and Collector agent.
+- `agentes/linux` and `agentes/windows`: compatible legacy agents kept for controlled migration.
 - `shared/domain`: shared frontend domain constants.
 - `shared/operational-event-schema`: shared operational event schema.
 - `database/supabase`: PostgreSQL/Supabase-compatible schema, migrations, seeds, and validation SQL.
@@ -48,6 +49,16 @@ Vulcan is not a surveillance, espionage, or monitoring product. The agent must n
 - `SECURITY.md`
 - `AI.md`
 - `AGENT.md`
+- `AGENT_ARCHITECTURE.md`
+- `AGENT_WINDOWS_INSTALL.md`
+- `AGENT_LINUX_INSTALL.md`
+- `AGENT_GPO_DEPLOYMENT.md`
+- `AGENT_SECURITY.md`
+- `AGENT_POLICIES.md`
+- `AGENT_TROUBLESHOOTING.md`
+- `AGENT_RELEASE.md`
+- `SERVER_AGENT.md`
+- `COLLECTOR_AGENT.md`
 - `BACKEND.md`
 - `FRONTEND.md`
 - `SUPABASE.md`

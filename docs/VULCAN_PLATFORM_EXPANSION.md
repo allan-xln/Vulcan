@@ -621,8 +621,76 @@ Itens deliberadamente não apresentados como prontos:
    a leitura existem, mas não há causa provável inventada.
 4. Relacionar impacto de infraestrutura aos indicadores do Workforce e à visão executiva.
 5. Implementar serviço de retenção com preview, backup e restore ensaiados.
-6. Substituir enrollment token compartilhado por tokens assinados por tenant/dispositivo.
+6. Migrar os agentes legados que ainda usam enrollment token compartilhado para o contrato
+   v2 já disponível, com token curto, identidade Ed25519 por instalação e tenant resolvido
+   pelo servidor.
 7. Medir volume/latência antes de aprovar NATS, Redis de plataforma, ClickHouse,
    VictoriaMetrics, MinIO ou OpenTelemetry Collector.
 8. Quebrar gradualmente `page.tsx` e `repository.py`; nenhum refactor grande foi feito nesta
    entrega para preservar compatibilidade.
+
+## Expansão Vulcan Agent v2 — 2026-07-23
+
+O agente foi evoluído de forma aditiva em `agentes/agent`, mantendo os agentes Linux/Windows
+legados como rollback. O novo núcleo Go compartilha Workstation, Server e Collector sem
+separar o produto.
+
+Componentes entregues:
+
+- migration incremental para tokens, identidades, políticas, nonces, comandos e releases;
+- enrollment de uso único com hash no banco;
+- identidade Ed25519 local e assinatura de cada request;
+- política Ed25519 assinada, aplicação atômica e rollback local;
+- fila SQLite cifrada, prioridades, retry, deduplicação e replay;
+- collectors de saúde, inventário, rede, atividade suportada, checks HTTP/TCP e discovery
+  explícito/read-only;
+- API v2 integrada a `devices`, `unified_events`, `activity_events` e auditoria;
+- migration de guarda para impedir espelho canônico duplicado no caminho v2 sem alterar o
+  espelho dos agentes legados;
+- migration de re-enrollment que preserva identidades revogadas e mantém somente uma
+  identidade ativa por tenant/dispositivo;
+- área visual de agentes, políticas, instalação, diagnóstico, eventos e auditoria;
+- MSI, `.deb`, systemd user/system, Windows LocalService, SBOM e checksums.
+
+Portas e serviços:
+
+| Componente | Porta/direção | Observação |
+| --- | --- | --- |
+| agente → Vulcan API | HTTPS TCP 443 | 3001 apenas no desenvolvimento local |
+| Workstation/Server | nenhuma entrada | não recebem NATS ou acesso remoto |
+| Collector 0.2.0 | nenhuma entrada | receivers syslog/traps/flows ainda não existem |
+| `VulcanAgent` Windows | serviço automático | conta LocalService |
+| `vulcan-agent` Linux | system unit | usuário sem login `vulcan-agent` |
+| `vulcan-agent-user` | user unit | sessão Workstation |
+
+Variáveis:
+
+- `VULCAN_AGENT_POLICY_SIGNING_KEY_FILE`: chave Ed25519 persistente do backend;
+- `VULCAN_ENROLLMENT_TOKEN`: token curto apenas no processo de enrollment;
+- `VULCAN_AGENT_CONFIG_DIR`, `VULCAN_AGENT_DATA_DIR`, `VULCAN_AGENT_LOG_DIR`: paths
+  explícitos usados pelo serviço Linux.
+
+Validação executada:
+
+- migration aplicada em banco temporário e aditivamente no banco local;
+- suíte API ampliada de 29 para 34 testes;
+- enrollment real, política assinada, heartbeat e ingestão canônica;
+- API indisponível, fila local, retorno e replay até profundidade zero;
+- repetição do mesmo request assinado rejeitada;
+- `go test -race`, `go vet`, cross-build Windows e frontend lint/typecheck/unit;
+- `.deb` e MSI gerados e inspecionados; binário Windows executado via Wine;
+- 58 testes Python e cinco unitários web passaram;
+- E2E Chromium passou sobre os containers reais, incluindo login, Workforce,
+  Infrastructure, Timeline, Agentes e os links de download MSI/DEB;
+- API, frontend, banco, Evolution e worker foram revisados saudáveis depois do deploy;
+- amostra de 73 segundos do agente Go: 12,9–13,2 MiB RSS, CPU ociosa 0,0%, nove threads e
+  dez descritores.
+
+Limites não apresentados como prontos:
+
+- Windows SCM e MSI ainda exigem homologação em Windows real;
+- pacote `.deb` não substituiu o agente legado ativo nesta máquina;
+- assinatura Authenticode/manifesto e auto-update ainda não foram habilitados;
+- printing, Windows Event Log detalhado, USB, containers, SNMP, syslog/traps/flows,
+  topologia e adapters permanecem nas próximas fases;
+- soak de 24 horas e simulação de 1.000 agentes ainda precisam ser executados.

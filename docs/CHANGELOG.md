@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added the unified Go Vulcan Agent with Workstation, Server and Collector profiles.
+- Added v2 one-time enrollment, Ed25519 request/policy signatures and replay protection.
+- Added encrypted SQLite offline queue, real canonical event ingestion and typed commands.
+- Added tenant-scoped agent identities, policies, releases and audit migration.
+- Added agent management/policy/installation UI and MSI/DEB/SBOM release pipeline.
 - Reorganized product into `/home/allan/Dev/Vulcan`.
 - Renamed product identity to Vulcan.
 - Added GPT/OpenAI configuration and AI insight endpoint.

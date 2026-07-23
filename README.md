@@ -13,7 +13,8 @@ Slogan:
 - `backend/discovery`: worker de descoberta de rede somente leitura, desativado por padrão.
 - `backend`: ingestion, query, and job services.
 - `ai/api`: hybrid GPT + Llama AI service.
-- `agentes`: Linux and Windows agent MVPs, installers, shared contract, and macOS placeholder.
+- `agentes/agent`: unified Go Workstation, Server and Collector agent.
+- `agentes/linux` and `agentes/windows`: legacy agents preserved for controlled migration.
 - `shared`: shared TypeScript packages and schemas.
 - `database/supabase`: PostgreSQL/Supabase-compatible schema.
 - `docker/compose.yml`: local PostgreSQL support.
@@ -264,38 +265,27 @@ Docs:
 - `docs/WHATSAPP.md`
 - `docs/NOTIFICATIONS.md`
 
-## Windows Agent
+## Vulcan Agent v2
 
-Build the robust Windows agent package:
-
-```bash
-corepack pnpm agent:windows:build
-```
-
-Generated package:
-
-```text
-agentes/installers/windows/VulcanAgent-Windows-x64.zip
-```
-
-See `docs/AGENT.md` and `agentes/windows/README.md` for installation, GPO usage, privacy boundaries, service recovery and offline sync behavior.
-
-## Linux Agent
-
-Package the Linux agent:
+O agente Go unificado possui perfis Workstation, Server e Collector, identidade Ed25519,
+política assinada, fila SQLite cifrada, replay offline e eventos canônicos no mesmo tenant
+do Vulcan.
 
 ```bash
-corepack pnpm agent:linux:package
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/agentes/agent
+../../.tools/go/bin/go test -race ./...
+VERSION=0.2.0 ./build-release.sh
 ```
 
-Install the demo agent bound to the local `teste` user:
+O build gera `.deb`, MSI, binários, checksums e SBOM em `agentes/agent/dist` e publica os
+downloads locais em `frontend/web/public/agent-v2` (diretório ignorado pelo Git).
 
-```bash
-cd /home/allan/Documentos/ProjetosLanFuture/Vulcan/agentes/installers/linux
-bash ./instalar-vulcan-teste.sh --backend-url "http://localhost:3001" --install-deps
-```
+Os agentes Python Linux e Go Windows anteriores continuam disponíveis durante a migração.
+Não os remova antes de homologar o v2 no sistema operacional alvo.
 
-See `docs/AGENT.md`, `docs/LINUX_AGENT.md` and `agentes/linux/README.md` for privacy policy flags, logs, uninstall and collection-quality notes for GNOME/Wayland.
+Consulte `docs/AGENT_ARCHITECTURE.md`, `docs/AGENT_WINDOWS_INSTALL.md`,
+`docs/AGENT_LINUX_INSTALL.md`, `docs/AGENT_SECURITY.md` e
+`docs/AGENT_TROUBLESHOOTING.md`.
 
 ## Comandos Finais De Validacao
 
@@ -325,4 +315,6 @@ Documentos de produto e operacao:
 - `docs/LGPD.md` e `docs/PRIVACY.md`: limites de coleta e mensagem de confianca.
 - `docs/WHATSAPP.md` e `docs/EMAIL.md`: notificacoes fora do painel.
 - `docs/OBSERVABILITY.md`: health checks, logs, auditoria e producao.
-- `docs/WINDOWS_AGENT.md`, `docs/LINUX_AGENT.md`, `docs/MACOS_AGENT.md`: instalacao e estado dos agentes.
+- `docs/AGENT_ARCHITECTURE.md`: arquitetura e protocolo do agente Go v2.
+- `docs/AGENT_WINDOWS_INSTALL.md` e `docs/AGENT_LINUX_INSTALL.md`: instalação e estado.
+- `docs/SERVER_AGENT.md` e `docs/COLLECTOR_AGENT.md`: perfis sem produtividade.
