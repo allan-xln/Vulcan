@@ -92,6 +92,44 @@ Base service: `backend/api`
 - `POST /agent/sync`
 - `POST /agent/logs`
 
+### Plataforma, infraestrutura e timeline
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /livez`
+- `GET /version`
+- `GET /platform/modules`
+- `GET /infrastructure/overview`
+- `GET /infrastructure/sites`
+- `POST /infrastructure/sites`
+- `GET /infrastructure/networks`
+- `POST /infrastructure/networks`
+- `GET /infrastructure/assets`
+- `POST /infrastructure/assets`
+- `GET /timeline`
+- `GET /realtime/events`
+- `POST /events`
+- `POST /events/simulate` — somente fora de produção e sempre marcado `simulated`
+- `GET /infrastructure/discovery/policies`
+- `POST /infrastructure/discovery/policies`
+- `PATCH /infrastructure/discovery/policies/{policy_id}`
+- `GET /infrastructure/discovery/runs`
+- `POST /infrastructure/discovery/runs`
+- `GET /infrastructure/integrations/catalog`
+- `GET /incidents`
+
+Todas as rotas de negócio exigem `Authorization` e `X-Tenant-Id`. Escritas validam o
+`tenantId` do corpo contra o tenant ativo. Leitura de infraestrutura exige papel
+autorizado; Workforce `employee/operator` não recebe inventário. Timeline e SSE respeitam
+tenant e, para escopos `self`/`hierarchy`, limitam eventos ao usuário ou à subárvore.
+
+O evento canônico usa `schemaVersion=2026-07-vulcan-event.v1`, idempotência por
+`tenant + source + sourceEventId`, horários de dispositivo/servidor, drift, origem
+confiável, classificação de privacidade, retenção e `dataOrigin`.
+
+O SSE é consumido por `fetch` streaming para enviar o bearer token em header. Tokens não
+são colocados na query string.
+
 Local protected routes accept:
 
 ```text

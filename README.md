@@ -10,6 +10,7 @@ Slogan:
 
 - `frontend/web`: Next.js web application.
 - `backend/api`: local SaaS API for auth, tenants, users, hierarchy, metrics, insights, notifications, AI routing, Supabase status, and agent gateway.
+- `backend/discovery`: worker de descoberta de rede somente leitura, desativado por padrão.
 - `backend`: ingestion, query, and job services.
 - `ai/api`: hybrid GPT + Llama AI service.
 - `agentes`: Linux and Windows agent MVPs, installers, shared contract, and macOS placeholder.
@@ -156,8 +157,11 @@ O Vulcan separa acompanhamento rapido de investigacao analitica:
 - `Notificacoes`: central para sistema, WhatsApp, e-mail, Windows/agente, tipos, prioridades, retry, templates, agendamentos e historico de entrega.
 - `Configuracoes`: central real de controle com seções salvas em `tenant_settings`, testes por seção, secrets mascarados, validação de entrada e auditoria.
 - `Configuracoes -> WhatsApp`: cliente vê o Canal WhatsApp Raiz gerenciado pela Vulcan; owner vê Evolution/Baileys, QR Code, fila, logs, retry e caminho futuro para Meta Cloud API.
+- `Infrastructure`: sites, redes, ativos, descoberta segura, incidentes, adapters e saúde da plataforma.
+- `Timeline`: eventos de Workforce e infraestrutura no contrato canônico, com SSE autenticado e detalhe técnico progressivo.
 
 Itens criticos do `Comando` abrem `Metricas` ja filtrada. Exportacoes CSV e Excel ficam em `Metricas` e respeitam o recorte atual.
+O `Comando`/Workforce continua sendo a página inicial. Infrastructure e Timeline usam a mesma autenticação, tenant, hierarquia, auditoria e identidade visual.
 
 Documentacao:
 
@@ -174,6 +178,29 @@ Documentacao:
 - `docs/WHATSAPP_ROOT_CHANNEL.md`
 - `docs/API.md`
 - `docs/QA.md`
+- `docs/VULCAN_PLATFORM_EXPANSION.md`
+
+## Expansão Da Plataforma
+
+A fundação de infraestrutura é aditiva e preserva o PostgreSQL/Supabase atual:
+
+```bash
+corepack pnpm supabase:migrate
+corepack pnpm verify:platform
+corepack pnpm test:platform
+corepack pnpm test:discovery
+```
+
+O worker de descoberta não inicia varreduras no stack padrão. Para subir o profile, ainda
+inerte enquanto `DISCOVERY_ENABLED=false`:
+
+```bash
+docker compose --profile network up -d --build discovery
+```
+
+Ativar o worker não basta para consultar uma rede: cada política precisa de site, CIDR
+privado permitido, limite, aprovação explícita e continua obrigada a `read_only` e
+`safe_mode`. Nenhuma automação corretiva ou alteração remota faz parte desta fase.
 
 ## Hybrid AI Setup
 

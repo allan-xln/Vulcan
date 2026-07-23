@@ -53,11 +53,11 @@ import {
   YAxis
 } from "recharts";
 import { getSupabaseClient, isMockAuthEnabled, isSupabaseAuthAvailable } from "@/lib/supabase";
+import { InfrastructureView, UnifiedTimelineView } from "@/components/platform-expansion";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const DEMO_TENANT_ID = process.env.NEXT_PUBLIC_DEMO_TENANT_ID ?? "00000000-0000-0000-0000-000000000301";
 const DEMO_ADMIN_EMAIL = process.env.NEXT_PUBLIC_DEMO_ADMIN_EMAIL ?? "admin@vulcan.local";
-const DEMO_ADMIN_PASSWORD = process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD ?? "VulcanAdmin123!";
 const DEFAULT_TENANT_EMAIL_DOMAIN = process.env.NEXT_PUBLIC_TENANT_EMAIL_DOMAIN ?? "erstransportes.com.br";
 const MOCK_AUTH = isMockAuthEnabled();
 const SUPABASE_AUTH_READY = isSupabaseAuthAvailable();
@@ -103,7 +103,15 @@ const initialDesktopNotificationRuntime: DesktopNotificationRuntime = {
   detail: "Aguardando inicialização do navegador."
 };
 
-type ViewKey = "dashboard" | "hierarchy" | "metrics" | "insights" | "notifications" | "settings";
+type ViewKey =
+  | "dashboard"
+  | "hierarchy"
+  | "metrics"
+  | "insights"
+  | "infrastructure"
+  | "timeline"
+  | "notifications"
+  | "settings";
 
 type MetricsIntent = {
   nonce: number;
@@ -1398,6 +1406,8 @@ const commands: { key: ViewKey; label: string; icon: typeof Gauge }[] = [
   { key: "hierarchy", label: "Hierarquia", icon: Network },
   { key: "metrics", label: "Métricas", icon: Activity },
   { key: "insights", label: "Insights", icon: Brain },
+  { key: "infrastructure", label: "Infrastructure", icon: DatabaseZap },
+  { key: "timeline", label: "Timeline", icon: CalendarClock },
   { key: "notifications", label: "Notificações", icon: BellRing },
   { key: "settings", label: "Configurações", icon: Layers3 }
 ];
@@ -1407,6 +1417,8 @@ const commandSummary: Record<ViewKey, string> = {
   hierarchy: "Organograma dinâmico com visibilidade por tenant e subárvore.",
   metrics: "Concentração de uso, setores, tendências e carga de contexto.",
   insights: "Recomendações de IA híbrida e oportunidades de automação.",
+  infrastructure: "Sites, redes, ativos, descoberta segura e integrações.",
+  timeline: "Pessoas, dispositivos e infraestrutura em uma sequência unificada.",
   notifications: "Sistema, Windows, WhatsApp, e-mail e agendamentos.",
   settings: "Empresa, Supabase, IA, segurança, WhatsApp, e-mail e integrações."
 };
@@ -2234,7 +2246,7 @@ export default function HomePage() {
 
     const params = new URLSearchParams(window.location.search);
     const requestedView = params.get("view");
-    if (requestedView && ["dashboard", "hierarchy", "metrics", "insights", "notifications", "settings"].includes(requestedView)) {
+    if (requestedView && ["dashboard", "hierarchy", "metrics", "insights", "infrastructure", "timeline", "notifications", "settings"].includes(requestedView)) {
       setView(requestedView as ViewKey);
     }
 
@@ -3360,6 +3372,22 @@ function DashboardShell({
               emailStatuses={emailStatuses}
               liveStatusLabel={liveStatusLabel}
               onOpenMetrics={onOpenMetrics}
+            />
+          )}
+          {activeView === "infrastructure" && (
+            <InfrastructureView
+              key="infrastructure"
+              apiUrl={API_URL}
+              tenantId={DEMO_TENANT_ID}
+              token={token}
+            />
+          )}
+          {activeView === "timeline" && (
+            <UnifiedTimelineView
+              key="timeline"
+              apiUrl={API_URL}
+              tenantId={DEMO_TENANT_ID}
+              token={token}
             />
           )}
           {activeView === "notifications" && (

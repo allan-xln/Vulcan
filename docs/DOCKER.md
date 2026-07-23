@@ -8,7 +8,8 @@ Este runtime sobe a pilha local completa do Vulcan em Docker:
 - Redis da Evolution;
 - backend API;
 - worker da fila WhatsApp;
-- frontend Next.js.
+- frontend Next.js;
+- discovery somente leitura opcional (`profile=network`).
 
 ## Primeiro Uso
 
@@ -101,6 +102,37 @@ Depois de escanear:
 ```
 
 O status esperado é `unofficial_connected`.
+
+## Discovery Somente Leitura
+
+O stack padrão não inicia o discovery. Para construir e subir o serviço ainda desativado:
+
+```bash
+docker compose --profile network up -d --build discovery
+docker inspect --format '{{json .State.Health}}' vulcan-discovery
+```
+
+Para permitir consultas, altere `DISCOVERY_ENABLED=true` em `docker/.env` somente depois
+de cadastrar e aprovar as redes privadas na interface. O serviço impõe allowlist, limite
+de alvos, concorrência, timeout e portas TCP globais. Não há port scan agressivo, escrita
+SNMP, configuração de equipamento ou automação corretiva.
+
+Redes Docker do compose principal:
+
+- `edge`: serviços com saída/entrada controlada;
+- `application`: frontend, API e workers;
+- `telemetry`: coletores opcionais;
+- `data`: PostgreSQL, interna;
+- `internal`: dependências sem publicação.
+
+Health endpoints da API:
+
+```text
+/healthz
+/readyz
+/livez
+/version
+```
 
 ## Importante
 

@@ -16,11 +16,10 @@ FROM deps AS build
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:3001
 ARG NEXT_PUBLIC_ENVIRONMENT=local
-ARG NEXT_PUBLIC_LOCAL_TEST_AUTH=true
+ARG NEXT_PUBLIC_LOCAL_TEST_AUTH=false
 ARG NEXT_PUBLIC_MOCK_AUTH=false
 ARG NEXT_PUBLIC_DEMO_TENANT_ID=00000000-0000-0000-0000-000000000301
 ARG NEXT_PUBLIC_DEMO_ADMIN_EMAIL=admin@vulcan.local
-ARG NEXT_PUBLIC_DEMO_ADMIN_PASSWORD=VulcanAdmin123!
 ARG NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=replace-me
 ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=replace-me
@@ -31,7 +30,6 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_PUBLIC_MOCK_AUTH=${NEXT_PUBLIC_MOCK_AUTH} \
     NEXT_PUBLIC_DEMO_TENANT_ID=${NEXT_PUBLIC_DEMO_TENANT_ID} \
     NEXT_PUBLIC_DEMO_ADMIN_EMAIL=${NEXT_PUBLIC_DEMO_ADMIN_EMAIL} \
-    NEXT_PUBLIC_DEMO_ADMIN_PASSWORD=${NEXT_PUBLIC_DEMO_ADMIN_PASSWORD} \
     NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL} \
     NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY} \
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
@@ -44,11 +42,8 @@ RUN corepack pnpm --dir frontend/web build
 FROM node:22-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
-    FRONTEND_PORT=3002 \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+    FRONTEND_PORT=3002
 WORKDIR /app
-
-RUN corepack enable
 
 COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/tsconfig.base.json ./
 COPY --from=build /app/node_modules ./node_modules
@@ -57,4 +52,4 @@ COPY --from=build /app/frontend/web ./frontend/web
 
 EXPOSE 3002
 
-CMD ["sh", "-c", "corepack pnpm --dir frontend/web exec next start --hostname 0.0.0.0 --port ${FRONTEND_PORT:-3002}"]
+CMD ["sh", "-c", "cd /app/frontend/web && ./node_modules/.bin/next start --hostname 0.0.0.0 --port ${FRONTEND_PORT:-3002}"]

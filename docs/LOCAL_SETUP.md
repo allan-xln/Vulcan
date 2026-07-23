@@ -77,7 +77,7 @@ Supabase demo user after `corepack pnpm seed:demo`:
 
 ```text
 email: admin@vulcan.local
-password: value of SUPABASE_DEMO_ADMIN_PASSWORD, default VulcanAdmin123! for local demo
+password: value configured only on the backend in SUPABASE_DEMO_ADMIN_PASSWORD
 ```
 
 Admin development fallback:
@@ -181,6 +181,42 @@ corepack pnpm demo:validate
 ```
 
 This command logs in as every demo profile and verifies hierarchy visibility, devices, operational intelligence and notifications. It fails if a profile sees names or device owners outside its expected reporting tree.
+
+## Plataforma E Infraestrutura
+
+Aplicar a migration aditiva e validar RLS das novas tabelas contra o PostgreSQL local:
+
+```bash
+DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:55432/vulcan' \
+  ./scripts/apply-supabase-migrations.sh
+
+VULCAN_PLATFORM_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:55432/vulcan' \
+  ./scripts/verify-platform-expansion.sh
+```
+
+Testes sem consultar a rede real:
+
+```bash
+corepack pnpm test:platform
+corepack pnpm test:discovery
+```
+
+O serviço `vulcan-discovery` permanece inerte com `DISCOVERY_ENABLED=false`. O profile
+opcional pode ser iniciado com:
+
+```bash
+docker compose --profile network up -d --build discovery
+```
+
+Para uma execução real controlada, são necessários três gates independentes:
+
+1. `DISCOVERY_ENABLED=true` no runtime;
+2. política privada, limitada, `read_only` e `safe_mode`;
+3. aprovação explícita da política e agendamento manual pela interface/API.
+
+Não use redes públicas nem credenciais no cadastro. O worker atual suporta ICMP, DNS
+reverso e conexão TCP estritamente limitada; SNMP e alterações remotas não estão
+implementados nesta fase.
 
 ## WhatsApp, E-mail E Notificações
 
