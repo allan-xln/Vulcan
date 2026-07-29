@@ -40,6 +40,8 @@ if [[ -n "$RESTORE_DIR" ]]; then
 fi
 
 "${compose[@]}" --profile core up -d --wait
+"${compose[@]}" --profile core restart edge
+"${compose[@]}" --profile core up -d --wait --no-deps edge
 
 if grep -Eq '^DISCOVERY_ENABLED=(true|1|yes)$' "$ENV_FILE"; then
   "${compose[@]}" --profile core --profile network up -d --wait discovery
