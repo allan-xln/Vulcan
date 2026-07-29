@@ -42,7 +42,7 @@ done
 cp "$ENV_FILE" "$staging/config/.env.production"
 tar -C "$DEPLOY_DIR" -czf "$staging/config/secrets.tar.gz" secrets
 find "$staging" -type f -exec chmod 0600 {} +
-(cd "$staging" && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+(cd "$staging" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 
 archive="$BACKUP_ROOT/vulcan-production-$timestamp.tar.gz.enc"
 tar -C "$staging" -czf - . | openssl enc -aes-256-cbc -pbkdf2 -salt \
