@@ -5,6 +5,7 @@ import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 from ipaddress import ip_network
+from pathlib import Path
 from time import perf_counter
 from uuid import UUID, uuid4
 
@@ -142,9 +143,11 @@ class PlatformRepository:
                     "infrastructure",
                     "timeline",
                     "assets",
+                    "agents",
                     "print",
                     "security",
                     "intelligence",
+                    "wallboard",
                     "automations",
                     "compliance",
                     "administration",
@@ -1320,8 +1323,26 @@ class PlatformRepository:
                     detail=f"{row['queued_discovery']} execução(ões) aguardando worker.",
                 ),
             ]
+            auth_ready = True
+            if self.settings.auth_provider == "database":
+                auth_key_path = Path(self.settings.auth_signing_key_file or "")
+                try:
+                    auth_ready = auth_key_path.is_file() and len(auth_key_path.read_bytes().strip()) >= 32
+                except OSError:
+                    auth_ready = False
+                checks.append(
+                    DependencyCheck(
+                        name="authentication",
+                        status="ok" if auth_ready else "unavailable",
+                        detail=(
+                            "Autenticação de banco possui chave de assinatura protegida."
+                            if auth_ready
+                            else "Chave de assinatura da autenticação não está disponível."
+                        ),
+                    )
+                )
             return PlatformHealth(
-                status="ok" if foundation_ready else "degraded",
+                status="ok" if foundation_ready and auth_ready else "degraded",
                 service="vulcan-api",
                 timestamp=now,
                 dataOrigin="real",

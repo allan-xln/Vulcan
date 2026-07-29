@@ -1,6 +1,8 @@
 import json
 from dataclasses import dataclass
 from os import getenv
+from pathlib import Path
+from urllib.parse import quote
 
 from app.runtime_config import load_runtime_config
 
@@ -26,6 +28,10 @@ class Settings:
     ai_complex_model: str
     ai_operational_model: str
     auth_provider: str
+    auth_signing_key_file: str | None
+    auth_token_ttl_minutes: int
+    auth_issuer: str
+    auth_audience: str
     supabase_url: str | None
     supabase_rest_url: str | None
     supabase_project_ref: str | None
@@ -116,6 +122,31 @@ def _bool_value(value: object | None, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _secret_env(name: str, default: str = "") -> str:
+    file_path = getenv(f"{name}_FILE")
+    if file_path:
+        try:
+            return Path(file_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return default
+    return getenv(name, default)
+
+
+def _database_url() -> str | None:
+    configured_url = getenv("DATABASE_URL")
+    if configured_url:
+        return configured_url
+    password = _secret_env("VULCAN_DATABASE_PASSWORD")
+    if not password:
+        return None
+    user = quote(getenv("VULCAN_DATABASE_USER", "postgres"), safe="")
+    encoded_password = quote(password, safe="")
+    host = getenv("VULCAN_DATABASE_HOST", "db")
+    port = int(getenv("VULCAN_DATABASE_PORT", "5432"))
+    database = quote(getenv("VULCAN_DATABASE_NAME", "vulcan"), safe="")
+    return f"postgresql://{user}:{encoded_password}@{host}:{port}/{database}"
+
+
 def _origin_list_env(names: tuple[str, ...], default: tuple[str, ...]) -> tuple[str, ...]:
     value = next((getenv(name) for name in names if getenv(name)), None)
     if value is None:
@@ -153,7 +184,7 @@ def get_settings() -> Settings:
         value = runtime.get(name)
         if value is not None:
             return str(value)
-        return getenv(name, default)
+        return _secret_env(name, default)
 
     default_origin_regex = None if environment == "production" else r"^https?://(localhost|127\.0\.0\.1):[0-9]+$"
     return Settings(
@@ -196,6 +227,10 @@ def get_settings() -> Settings:
         ai_complex_model=getenv("AI_COMPLEX_MODEL", getenv("OPENAI_MODEL", "gpt-5.5")),
         ai_operational_model=getenv("AI_OPERATIONAL_MODEL", getenv("LLAMA_MODEL", "llama-4-maverick")),
         auth_provider=getenv("AUTH_PROVIDER", "local"),
+        auth_signing_key_file=getenv("VULCAN_AUTH_SIGNING_KEY_FILE") or None,
+        auth_token_ttl_minutes=max(5, int(getenv("VULCAN_AUTH_TOKEN_TTL_MINUTES", "480"))),
+        auth_issuer=getenv("VULCAN_AUTH_ISSUER", "vulcan-api"),
+        auth_audience=getenv("VULCAN_AUTH_AUDIENCE", "vulcan-web"),
         supabase_url=getenv("SUPABASE_URL", getenv("NEXT_PUBLIC_SUPABASE_URL", "")) or None,
         supabase_rest_url=getenv("SUPABASE_REST_URL") or None,
         supabase_project_ref=getenv("SUPABASE_PROJECT_REF") or None,
@@ -203,7 +238,7 @@ def get_settings() -> Settings:
         supabase_anon_key=getenv("SUPABASE_ANON_KEY", getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")) or None,
         supabase_service_role_key=getenv("SUPABASE_SERVICE_ROLE_KEY") or None,
         supabase_secret_key=getenv("SUPABASE_SECRET_KEY") or None,
-        database_url=getenv("DATABASE_URL") or None,
+        database_url=_database_url(),
         smtp_host=getenv("SMTP_HOST") or None,
         smtp_port=int(getenv("SMTP_PORT", "0")) or None,
         smtp_user=getenv("SMTP_USER") or None,
@@ -278,7 +313,10 @@ def get_settings() -> Settings:
         allow_runtime_integration_config=_bool_env("VULCAN_ALLOW_RUNTIME_INTEGRATION_CONFIG", environment != "production"),
         fcm_server_key=getenv("FCM_SERVER_KEY") or None,
         fcm_vapid_key=getenv("FCM_VAPID_KEY") or None,
-        agent_enrollment_token=getenv("AGENT_ENROLLMENT_TOKEN", "vulcan-local-enrollment-token"),
+        agent_enrollment_token=_secret_env(
+            "AGENT_ENROLLMENT_TOKEN",
+            "vulcan-local-enrollment-token" if environment != "production" else "",
+        ),
         agent_public_backend_url=getenv("AGENT_PUBLIC_BACKEND_URL") or None,
         agent_installer_package_url=getenv("AGENT_INSTALLER_PACKAGE_URL") or None,
     )

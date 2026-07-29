@@ -105,7 +105,7 @@ from app.schemas import (
     User,
     WhatsAppStatus,
 )
-from app.security import AuthContext, Authenticated, login_with_local_admin
+from app.security import AuthContext, Authenticated, login_with_database, login_with_local_admin
 from app.supabase import supabase_status
 from app.runtime_config import masked_runtime_config, update_runtime_config
 from app.whatsapp import (
@@ -159,6 +159,8 @@ def health() -> HealthResponse:
 
 @app.post("/auth/login", response_model=LoginResponse)
 def login(request: LoginRequest) -> LoginResponse:
+    if get_settings().auth_provider == "database":
+        return login_with_database(request)
     return login_with_local_admin(request)
 
 

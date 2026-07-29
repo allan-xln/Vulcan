@@ -3,9 +3,10 @@ from uuid import UUID
 
 import httpx
 import psycopg
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from psycopg.rows import dict_row
 
+from app.auth_tokens import AuthTokenError, create_access_token, decode_access_token
 from app.config import Settings, get_settings
 from app.schemas import LoginRequest, LoginResponse
 
@@ -157,6 +158,68 @@ def login_with_local_admin(request: LoginRequest, settings: Settings | None = No
     )
 
 
+def login_with_database(request: LoginRequest, settings: Settings | None = None) -> LoginResponse:
+    settings = settings or get_settings()
+    if settings.auth_provider != "database" or not settings.database_url:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="database auth is not configured")
+    username = request.username.strip().lower()
+    try:
+        with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+            row = conn.execute(
+                """
+                select au.id,
+                       au.email,
+                       coalesce(m.full_name, up.display_name, au.email::text) as full_name,
+                       coalesce(r.slug, case when root_user.user_id is not null then 'root' else 'employee' end) as role_slug,
+                       coalesce(
+                         m.tenant_id,
+                         (select tenant.id from public.tenants tenant where tenant.status = 'active'
+                          order by tenant.created_at limit 1)
+                       ) as tenant_id,
+                       au.encrypted_password = crypt(%s, au.encrypted_password) as password_ok
+                from auth.users au
+                left join public.vulcan_root_users root_user on root_user.user_id = au.id
+                left join public.memberships m on m.user_id = au.id and m.status = 'active'
+                left join public.roles r on r.id = m.role_id
+                left join public.user_profiles up on up.user_id = au.id
+                where (lower(au.email::text) = %s
+                       or lower(coalesce(au.raw_user_meta_data ->> 'login', '')) = %s)
+                  and au.deleted_at is null
+                  and (au.banned_until is null or au.banned_until <= timezone('utc', now()))
+                  and coalesce(au.encrypted_password, '') <> ''
+                order by (root_user.user_id is not null) desc, m.created_at desc nulls last
+                limit 1
+                """,
+                (request.password, username, username),
+            ).fetchone()
+    except (psycopg.Error, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="authentication database unavailable") from exc
+    if not row or not row["password_ok"] or not row["tenant_id"]:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+    try:
+        token = create_access_token(
+            settings,
+            user_id=str(row["id"]),
+            email=str(row["email"]),
+            tenant_id=str(row["tenant_id"]),
+            role=str(row["role_slug"]),
+        )
+    except AuthTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return LoginResponse(
+        accessToken=token,
+        tokenType="bearer",
+        user={
+            "id": str(row["id"]),
+            "name": row["full_name"],
+            "email": row["email"],
+            "role": row["role_slug"],
+            "tenantId": str(row["tenant_id"]),
+        },
+        warning="Sessão segura do Vulcan. O acesso é limitado pelo tenant e pelas permissões do usuário.",
+    )
+
+
 def _role_from_scope(scope: str) -> str:
     if scope in {"tenant", "global"}:
         return "tenant_admin"
@@ -284,7 +347,84 @@ def _validate_supabase_token(token: str, settings: Settings, tenant_id: UUID) ->
     )
 
 
+def _validate_database_token(
+    token: str,
+    settings: Settings,
+    requested_tenant_id: UUID | None,
+) -> AuthContext:
+    try:
+        payload = decode_access_token(settings, token)
+        user_id = UUID(payload["sub"])
+        token_tenant_id = UUID(payload["tenant_id"])
+    except (AuthTokenError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired access token") from exc
+    if not settings.database_url:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="authentication database unavailable")
+    try:
+        with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+            root_row = conn.execute(
+                """
+                select exists(
+                  select 1
+                  from auth.users au
+                  join public.vulcan_root_users root_user on root_user.user_id = au.id
+                  where au.id = %s
+                    and au.deleted_at is null
+                    and (au.banned_until is null or au.banned_until <= timezone('utc', now()))
+                ) as is_root
+                """,
+                (user_id,),
+            ).fetchone()
+            is_root = bool(root_row and root_row["is_root"])
+            effective_tenant_id = requested_tenant_id if is_root and requested_tenant_id else token_tenant_id
+            tenant_active = conn.execute(
+                "select exists(select 1 from public.tenants where id = %s and status = 'active') as active",
+                (effective_tenant_id,),
+            ).fetchone()
+            if not tenant_active or not tenant_active["active"]:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="tenant is not active")
+            if is_root:
+                return AuthContext(
+                    user_id=str(user_id),
+                    email=payload["email"],
+                    tenant_id=effective_tenant_id,
+                    role="root",
+                    provider="database",
+                )
+            if requested_tenant_id and requested_tenant_id != token_tenant_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant outside authenticated context")
+            membership = conn.execute(
+                """
+                select r.slug as role_slug
+                from auth.users au
+                join public.memberships m on m.user_id = au.id
+                left join public.roles r on r.id = m.role_id
+                where au.id = %s
+                  and m.tenant_id = %s
+                  and m.status = 'active'
+                  and au.deleted_at is null
+                  and (au.banned_until is null or au.banned_until <= timezone('utc', now()))
+                limit 1
+                """,
+                (user_id, token_tenant_id),
+            ).fetchone()
+    except HTTPException:
+        raise
+    except (psycopg.Error, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="authentication database unavailable") from exc
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user membership is not active")
+    return AuthContext(
+        user_id=str(user_id),
+        email=payload["email"],
+        tenant_id=token_tenant_id,
+        role=str(membership["role_slug"] or "employee"),
+        provider="database",
+    )
+
+
 def require_auth(
+    request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
 ) -> AuthContext:
@@ -335,6 +475,11 @@ def require_auth(
 
     if settings.auth_provider == "supabase":
         return _validate_supabase_token(token, settings, tenant_id)
+    if settings.auth_provider == "database":
+        context = _validate_database_token(token, settings, UUID(x_tenant_id) if x_tenant_id else None)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and context.role in {"read_only", "auditor"}:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="read-only role cannot modify data")
+        return context
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
