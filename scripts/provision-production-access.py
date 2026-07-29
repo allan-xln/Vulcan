@@ -244,14 +244,21 @@ def main() -> None:
             update public.tenant_modules
             set enabled = module_key in (
                   'workforce', 'infrastructure', 'assets', 'timeline',
-                  'agents', 'print', 'intelligence', 'wallboard'
+                  'agents', 'print', 'intelligence', 'wallboard',
+                  'automations', 'compliance', 'administration'
                 ),
                 enabled_at = case
                   when module_key in (
                     'workforce', 'infrastructure', 'assets', 'timeline',
-                    'agents', 'print', 'intelligence', 'wallboard'
+                    'agents', 'print', 'intelligence', 'wallboard',
+                    'automations', 'compliance', 'administration'
                   ) then coalesce(enabled_at, timezone('utc', now()))
                   else null
+                end,
+                limits = case
+                  when module_key = 'automations'
+                    then jsonb_set(limits, '{mode}', '"read_only"'::jsonb, true)
+                  else limits
                 end,
                 plan_source = case when module_key = 'workforce' then 'system' else 'tenant' end
             where tenant_id = %s

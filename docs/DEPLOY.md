@@ -43,15 +43,15 @@ contém `.git`, árvore de código, testes nem secrets.
 
 ```bash
 cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
-PATH="$PWD/.tools/syft/bin:$PATH" ./scripts/build-production-release.sh 0.3.3
-sha256sum -c dist/vulcan-0.3.3-linux-amd64.tar.gz.sha256
+PATH="$PWD/.tools/syft/bin:$PATH" ./scripts/build-production-release.sh 0.3.4
+sha256sum -c dist/vulcan-0.3.4-linux-amd64.tar.gz.sha256
 ```
 
 No host Linux isolado:
 
 ```bash
-tar -xzf vulcan-0.3.3-linux-amd64.tar.gz
-cd vulcan-0.3.3-linux-amd64
+tar -xzf vulcan-0.3.4-linux-amd64.tar.gz
+cd vulcan-0.3.4-linux-amd64
 cp .env.production.example .env.production
 chmod 0600 .env.production
 # Revisar URL, versão, commit e build antes do primeiro start.

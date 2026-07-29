@@ -25,7 +25,7 @@ internos não possuem porta publicada no host.
 
 ## Releases
 
-- plataforma em produção: `0.3.3`;
+- plataforma em produção: `0.3.4`;
 - agente publicado: `0.3.1`;
 - rollback de imagens: releases `0.3.2`, `0.3.1` e base `0.3.0`;
 - commit e build exatos: `/version` e `manifests/release.json`;
@@ -34,7 +34,8 @@ internos não possuem porta publicada no host.
 A correção `0.3.1` acrescentou a autorização explícita de HTTP apenas para endereços IP
 privados. HTTPS continua sendo o padrão. HTTP público permanece recusado pelo agente.
 A correção de plataforma `0.3.3` habilitou a autenticação real do backend no frontend,
-sem reativar `admin/admin` ou o modo demo.
+sem reativar `admin/admin` ou o modo demo. A `0.3.4` fixou os entitlements finais do
+tenant, com Automations limitado a `read_only`.
 
 ## Serviços
 
@@ -111,13 +112,13 @@ Comandos operacionais:
 
 ```bash
 cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
-dist/vulcan-0.3.3-linux-amd64/healthcheck.sh
-dist/vulcan-0.3.3-linux-amd64/logs.sh backend frontend edge
-dist/vulcan-0.3.3-linux-amd64/restart.sh
+dist/vulcan-0.3.4-linux-amd64/healthcheck.sh
+dist/vulcan-0.3.4-linux-amd64/logs.sh backend frontend edge
+dist/vulcan-0.3.4-linux-amd64/restart.sh
 VULCAN_BACKUP_ROOT=/caminho/privado \
-  dist/vulcan-0.3.3-linux-amd64/backup.sh
-dist/vulcan-0.3.3-linux-amd64/rollback.sh \
-  dist/vulcan-0.3.2-linux-amd64
+  dist/vulcan-0.3.4-linux-amd64/backup.sh
+dist/vulcan-0.3.4-linux-amd64/rollback.sh \
+  dist/vulcan-0.3.3-linux-amd64
 ```
 
 O rollback troca apenas imagens e não reverte o banco destrutivamente.

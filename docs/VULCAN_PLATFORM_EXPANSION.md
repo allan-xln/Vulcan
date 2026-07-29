@@ -686,7 +686,7 @@ banco para o controlador de domínio.
 Estado validado:
 
 - borda oficial `192.168.200.4:8099 -> 192.168.200.160:8099`;
-- release de plataforma `0.3.3` e agente `0.3.1`;
+- release de plataforma `0.3.4` e agente `0.3.1`;
 - tenant ERS, Workforce, Infrastructure, Assets, Timeline, Agents, Print, Intelligence e
   Wallboard habilitados;
 - login real do backend no frontend, sem autenticação demo;
