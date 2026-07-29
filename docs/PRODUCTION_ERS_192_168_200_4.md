@@ -25,17 +25,27 @@ internos não possuem porta publicada no host.
 
 ## Releases
 
-- plataforma em produção: `0.3.4`;
+- plataforma em produção: `0.3.5`;
 - agente publicado: `0.3.1`;
-- rollback de imagens: releases `0.3.2`, `0.3.1` e base `0.3.0`;
+- rollback imediato: release `0.3.4`; também foram preservadas `0.3.3` e a base `0.3.0`;
 - commit e build exatos: `/version` e `manifests/release.json`;
 - os pacotes possuem `SHA256SUMS` e SBOM CycloneDX.
+
+Release de produção:
+
+```text
+arquivo: dist/vulcan-0.3.5-linux-amd64.tar.gz
+SHA-256: fad45b7f7929dbe49be9dede3e5df34865231462eaf66f5abde35ae0748d860f
+commit: 466e9bab376211bf74d5194af31c269b757b7425
+build: 20260729T184432Z
+```
 
 A correção `0.3.1` acrescentou a autorização explícita de HTTP apenas para endereços IP
 privados. HTTPS continua sendo o padrão. HTTP público permanece recusado pelo agente.
 A correção de plataforma `0.3.3` habilitou a autenticação real do backend no frontend,
 sem reativar `admin/admin` ou o modo demo. A `0.3.4` fixou os entitlements finais do
-tenant, com Automations limitado a `read_only`.
+tenant, com Automations limitado a `read_only`. A `0.3.5` corrige o manifesto de backup
+para excluir `SHA256SUMS` do próprio cálculo e permitir validação integral.
 
 ## Serviços
 
@@ -104,21 +114,27 @@ Backups ficam fora do Git, sob
 `/home/allan/.local/share/vulcan-cutover-20260729/`, com modo `0700`; arquivos e
 checksums usam `0600`. O backup é AES-256-CBC/PBKDF2 e usa passphrase separada.
 
-O restore foi executado em PostgreSQL descartável, sem porta publicada, incluindo os
-roles RLS. Foram validados 1 tenant, 15 usuários, 13 memberships, 27 dispositivos,
-22 identidades de agente, eventos/timeline/auditoria e 37 tabelas da Evolution API.
+O backup final é
+`official-0.3.5-backups/vulcan-production-20260729T185224Z.tar.gz.enc`, SHA-256
+`2dbfdb7e30bbd06204e0a340512d456548b9ae057bd1c06559b5de46d8020f7b`.
+O manifesto interno, os dumps e os volumes passaram na validação de checksum.
+
+O restore final foi executado em PostgreSQL descartável, sem porta publicada, incluindo
+os roles RLS. Foram validados 1 tenant, 15 usuários, 27 dispositivos, 22 identidades de
+agente, 39.690 eventos, 39.539 atividades, 58.663 registros de auditoria, 11 módulos
+habilitados e 37 tabelas da Evolution API. Os containers descartáveis foram removidos.
 
 Comandos operacionais:
 
 ```bash
 cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
-dist/vulcan-0.3.4-linux-amd64/healthcheck.sh
-dist/vulcan-0.3.4-linux-amd64/logs.sh backend frontend edge
-dist/vulcan-0.3.4-linux-amd64/restart.sh
+dist/vulcan-0.3.5-linux-amd64/healthcheck.sh
+dist/vulcan-0.3.5-linux-amd64/logs.sh backend frontend edge
+dist/vulcan-0.3.5-linux-amd64/restart.sh
 VULCAN_BACKUP_ROOT=/caminho/privado \
-  dist/vulcan-0.3.4-linux-amd64/backup.sh
-dist/vulcan-0.3.4-linux-amd64/rollback.sh \
-  dist/vulcan-0.3.3-linux-amd64
+  dist/vulcan-0.3.5-linux-amd64/backup.sh
+dist/vulcan-0.3.5-linux-amd64/rollback.sh \
+  dist/vulcan-0.3.4-linux-amd64
 ```
 
 O rollback troca apenas imagens e não reverte o banco destrutivamente.
@@ -144,7 +160,8 @@ AD e não foram reparados por esta entrega.
 ## Riscos restantes
 
 - o runtime `.160` é um notebook Zorin em Wi-Fi e não é o host ideal de produção;
-- o disco raiz estava acima de 97% de uso durante o corte;
+- após remover apenas cache descartável de build, o disco raiz ficou em 97% de uso,
+  com aproximadamente 13 GiB livres; requer expansão ou migração prioritária;
 - o endpoint oficial ainda usa HTTP interno; planejar certificado confiável e HTTPS;
 - encaminhamentos antigos `80`, `3001` e `3002` no DC permanecem como legado inativo;
 - o MSI não foi instalado em Windows real nesta janela;
