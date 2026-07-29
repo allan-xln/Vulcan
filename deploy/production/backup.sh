@@ -36,8 +36,7 @@ for volume in \
   vulcan-production-evolution-redis; do
   docker run --rm \
     -v "$volume:/volume:ro" \
-    -v "$staging/volumes:/backup" \
-    alpine:3.22 tar -C /volume -czf "/backup/$volume.tar.gz" .
+    alpine:3.22 tar -C /volume -czf - . > "$staging/volumes/$volume.tar.gz"
 done
 
 cp "$ENV_FILE" "$staging/config/.env.production"
