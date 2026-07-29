@@ -32,9 +32,10 @@ corepack pnpm dev
 
 ## Release de produção self-hosted
 
-O endereço oficial é `192.168.200.4:8099`, mas o runtime fica isolado no host Linux
-`192.168.200.160`. O servidor 4 é controlador de domínio/DNS e não recebe runtime, banco
-ou containers do Vulcan. O runbook autoritativo está em
+O endereço oficial é `192.168.200.4:8099`, mas o runtime fica isolado na VM Linux
+`VULCAN-PROD01` (`192.168.200.26`, VMID `103`, Proxmox `PVE02`). O servidor 4 é
+controlador de domínio/DNS e não recebe runtime, banco ou containers do Vulcan. O
+runbook autoritativo está em
 `docs/PRODUCTION_ERS_192_168_200_4.md`.
 
 A release autocontida fica em `dist/vulcan-<versão>-linux-amd64.tar.gz` e contém somente
@@ -43,15 +44,16 @@ contém `.git`, árvore de código, testes nem secrets.
 
 ```bash
 cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
-PATH="$PWD/.tools/syft/bin:$PATH" ./scripts/build-production-release.sh 0.3.4
-sha256sum -c dist/vulcan-0.3.4-linux-amd64.tar.gz.sha256
+PATH="$PWD/.tools/syft/bin:$PATH" ./scripts/build-production-release.sh 0.3.5
+sha256sum -c dist/vulcan-0.3.5-linux-amd64.tar.gz.sha256
 ```
 
-No host Linux isolado:
+No host Linux isolado, instale previamente Docker Engine, Docker Compose e o pacote
+`acl`, necessário para preparar permissões dos volumes durante o restore:
 
 ```bash
-tar -xzf vulcan-0.3.4-linux-amd64.tar.gz
-cd vulcan-0.3.4-linux-amd64
+tar -xzf vulcan-0.3.5-linux-amd64.tar.gz
+cd vulcan-0.3.5-linux-amd64
 cp .env.production.example .env.production
 chmod 0600 .env.production
 # Revisar URL, versão, commit e build antes do primeiro start.
@@ -64,7 +66,7 @@ permanecem nas redes Docker internas. `discovery` usa o profile `network`, inici
 desabilitado e exige aprovação explícita das redes do site.
 
 O corte reutiliza o encaminhamento exclusivo `192.168.200.4:8099` para
-`192.168.200.160:8099`. Não altere AD, DNS ou outros listeners do controlador de domínio.
+`192.168.200.26:8099`. Não altere AD, DNS ou outros listeners do controlador de domínio.
 
 ## Domains And CORS
 

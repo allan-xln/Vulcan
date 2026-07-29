@@ -679,14 +679,15 @@ O procedimento, os gates e os comandos operacionais estão em
 
 ## Corte de produção ERS por `192.168.200.4:8099` — 2026-07-29
 
-A missão de destino foi corrigida posteriormente. O servidor 7 deixou de ser obrigatório,
-e o runtime isolado saudável em `192.168.200.160` foi promovido sem mover containers ou
+A missão de destino foi corrigida posteriormente. O servidor 7 deixou de ser obrigatório.
+O estado preservado do runtime temporário `.160` foi migrado para a VM Linux dedicada
+`VULCAN-PROD01` (`192.168.200.26`, VMID `103` no `PVE02`), sem mover containers ou
 banco para o controlador de domínio.
 
 Estado validado:
 
-- borda oficial `192.168.200.4:8099 -> 192.168.200.160:8099`;
-- release de plataforma `0.3.4` e agente `0.3.1`;
+- borda oficial `192.168.200.4:8099 -> 192.168.200.26:8099`;
+- release de plataforma `0.3.5` e agente `0.3.1`;
 - tenant ERS, Workforce, Infrastructure, Assets, Timeline, Agents, Print, Intelligence e
   Wallboard habilitados;
 - login real do backend no frontend, sem autenticação demo;
@@ -694,6 +695,7 @@ Estado validado:
 - MSI, `.deb`, checksums e SBOM publicados;
 - Workstation Agent real online, com fila cifrada/replay comprovados;
 - backup criptografado e restore em bancos descartáveis validados;
+- backup diário local e job de snapshot Proxmox configurados;
 - serviços AD/DNS preservados e testes focados do `dcdiag` aprovados.
 
 O runbook e os riscos atuais estão em

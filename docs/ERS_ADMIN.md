@@ -38,6 +38,7 @@ curl -fsS -X POST http://192.168.200.4:8099/api/auth/login \
 ```
 
 O endereço acima é o endpoint oficial. O servidor 4 apenas encaminha a porta 8099; API,
-frontend e banco permanecem no runtime Linux isolado `192.168.200.160`.
+frontend e banco permanecem na VM Linux isolada `VULCAN-PROD01`
+(`192.168.200.26`).
 
 Após login, o aviso deve indicar senha temporária. A troca forçada em primeiro login ainda depende da tela dedicada de troca de senha.

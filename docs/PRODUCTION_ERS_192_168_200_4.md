@@ -16,18 +16,29 @@ PostgreSQL, Redis, containers, frontend, backend, worker, collector ou ferrament
 build do Vulcan. A única rota oficial é o encaminhamento TCP já existente:
 
 ```text
-192.168.200.4:8099 -> 192.168.200.160:8099
+192.168.200.4:8099 -> 192.168.200.26:8099
 ```
 
-O runtime fica no host Linux isolado `192.168.200.160`, no projeto Compose
-`vulcan-production`. A porta de borda é publicada em `0.0.0.0:8099`; bancos e serviços
-internos não possuem porta publicada no host.
+O runtime definitivo fica na VM Linux dedicada `VULCAN-PROD01`, IP estático
+`192.168.200.26`, VMID `103` no nó Proxmox `PVE02`. A VM possui 2 vCPU, 8 GiB de RAM e
+120 GiB de disco, além de 4 GiB de swap com `vm.swappiness=10`. O projeto Compose é
+`vulcan-production`; a porta de borda é publicada em `0.0.0.0:8099`, enquanto bancos e
+serviços internos não possuem porta publicada no host.
+
+O antigo runtime temporário `192.168.200.160` era o notebook de desenvolvimento. Seus
+containers de produção estão parados, mas os volumes e backups foram preservados como
+rollback. O acesso oficial não depende mais desse equipamento.
+
+A regra `Vulcan LAN Installer 8099` aceita a porta TCP 8099 no perfil de domínio e o
+acesso foi validado pela VPN. Assim, clientes da rede corporativa roteada e da VPN podem
+usar o mesmo endereço oficial; a aplicação não foi publicada diretamente na Internet.
 
 ## Releases
 
 - plataforma em produção: `0.3.5`;
 - agente publicado: `0.3.1`;
-- rollback imediato: release `0.3.4`; também foram preservadas `0.3.3` e a base `0.3.0`;
+- rollback imediato: restore do backup pré-corte na VM; o runtime temporário anterior foi
+  preservado desligado como contingência adicional;
 - commit e build exatos: `/version` e `manifests/release.json`;
 - os pacotes possuem `SHA256SUMS` e SBOM CycloneDX.
 
@@ -51,7 +62,7 @@ para excluir `SHA256SUMS` do próprio cálculo e permitir validação integral.
 
 | Serviço | Função | Exposição |
 | --- | --- | --- |
-| `edge` | Nginx de borda | `192.168.200.160:8099` |
+| `edge` | Nginx de borda | `192.168.200.26:8099` |
 | `frontend` | Vulcan Web | apenas rede Docker |
 | `backend` | API, realtime e Agent API v2 | apenas rede Docker |
 | `whatsapp-worker` | worker assíncrono | sem porta publicada |
@@ -110,34 +121,54 @@ gravado em script permanente.
 
 ## Backup, restore e rollback
 
-Backups ficam fora do Git, sob
-`/home/allan/.local/share/vulcan-cutover-20260729/`, com modo `0700`; arquivos e
-checksums usam `0600`. O backup é AES-256-CBC/PBKDF2 e usa passphrase separada.
+Backups ficam fora do Git. Na VM, o diretório é `/var/backups/vulcan/daily`, protegido
+para `root`; o material de restore fica em `/opt/vulcan/restore`. O backup é
+AES-256-CBC/PBKDF2 e usa passphrase separada.
 
-O backup final é
-`official-0.3.5-backups/vulcan-production-20260729T185224Z.tar.gz.enc`, SHA-256
-`2dbfdb7e30bbd06204e0a340512d456548b9ae057bd1c06559b5de46d8020f7b`.
-O manifesto interno, os dumps e os volumes passaram na validação de checksum.
+O backup pré-corte é
+`vulcan-production-20260729T220432Z.tar.gz.enc`, SHA-256
+`bb6a88859690c3d292aaadb8da864bb4287cc017d830cc2efbc1221953a5dbb2`.
+O primeiro backup gerado já na VM é
+`vulcan-production-20260729T222956Z.tar.gz.enc`, SHA-256
+`7f449f66448d7942e1a7cedae41491b1d56b4e6c681c743b6384db48840d0706`.
+O manifesto interno, dumps, volumes e catálogos `pg_restore` passaram na validação.
+
+O timer `vulcan-backup.timer` executa diariamente, com retenção local de 14 dias. No
+Proxmox, o job `vulcan-prod01-daily` protege a VMID `103` no storage `BACKUPSERS` às
+`03:15`, em modo snapshot, com retenção de 7 diários, 4 semanais e 6 mensais.
+
+O snapshot inicial `BACKUPSERS:backup/vm/103/2026-07-29T22:31:40Z` terminou com
+`TASK OK`. O backup leu 120 GiB, reutilizou 93% dos blocos e foi listado novamente no
+storage depois da conclusão.
 
 O restore final foi executado em PostgreSQL descartável, sem porta publicada, incluindo
 os roles RLS. Foram validados 1 tenant, 15 usuários, 27 dispositivos, 22 identidades de
-agente, 39.690 eventos, 39.539 atividades, 58.663 registros de auditoria, 11 módulos
-habilitados e 37 tabelas da Evolution API. Os containers descartáveis foram removidos.
+agente e 11 módulos habilitados. Após o corte e o replay do piloto, a produção registrava
+39.909 eventos, 39.717 atividades e 58.946 registros de auditoria. A Evolution API possui
+37 tabelas. Os containers descartáveis usados no teste de restore foram removidos.
+
+Um reboot controlado somente da VM foi executado às `20:13:47 -03`. Docker, os oito
+containers, o backup timer e o QEMU Guest Agent voltaram automaticamente. O endereço
+oficial respondeu novamente, os endpoints de health/readiness passaram, o Workstation
+Agent reenviou os três eventos acumulados e zerou a fila. Chromium validou Agentes e
+Wallboard no IP oficial com `2/2` testes aprovados.
 
 Comandos operacionais:
 
 ```bash
-cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
-dist/vulcan-0.3.5-linux-amd64/healthcheck.sh
-dist/vulcan-0.3.5-linux-amd64/logs.sh backend frontend edge
-dist/vulcan-0.3.5-linux-amd64/restart.sh
+ssh vulcanops@192.168.200.26
+cd /opt/vulcan/current
+sudo ./healthcheck.sh
+sudo ./logs.sh backend frontend edge
+sudo ./restart.sh
 VULCAN_BACKUP_ROOT=/caminho/privado \
-  dist/vulcan-0.3.5-linux-amd64/backup.sh
-dist/vulcan-0.3.5-linux-amd64/rollback.sh \
-  dist/vulcan-0.3.4-linux-amd64
+  sudo ./backup.sh
+sudo ./rollback.sh /opt/vulcan/releases/<release-anterior>
 ```
 
-O rollback troca apenas imagens e não reverte o banco destrutivamente.
+Uma release anterior só deve ser informada ao `rollback.sh` depois de transferida e
+validada. Para retorno com dados, use o backup pré-corte e o procedimento de restore; o
+rollback de imagem não reverte o banco destrutivamente.
 
 ## Saúde do controlador de domínio
 
@@ -148,7 +179,7 @@ Após o corte:
 - `SYSVOL` e `NETLOGON`: compartilhados;
 - SOA, SRV LDAP, SRV Kerberos e A do SRVERS01: resolvidos pelo DNS local;
 - `repadmin /replsummary`: `0/5` falhas de objetos para o destino SRVERS01;
-- o SRVERS01 alcançou `192.168.200.160:8099`;
+- o SRVERS01 alcançou `192.168.200.26:8099`;
 - nenhuma reinicialização, correção automática, GPO ou zona DNS foi alterada.
 
 O `dcdiag /q` completo não está limpo por causas externas ao Vulcan: bind negado ao
@@ -159,15 +190,11 @@ AD e não foram reparados por esta entrega.
 
 ## Riscos restantes
 
-- o runtime `.160` é um notebook Zorin em Wi-Fi e não é o host ideal de produção;
-- após remover apenas cache descartável de build, o disco raiz ficou em 97% de uso,
-  com aproximadamente 13 GiB livres; requer expansão ou migração prioritária;
 - o endpoint oficial ainda usa HTTP interno; planejar certificado confiável e HTTPS;
 - encaminhamentos antigos `80`, `3001` e `3002` no DC permanecem como legado inativo;
 - o MSI não foi instalado em Windows real nesta janela;
 - não há Server Agent piloto nem implantação GPO aprovada;
 - o `dcdiag /q` completo contém pendências de AD não causadas pelo Vulcan.
 
-Prioridade operacional: mover o mesmo bundle/volumes para uma VM Linux fixa no Proxmox,
-com IP estático, disco monitorado e TLS, mantendo `192.168.200.4:8099` como endereço
-oficial durante a transição.
+Prioridade operacional: homologar MSI e Server Agent em hosts Windows não críticos e
+configurar TLS interno confiável, mantendo `192.168.200.4:8099` como endereço oficial.

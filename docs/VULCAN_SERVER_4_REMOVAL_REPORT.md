@@ -16,11 +16,12 @@
 O encaminhamento necessário permanece ativo:
 
 ```text
-192.168.200.4:8099 -> 192.168.200.160:8099
+192.168.200.4:8099 -> 192.168.200.26:8099
 ```
 
 A regra de firewall `Vulcan LAN Installer 8099` também foi preservada. Ela entrega
-aplicação, Wallboard, API e downloads através de uma única borda no runtime Linux.
+aplicação, Wallboard, API e downloads através de uma única borda na VM Linux dedicada
+`VULCAN-PROD01`.
 
 Os encaminhamentos antigos 80, 3001 e 3002, suas regras de firewall e o artefato
 `C:\ProgramData\Vulcan\Deploy\VulcanAgent-Windows-x64.zip` permanecem como legado.
@@ -29,9 +30,9 @@ para mudança e porque a missão atual não autorizou uma janela separada de lim
 
 ## O que foi removido
 
-Nada no SRVERS01. A release anterior e os volumes do host Linux foram preservados como
-rollback; somente os containers de aplicação no projeto `vulcan-production` foram
-atualizados.
+Nada no SRVERS01. A release anterior, os volumes e os backups do runtime temporário
+`.160` foram preservados como rollback, mas seus containers de produção foram parados
+depois que o acesso oficial passou a responder pela VM `.26`.
 
 ## O que não pertence ao Vulcan
 

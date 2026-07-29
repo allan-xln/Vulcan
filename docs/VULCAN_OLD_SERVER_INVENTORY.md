@@ -7,7 +7,7 @@
 - Hostname: `SRVERS01.erstransportes.local`
 - Modo da auditoria: somente leitura
 - Estado da remoção: **não aplicável ao listener oficial 8099**
-- Destino aprovado: runtime isolado `192.168.200.160`
+- Destino aprovado: VM isolada `VULCAN-PROD01` (`192.168.200.26`)
 - Função atual: ponto oficial de entrada, sem runtime pesado no controlador de domínio.
 
 Credenciais, valores de `.env`, chaves, certificados privados e conteúdo dos dumps não
@@ -16,8 +16,8 @@ fazem parte deste documento nem do Git.
 ## Conclusão principal
 
 O servidor `192.168.200.4` não contém o runtime, os containers nem o banco do Vulcan. Ele
-atua como encaminhador TCP para o ambiente que atualmente executa em
-`192.168.200.160`. Os únicos componentes exclusivos do Vulcan encontrados no servidor 4
+atua como encaminhador TCP para a VM dedicada `192.168.200.26`. Os únicos componentes
+exclusivos do Vulcan encontrados no servidor 4
 foram:
 
 1. quatro regras de `netsh interface portproxy`;
@@ -59,9 +59,10 @@ para o host atual do produto:
 | `192.168.200.4:80` | `192.168.200.160:3002` | frontend |
 | `192.168.200.4:3001` | `192.168.200.160:3001` | API |
 | `192.168.200.4:3002` | `192.168.200.160:3002` | frontend direto |
-| `192.168.200.4:8099` | `192.168.200.160:8099` | distribuição antiga do agente |
+| `192.168.200.4:8099` | `192.168.200.26:8099` | borda oficial atual |
 
-O destino `192.168.200.160:8099` passou a servir a release de produção e foi validado
+Os listeners 80, 3001 e 3002 continuam como legado apontado ao antigo runtime temporário
+`.160`. O destino atual `192.168.200.26:8099` serve a release de produção e foi validado
 através do listener `192.168.200.4:8099`. Essa regra é necessária para o acesso oficial e
 não deve ser removida enquanto essa arquitetura estiver vigente.
 
@@ -114,8 +115,9 @@ O arquivo foi copiado para o backup protegido e o hash da cópia foi validado.
 
 ## Origem real dos dados a migrar
 
-O runtime atual foi encontrado no host Linux `192.168.200.160`, no repositório
-`Vulcan`. O compose atual contém:
+Na auditoria inicial, a origem dos dados foi encontrada no runtime temporário Linux
+`192.168.200.160`, no repositório `Vulcan`. Esse estado foi migrado para a VM definitiva
+sem recriar o banco. O compose contém:
 
 - API;
 - frontend;
@@ -192,10 +194,12 @@ ambiente de produção atual não foi alterado.
 
 ## Servidor de destino
 
-O runtime aprovado nesta missão é `192.168.200.160`, host Linux com Docker Compose. A
-release autocontida foi implantada no projeto `vulcan-production`, com somente a borda
-8099 publicada. O servidor `192.168.200.7` deixou de ser requisito desta missão e não
-recebeu runtime, Docker, WSL ou aplicação do Vulcan.
+O runtime aprovado nesta missão é a VM Linux dedicada `VULCAN-PROD01`,
+`192.168.200.26`, VMID `103` no nó Proxmox `PVE02`. A release autocontida foi implantada
+no projeto `vulcan-production`, com somente a borda 8099 publicada. O antigo runtime
+temporário `.160` foi parado após o corte, mantendo volumes e backups. O servidor
+`192.168.200.7` deixou de ser requisito desta missão e não recebeu runtime, Docker, WSL
+ou aplicação do Vulcan.
 
 ## Gate de remoção
 
