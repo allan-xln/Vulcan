@@ -6,17 +6,16 @@ import logging
 import signal
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from app.config import get_settings
 from app.repository import VulcanRepository
-from app.runtime_config import PROJECT_ROOT
+from app.runtime_config import runtime_config_path
 from app.whatsapp import WhatsAppConnection
 
 
 logger = logging.getLogger("vulcan.whatsapp-worker")
 running = True
-HEALTH_FILE = PROJECT_ROOT / ".runtime" / "whatsapp-worker-health.json"
+HEALTH_FILE = runtime_config_path().parent / "whatsapp-worker-health.json"
 
 
 def stop_worker(signum: int, _frame: object) -> None:

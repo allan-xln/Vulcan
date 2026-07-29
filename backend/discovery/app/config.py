@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from os import getenv
+from pathlib import Path
+from urllib.parse import quote
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -21,6 +23,25 @@ def _int_list_env(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
     return ports
 
 
+def _database_url() -> str:
+    configured_url = getenv("DATABASE_URL")
+    if configured_url:
+        return configured_url
+    password_file = getenv("VULCAN_DATABASE_PASSWORD_FILE")
+    if not password_file:
+        return ""
+    try:
+        password = Path(password_file).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    user = quote(getenv("VULCAN_DATABASE_USER", "postgres"), safe="")
+    encoded_password = quote(password, safe="")
+    host = getenv("VULCAN_DATABASE_HOST", "db")
+    port = int(getenv("VULCAN_DATABASE_PORT", "5432"))
+    database = quote(getenv("VULCAN_DATABASE_NAME", "vulcan"), safe="")
+    return f"postgresql://{user}:{encoded_password}@{host}:{port}/{database}"
+
+
 @dataclass(frozen=True)
 class DiscoverySettings:
     database_url: str
@@ -36,7 +57,7 @@ class DiscoverySettings:
 
 def get_settings() -> DiscoverySettings:
     return DiscoverySettings(
-        database_url=getenv("DATABASE_URL", ""),
+        database_url=_database_url(),
         enabled=_bool_env("DISCOVERY_ENABLED", False),
         worker_poll_seconds=max(2, int(getenv("DISCOVERY_WORKER_POLL_SECONDS", "10"))),
         max_targets_per_run=max(1, min(int(getenv("DISCOVERY_MAX_TARGETS_PER_RUN", "256")), 4096)),

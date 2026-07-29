@@ -42,14 +42,17 @@ RUN corepack pnpm --dir frontend/web build
 FROM node:22-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
-    FRONTEND_PORT=3002
+    FRONTEND_PORT=3002 \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3002 \
+    HOSTNAME=0.0.0.0
 WORKDIR /app
 
-COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/tsconfig.base.json ./
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/shared ./shared
-COPY --from=build /app/frontend/web ./frontend/web
+COPY --from=build --chown=node:node /app/frontend/web/.next/standalone ./
+COPY --from=build --chown=node:node /app/frontend/web/.next/static ./frontend/web/.next/static
+COPY --from=build --chown=node:node /app/frontend/web/public ./frontend/web/public
 
+USER node
 EXPOSE 3002
 
-CMD ["sh", "-c", "cd /app/frontend/web && ./node_modules/.bin/next start --hostname 0.0.0.0 --port ${FRONTEND_PORT:-3002}"]
+CMD ["node", "frontend/web/server.js"]

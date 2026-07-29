@@ -21,6 +21,20 @@ if [ ! -x "$GO_BINARY" ]; then
   exit 1
 fi
 
+PORTABLE_MSITOOLS="$REPOSITORY_ROOT/.tools/msitools/usr"
+if [ -z "$WIXL_BINARY" ] && [ -x "$PORTABLE_MSITOOLS/bin/wixl" ]; then
+  WIXL_BINARY="$PORTABLE_MSITOOLS/bin/wixl"
+fi
+if [ -z "$MSIBUILD_BINARY" ] && [ -x "$PORTABLE_MSITOOLS/bin/msibuild" ]; then
+  MSIBUILD_BINARY="$PORTABLE_MSITOOLS/bin/msibuild"
+fi
+if [ -z "$WIXL_WXIDIR" ] && [ -d "$PORTABLE_MSITOOLS/share/wixl-0.101/include" ]; then
+  WIXL_WXIDIR="$PORTABLE_MSITOOLS/share/wixl-0.101/include"
+fi
+if [ -f "$PORTABLE_MSITOOLS/lib/x86_64-linux-gnu/libmsi.so.0" ]; then
+  export LD_LIBRARY_PATH="$PORTABLE_MSITOOLS/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 case "$VERSION" in
   *[!0-9.]*|'')
     echo "VERSION must be numeric for MSI/DEB, for example 0.2.0" >&2
@@ -95,12 +109,15 @@ else
   if [ -n "$WIXL_WXIDIR" ]; then
     WIXL_ARGUMENTS+=(--wxidir "$WIXL_WXIDIR")
   fi
-  "$WIXL_BINARY" "${WIXL_ARGUMENTS[@]}" "$WIXL_SOURCE"
-  "$MSIBUILD_BINARY" "$DIST_DIR/VulcanAgent-Windows-x64.msi" -q \
-    "UPDATE Property SET Value = 'WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED;VULCAN_SERVER;ENROLLMENT_TOKEN;AGENT_PROFILE;SITE' WHERE Property = 'SecureCustomProperties'
-     INSERT INTO Property (Property, Value) VALUES ('MsiHiddenProperties', 'VULCAN_SERVER;ENROLLMENT_TOKEN')
-     UPDATE CustomAction SET Type = 10291 WHERE Action = 'SetEnrollAgentData'
-     UPDATE CustomAction SET Type = 11282 WHERE Action = 'EnrollAgent'"
+  (
+    cd "$AGENT_ROOT"
+    "$WIXL_BINARY" "${WIXL_ARGUMENTS[@]}" "$WIXL_SOURCE"
+    "$MSIBUILD_BINARY" "$DIST_DIR/VulcanAgent-Windows-x64.msi" -q \
+      "UPDATE Property SET Value = 'WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED;VULCAN_SERVER;ENROLLMENT_TOKEN;AGENT_PROFILE;SITE' WHERE Property = 'SecureCustomProperties'
+       INSERT INTO Property (Property, Value) VALUES ('MsiHiddenProperties', 'VULCAN_SERVER;ENROLLMENT_TOKEN')
+       UPDATE CustomAction SET Type = 10291 WHERE Action = 'SetEnrollAgentData'
+       UPDATE CustomAction SET Type = 11282 WHERE Action = 'EnrollAgent'"
+  )
 fi
 
 (

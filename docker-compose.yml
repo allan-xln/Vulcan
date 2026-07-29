@@ -189,7 +189,8 @@ services:
     build:
       context: .
       dockerfile: backend/api/Dockerfile
-    image: vulcan-backend:local
+      target: migration
+    image: vulcan-backend-migrate:local
     restart: "no"
     <<: *vulcan-env
     depends_on:

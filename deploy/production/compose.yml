@@ -1,0 +1,493 @@
+name: vulcan-production
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-database-client: &database-client
+  VULCAN_DATABASE_HOST: db
+  VULCAN_DATABASE_PORT: "5432"
+  VULCAN_DATABASE_NAME: vulcan
+  VULCAN_DATABASE_USER: postgres
+  VULCAN_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+
+x-api-environment: &api-environment
+  <<: *database-client
+  NEXT_PUBLIC_ENVIRONMENT: production
+  AUTH_PROVIDER: database
+  MOCK_AUTH: "false"
+  MOCK_DATA: "false"
+  LOCAL_TEST_AUTH_ENABLED: "false"
+  VULCAN_AUTH_SIGNING_KEY_FILE: /run/secrets/auth_signing_key
+  VULCAN_AUTH_TOKEN_TTL_MINUTES: "${VULCAN_AUTH_TOKEN_TTL_MINUTES:-480}"
+  API_ALLOWED_ORIGINS: "${VULCAN_PUBLIC_URL:?VULCAN_PUBLIC_URL is required}"
+  VULCAN_BUILD_VERSION: "${VULCAN_VERSION:?VULCAN_VERSION is required}"
+  VULCAN_COMMIT_SHA: "${VULCAN_COMMIT_SHA:?VULCAN_COMMIT_SHA is required}"
+  VULCAN_BUILD_ID: "${VULCAN_BUILD_ID:?VULCAN_BUILD_ID is required}"
+  VULCAN_ALLOW_RUNTIME_INTEGRATION_CONFIG: "false"
+  VULCAN_RUNTIME_CONFIG_FILE: /app/.runtime/integration-secrets.json
+  VULCAN_AGENT_POLICY_SIGNING_KEY_FILE: /app/.runtime/agent-policy-signing.key
+  AGENT_ENROLLMENT_TOKEN_FILE: /run/secrets/agent_enrollment_token
+  AGENT_PUBLIC_BACKEND_URL: "${VULCAN_PUBLIC_URL}/api"
+  AGENT_INSTALLER_PACKAGE_URL: "${VULCAN_PUBLIC_URL}/downloads/agents/VulcanAgent-Windows-x64.msi"
+  EMAIL_DELIVERY_MODE: "${EMAIL_DELIVERY_MODE:-mock}"
+  EVOLUTION_ENABLED: "${EVOLUTION_ENABLED:-true}"
+  EVOLUTION_BASE_URL: http://evolution:8080
+  EVOLUTION_API_KEY_FILE: /run/secrets/evolution_api_key
+  EVOLUTION_WEBHOOK_TOKEN_FILE: /run/secrets/evolution_webhook_token
+  EVOLUTION_WEBHOOK_URL: http://backend:3001/integrations/whatsapp/evolution/webhook
+  EVOLUTION_REQUEST_ORIGIN: http://evolution:8080
+  ROOT_WHATSAPP_ENABLED: "${ROOT_WHATSAPP_ENABLED:-false}"
+  ROOT_WHATSAPP_PROVIDER: evolution
+  ROOT_WHATSAPP_MOCK_MODE: "false"
+  WHATSAPP_PROVIDER: evolution
+  WHATSAPP_ENABLE_UNOFFICIAL_PROVIDER: "true"
+  WHATSAPP_REQUIRE_OPT_IN: "true"
+  OPENAI_MODEL: "${OPENAI_MODEL:-gpt-5.5}"
+  AI_COMPLEX_MODEL: "${AI_COMPLEX_MODEL:-gpt-5.5}"
+  AI_OPERATIONAL_MODEL: "${AI_OPERATIONAL_MODEL:-llama-4-maverick}"
+
+services:
+  db:
+    profiles: ["core", "production"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: vulcan
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    expose:
+      - "5432"
+    volumes:
+      - vulcan_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vulcan"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - data
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 3G
+        reservations:
+          memory: 512M
+
+  runtime-init:
+    profiles: ["core", "production"]
+    image: alpine:3.22
+    restart: "no"
+    command: ["sh", "-ec", "chown -R 10001:10001 /runtime && chmod 0700 /runtime"]
+    volumes:
+      - vulcan_runtime:/runtime
+    network_mode: none
+    logging: *default-logging
+
+  migrate:
+    profiles: ["core", "production"]
+    image: "vulcan/backend-migration:${VULCAN_VERSION:?VULCAN_VERSION is required}"
+    restart: "no"
+    environment:
+      <<: *database-client
+    secrets:
+      - postgres_password
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - bash
+      - -ec
+      - |
+        export DATABASE_URL="$$(python -c 'from app.config import get_settings; print(get_settings().database_url or "")')"
+        psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f /app/database/supabase/local/init/001_supabase_compat.sql >/dev/null
+        /app/scripts/apply-supabase-migrations.sh
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging: *default-logging
+
+  provision:
+    profiles: ["core", "production"]
+    image: "vulcan/backend-migration:${VULCAN_VERSION:?VULCAN_VERSION is required}"
+    restart: "no"
+    environment:
+      <<: *database-client
+      VULCAN_ROOT_INITIAL_PASSWORD_FILE: /run/secrets/root_initial_password
+      ERS_ADMIN_INITIAL_PASSWORD_FILE: /run/secrets/ers_admin_initial_password
+      ERS_WALLBOARD_INITIAL_PASSWORD_FILE: /run/secrets/wallboard_initial_password
+      VULCAN_ROOT_EMAIL: "${VULCAN_ROOT_EMAIL:-root@vulcan.local}"
+      ERS_ADMIN_EMAIL: "${ERS_ADMIN_EMAIL:-admin.ers@erstransportes.local}"
+      ERS_WALLBOARD_EMAIL: "${ERS_WALLBOARD_EMAIL:-wallboard@erstransportes.local}"
+    secrets:
+      - postgres_password
+      - root_initial_password
+      - ers_admin_initial_password
+      - wallboard_initial_password
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - bash
+      - -ec
+      - |
+        export DATABASE_URL="$$(python -c 'from app.config import get_settings; print(get_settings().database_url or "")')"
+        python /app/scripts/provision-production-access.py
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging: *default-logging
+
+  evolution-db:
+    profiles: ["core", "production"]
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD_FILE: /run/secrets/evolution_db_password
+    command: ["postgres", "-c", "max_connections=200"]
+    secrets:
+      - evolution_db_password
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - internal
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+
+  evolution-redis:
+    profiles: ["core", "production"]
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - evolution_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - internal
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  evolution:
+    profiles: ["core", "production"]
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    env_file:
+      - ./secrets/evolution.env
+    environment:
+      SERVER_NAME: vulcan-evolution
+      SERVER_TYPE: http
+      SERVER_PORT: "8080"
+      SERVER_URL: http://evolution:8080
+      SERVER_DISABLE_DOCS: "true"
+      SERVER_DISABLE_MANAGER: "true"
+      CORS_ORIGIN: http://evolution:8080,http://backend:3001
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_CLIENT_NAME: vulcan-evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/0
+      CACHE_REDIS_PREFIX_KEY: vulcan-evolution
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      TELEMETRY_ENABLED: "false"
+      LOG_LEVEL: ERROR,WARN,INFO
+      WEBHOOK_GLOBAL_ENABLED: "false"
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:8080/',{headers:{Origin:'http://evolution:8080'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 8s
+      retries: 30
+      start_period: 45s
+    networks:
+      - application
+      - internal
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+
+  backend:
+    profiles: ["core", "production"]
+    image: "vulcan/backend:${VULCAN_VERSION:?VULCAN_VERSION is required}"
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+    secrets:
+      - postgres_password
+      - auth_signing_key
+      - agent_enrollment_token
+      - evolution_api_key
+      - evolution_webhook_token
+    volumes:
+      - vulcan_runtime:/app/.runtime
+    depends_on:
+      db:
+        condition: service_healthy
+      runtime-init:
+        condition: service_completed_successfully
+      provision:
+        condition: service_completed_successfully
+      evolution:
+        condition: service_healthy
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - application
+      - data
+      - internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 2G
+        reservations:
+          memory: 256M
+
+  whatsapp-worker:
+    profiles: ["core", "production"]
+    image: "vulcan/backend:${VULCAN_VERSION:?VULCAN_VERSION is required}"
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+    secrets:
+      - postgres_password
+      - auth_signing_key
+      - agent_enrollment_token
+      - evolution_api_key
+      - evolution_webhook_token
+    volumes:
+      - vulcan_runtime:/app/.runtime
+    command: ["python", "-m", "app.whatsapp_worker"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - application
+      - data
+      - internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  frontend:
+    profiles: ["core", "production"]
+    image: "vulcan/frontend:${VULCAN_VERSION:?VULCAN_VERSION is required}"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    expose:
+      - "3002"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:3002/wallboard').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - application
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+
+  edge:
+    profiles: ["core", "production"]
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${VULCAN_BIND_ADDRESS:-0.0.0.0}:${VULCAN_HTTP_PORT:-80}:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./agents:/srv/agents:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - edge
+      - application
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=64m,mode=0755
+      - /var/run:size=8m,mode=0755
+      - /tmp:size=16m,mode=1777
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  discovery:
+    profiles: ["network"]
+    image: "vulcan/discovery:${VULCAN_VERSION:?VULCAN_VERSION is required}"
+    restart: unless-stopped
+    environment:
+      <<: *database-client
+      DISCOVERY_ENABLED: "${DISCOVERY_ENABLED:-false}"
+      DISCOVERY_WORKER_POLL_SECONDS: "${DISCOVERY_WORKER_POLL_SECONDS:-10}"
+      DISCOVERY_MAX_TARGETS_PER_RUN: "${DISCOVERY_MAX_TARGETS_PER_RUN:-256}"
+      DISCOVERY_MAX_CONCURRENCY: "${DISCOVERY_MAX_CONCURRENCY:-16}"
+      DISCOVERY_ALLOW_PUBLIC_NETWORKS: "false"
+      DISCOVERY_MAX_TIMEOUT_MS: "${DISCOVERY_MAX_TIMEOUT_MS:-2000}"
+      DISCOVERY_ALLOWED_TCP_PORTS: "${DISCOVERY_ALLOWED_TCP_PORTS:-22,53,80,443,445,515,631,9100}"
+    secrets:
+      - postgres_password
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import json,pathlib,sys;p=pathlib.Path('/tmp/vulcan-discovery-health.json');d=json.loads(p.read_text()) if p.exists() else {};sys.exit(0 if d.get('checkedAt') else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - telemetry
+      - data
+      - internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+
+volumes:
+  vulcan_postgres:
+    name: vulcan-production-postgres
+  vulcan_runtime:
+    name: vulcan-production-runtime
+  evolution_instances:
+    name: vulcan-production-evolution-instances
+  evolution_postgres:
+    name: vulcan-production-evolution-postgres
+  evolution_redis:
+    name: vulcan-production-evolution-redis
+
+networks:
+  edge:
+    driver: bridge
+  application:
+    driver: bridge
+  telemetry:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true
+  internal:
+    driver: bridge
+    internal: true
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  auth_signing_key:
+    file: ./secrets/auth_signing_key
+  agent_enrollment_token:
+    file: ./secrets/agent_enrollment_token
+  root_initial_password:
+    file: ./secrets/root_initial_password
+  ers_admin_initial_password:
+    file: ./secrets/ers_admin_initial_password
+  wallboard_initial_password:
+    file: ./secrets/wallboard_initial_password
+  evolution_db_password:
+    file: ./secrets/evolution_db_password
+  evolution_api_key:
+    file: ./secrets/evolution_api_key
+  evolution_webhook_token:
+    file: ./secrets/evolution_webhook_token
