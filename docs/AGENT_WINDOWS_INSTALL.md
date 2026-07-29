@@ -3,7 +3,7 @@
 ## Compatibilidade e estado
 
 O mesmo binário `amd64` atende Workstation, Server e Collector em Windows 10/11 e
-Windows Server 2016–2025. A entrega `0.2.0` foi compilada para Windows, teve o CLI executado
+Windows Server 2016–2025. A entrega `0.3.1` foi compilada para Windows, teve o CLI executado
 via Wine e o MSI foi inspecionado estruturalmente. A instalação e o ciclo do Windows Service
 Manager ainda precisam ser homologados em uma VM Windows antes de distribuição ampla.
 
@@ -19,9 +19,10 @@ até configurar o certificado de code signing e verificar a assinatura no pipeli
 
 ```powershell
 msiexec.exe /i .\VulcanAgent-Windows-x64.msi /qn /norestart `
-  VULCAN_SERVER="https://vulcan.exemplo.com" `
+  VULCAN_SERVER="http://192.168.200.4:8099/api" `
   ENROLLMENT_TOKEN="TOKEN_DE_CURTA_DURACAO" `
   AGENT_PROFILE="workstation" `
+  ALLOW_INSECURE_PRIVATE_NETWORK=true `
   /l*v "$env:TEMP\VulcanAgent-install.log"
 ```
 
@@ -47,9 +48,10 @@ chave privada nunca sai da máquina.
 ```powershell
 .\Deploy-VulcanAgent.ps1 `
   -MsiPath .\VulcanAgent-Windows-x64.msi `
-  -VulcanServer "https://vulcan.exemplo.com" `
+  -VulcanServer "http://192.168.200.4:8099/api" `
   -EnrollmentToken "TOKEN_DE_CURTA_DURACAO" `
-  -AgentProfile workstation
+  -AgentProfile workstation `
+  -AllowInsecurePrivateNetwork
 ```
 
 O script usa `msiexec`, aceita códigos `0` e `3010`, executa `status` e configura três
@@ -82,7 +84,7 @@ política de retenção e o procedimento de evidência aplicáveis.
 
 ## Rede, proxy e certificado
 
-O agente inicia apenas conexões HTTPS de saída para o Vulcan, normalmente TCP 443. Não é
-necessária porta de entrada para Workstation ou Server. O certificado deve ser válido para
-o hostname configurado; HTTP só é permitido em loopback com a flag explícita de
-desenvolvimento. Proxy autenticado específico do agente ainda não está implementado.
+O agente inicia apenas conexões de saída. Na ERS, usa temporariamente TCP 8099 por HTTP
+privado com consentimento explícito; nenhuma porta de entrada é necessária para Workstation
+ou Server. HTTPS com certificado confiável continua sendo o destino recomendado. Proxy
+autenticado específico do agente ainda não está implementado.

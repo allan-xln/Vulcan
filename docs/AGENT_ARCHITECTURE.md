@@ -120,8 +120,10 @@ The Ed25519 signature covers method, path, timestamp, nonce and body hash. The s
 the registered public key, clock window, content hash, revocation state and unique nonce
 before resolving tenant/device identity.
 
-HTTPS certificate verification is mandatory. Plain HTTP is accepted only for explicit
-loopback development.
+HTTPS certificate verification is mandatory by default. Plain HTTP is accepted for
+explicit loopback development or, mediante `--allow-insecure-private-network`, somente
+quando o hostname é um endereço IP privado. O bypass é persistido, aparece no diagnóstico
+e nunca autoriza HTTP público.
 
 ## Policies
 

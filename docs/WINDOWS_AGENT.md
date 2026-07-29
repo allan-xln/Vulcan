@@ -77,12 +77,13 @@ Instalação piloto autorizada:
 ```powershell
 .\install.ps1 `
   -TenantId "00000000-0000-0000-0000-000000000301" `
-  -BackendUrl "http://192.168.200.7/api" `
+  -BackendUrl "http://192.168.200.4:8099/api" `
   -EnrollmentToken "TOKEN_RUNTIME" `
   -LinkedUser "$env:COMPUTERNAME\$env:USERNAME" `
   -CorporateMonitoring `
   -NoElevationPrompt
 ```
 
-Use o endpoint do servidor 7 somente depois que `/readyz` e o enrollment forem validados
-nele. Não configure agentes novos para o servidor 4.
+Use o endpoint oficial somente depois que `/readyz` e o enrollment forem validados.
+HTTP privado exige consentimento explícito no instalador; não implante por GPO antes de
+homologar um piloto Windows e um Server Agent não crítico.

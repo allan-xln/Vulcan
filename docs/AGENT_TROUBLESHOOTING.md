@@ -19,8 +19,9 @@ relógio local e horário do erro.
 
 ## Enrollment falha
 
-- `HTTPS is mandatory`: use certificado válido; HTTP só é aceito em localhost com
-  `--allow-insecure-loopback`;
+- `HTTPS is mandatory`: use certificado válido; no endpoint ERS temporário, HTTP só é
+  aceito para IP privado com `--allow-insecure-private-network`; localhost de
+  desenvolvimento usa `--allow-insecure-loopback`;
 - token expirado/usado/revogado: gere outro token; não aumente vida sem necessidade;
 - perfil divergente: o perfil do comando deve ser igual ao perfil fixado no token;
 - já enrolled: revogue com `unenroll` antes de gerar outra identidade;

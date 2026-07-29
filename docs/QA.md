@@ -310,5 +310,6 @@ Validações manuais:
 - dispositivo pendente aparece;
 - adoção existente funciona;
 - criar usuário e adotar funciona;
-- comando de deploy aponta para `192.168.200.7` somente após o health check real;
+- comando de deploy aponta para `http://192.168.200.4:8099/api` e exige consentimento
+  explícito enquanto usar HTTP privado;
 - descoberta ERS não instala nada.

@@ -1,13 +1,13 @@
 # Vulcan Agent — release
 
-## Versão 0.2.0
+## Versão 0.3.1
 
 Artefatos:
 
 - `VulcanAgent.exe`;
 - `VulcanAgent-Windows-x64.msi`;
-- `vulcan-agent_0.2.0_amd64.deb`;
-- `vulcan-agent_0.2.0_sbom.cdx.json`;
+- `vulcan-agent_0.3.1_amd64.deb`;
+- `vulcan-agent_0.3.1_sbom.cdx.json`;
 - `SHA256SUMS`.
 
 `dist/` e os downloads copiados ao frontend são gerados e ignorados pelo Git.
@@ -19,7 +19,7 @@ Requisitos: Go compatível com o `go.mod`, `dpkg-deb` e WiX 3 em Windows ou
 
 ```bash
 cd agentes/agent
-VERSION=0.2.0 ./build-release.sh
+VERSION=0.3.1 ./build-release.sh
 ```
 
 Em um ambiente com ferramentas extraídas:
@@ -29,7 +29,7 @@ LD_LIBRARY_PATH=/caminho/msitools/usr/lib/x86_64-linux-gnu \
 WIXL_BINARY=/caminho/msitools/usr/bin/wixl \
 MSIBUILD_BINARY=/caminho/msitools/usr/bin/msibuild \
 WIXL_WXIDIR=/caminho/msitools/usr/share/wixl/include \
-VERSION=0.2.0 ./build-release.sh
+VERSION=0.3.1 ./build-release.sh
 ```
 
 O fallback Linux ajusta explicitamente no banco MSI:
@@ -45,7 +45,7 @@ Isso deve ser validado a cada alteração do WXS.
 ```bash
 corepack pnpm verify:agent
 sha256sum --check dist/SHA256SUMS
-dpkg-deb --info dist/vulcan-agent_0.2.0_amd64.deb
+dpkg-deb --info dist/vulcan-agent_0.3.1_amd64.deb
 ```
 
 Além da inspeção do pacote, execute:
@@ -60,7 +60,7 @@ Além da inspeção do pacote, execute:
 - assinatura Authenticode e validação da assinatura;
 - piloto por anéis.
 
-Validação observada em 2026-07-23 para o release local `0.2.0`:
+Validação observada em 2026-07-29 para o release `0.3.1`:
 
 - `corepack pnpm verify:agent`: passou com validação SQL, race, vet, cross-test/vet Windows
   e cinco testes de contrato da API v2;
@@ -69,8 +69,11 @@ Validação observada em 2026-07-23 para o release local `0.2.0`:
 - `SHA256SUMS`, estrutura do `.deb` e tabelas/propriedades sensíveis do MSI foram
   inspecionados;
 - `VulcanAgent.exe version` executou pelo Wine;
-- o binário Linux real completou enrollment, política, fila offline e replay no protocolo
-  v2 local.
+- o binário Linux baixado da URL oficial completou enrollment, política, heartbeat,
+  inventário, Timeline, fila offline cifrada e replay no protocolo v2;
+- o serviço de usuário permaneceu ativo com aproximadamente 9 MiB de RSS no piloto;
+- HTTP foi aceito somente para o IP privado oficial mediante
+  `--allow-insecure-private-network`; HTTP público continuou recusado.
 
 Isso não equivale a homologação do MSI/SCM em Windows real nem à instalação do `.deb` sobre
 o agente legado ativo. Esses dois testes continuam obrigatórios antes da promoção para

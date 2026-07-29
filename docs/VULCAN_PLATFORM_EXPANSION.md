@@ -629,7 +629,7 @@ Itens deliberadamente não apresentados como prontos:
 8. Quebrar gradualmente `page.tsx` e `repository.py`; nenhum refactor grande foi feito nesta
    entrega para preservar compatibilidade.
 
-## Preparação da migração para `192.168.200.7` — 2026-07-29
+## Histórico: preparação da migração para `192.168.200.7` — 2026-07-29
 
 Foi criada uma implantação de produção self-hosted incremental, sem substituir a
 arquitetura existente:
@@ -676,6 +676,28 @@ Limites mantidos de forma explícita:
 
 O procedimento, os gates e os comandos operacionais estão em
 `docs/PRODUCTION_MIGRATION_192_168_200_7.md`.
+
+## Corte de produção ERS por `192.168.200.4:8099` — 2026-07-29
+
+A missão de destino foi corrigida posteriormente. O servidor 7 deixou de ser obrigatório,
+e o runtime isolado saudável em `192.168.200.160` foi promovido sem mover containers ou
+banco para o controlador de domínio.
+
+Estado validado:
+
+- borda oficial `192.168.200.4:8099 -> 192.168.200.160:8099`;
+- release de plataforma `0.3.3` e agente `0.3.1`;
+- tenant ERS, Workforce, Infrastructure, Assets, Timeline, Agents, Print, Intelligence e
+  Wallboard habilitados;
+- login real do backend no frontend, sem autenticação demo;
+- Wallboard read-only, SSE e Chromium validados pelo IP oficial;
+- MSI, `.deb`, checksums e SBOM publicados;
+- Workstation Agent real online, com fila cifrada/replay comprovados;
+- backup criptografado e restore em bancos descartáveis validados;
+- serviços AD/DNS preservados e testes focados do `dcdiag` aprovados.
+
+O runbook e os riscos atuais estão em
+`docs/PRODUCTION_ERS_192_168_200_4.md`.
 
 ## Expansão Vulcan Agent v2 — 2026-07-23
 

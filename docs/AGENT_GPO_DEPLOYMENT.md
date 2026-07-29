@@ -5,7 +5,8 @@ Este runbook prepara uma implantação; ele não autoriza nem executa alteraçõ
 ## Pré-requisitos
 
 - MSI `amd64` assinado e checksum conferido;
-- URL HTTPS do Vulcan acessível pela máquina;
+- URL do Vulcan acessível pela máquina; prefira HTTPS, ou use o consentimento explícito
+  para o IP privado durante a fase temporária da ERS;
 - token de enrollment curto, escopo/site/perfil corretos e quantidade de usos compatível;
 - piloto concluído em Windows 10/11 e nas versões de Windows Server usadas;
 - política do agente criada e revisada no Vulcan;
@@ -63,5 +64,6 @@ o token original.
 
 ## Firewall e proxy
 
-Libere apenas HTTPS de saída ao hostname do Vulcan. Não abra NATS, PostgreSQL ou portas de
-administração para estações. Proxy autenticado específico ainda é uma limitação conhecida.
+Libere apenas a saída para o endpoint Vulcan aprovado. Na ERS temporária, isso significa
+TCP 8099 para `192.168.200.4`; não abra NATS, PostgreSQL ou portas de administração para
+estações. Proxy autenticado específico ainda é uma limitação conhecida.

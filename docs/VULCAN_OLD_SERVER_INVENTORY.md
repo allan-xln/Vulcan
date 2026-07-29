@@ -6,9 +6,9 @@
 - Servidor auditado: `192.168.200.4`
 - Hostname: `SRVERS01.erstransportes.local`
 - Modo da auditoria: somente leitura
-- Estado da remoção: **não autorizada**
-- Motivo do bloqueio: o novo ambiente em `192.168.200.7` ainda não foi implantado e
-  validado.
+- Estado da remoção: **não aplicável ao listener oficial 8099**
+- Destino aprovado: runtime isolado `192.168.200.160`
+- Função atual: ponto oficial de entrada, sem runtime pesado no controlador de domínio.
 
 Credenciais, valores de `.env`, chaves, certificados privados e conteúdo dos dumps não
 fazem parte deste documento nem do Git.
@@ -61,8 +61,9 @@ para o host atual do produto:
 | `192.168.200.4:3002` | `192.168.200.160:3002` | frontend direto |
 | `192.168.200.4:8099` | `192.168.200.160:8099` | distribuição antiga do agente |
 
-O destino `192.168.200.160:8099` não estava aceitando conexão durante a auditoria. A
-regra foi preservada porque o corte ainda não foi aprovado.
+O destino `192.168.200.160:8099` passou a servir a release de produção e foi validado
+através do listener `192.168.200.4:8099`. Essa regra é necessária para o acesso oficial e
+não deve ser removida enquanto essa arquitetura estiver vigente.
 
 ### Regras de firewall
 
@@ -191,25 +192,14 @@ ambiente de produção atual não foi alterado.
 
 ## Servidor de destino
 
-O `192.168.200.7` responde como Windows e expõe LDAP/Kerberos/SMB/WinRM. O RootDSE
-anônimo informou `SRVERS04.erstransportes.local` e o mesmo domínio da ERS. Porém, o host
-não apareceu na lista de controladores de domínio retornada pelo servidor 4, e a
-credencial administrativa fornecida foi rejeitada por WinRM e SMB no servidor 7.
-
-Essa inconsistência precisa ser resolvida antes de escolher o ambiente isolado de
-implantação. Nenhum runtime, Docker, WSL, hypervisor ou aplicação foi instalado no
-servidor 7.
+O runtime aprovado nesta missão é `192.168.200.160`, host Linux com Docker Compose. A
+release autocontida foi implantada no projeto `vulcan-production`, com somente a borda
+8099 publicada. O servidor `192.168.200.7` deixou de ser requisito desta missão e não
+recebeu runtime, Docker, WSL ou aplicação do Vulcan.
 
 ## Gate de remoção
 
-Nenhum item do servidor 4 pode ser removido antes de:
-
-- obter acesso administrativo válido ao servidor 7;
-- confirmar se ele possui ou hospeda uma VM Linux aprovada;
-- implantar a release de produção;
-- restaurar e validar os dados;
-- validar Workforce, Infrastructure, Timeline, Agents e Wallboard;
-- validar um agente real;
-- executar backup e restore no destino;
-- testar acesso pela rede e rollback;
-- autorizar formalmente o corte.
+O listener e a regra de firewall da porta 8099 permanecem necessários. Os listeners
+legados 80, 3001 e 3002 e o pacote ZIP antigo só poderão ser removidos em uma janela
+separada, depois de confirmar que nenhum cliente depende deles e com credencial elevada.
+Nada foi removido durante este corte.

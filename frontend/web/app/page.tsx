@@ -65,6 +65,7 @@ const SUPABASE_AUTH_READY = isSupabaseAuthAvailable();
 const LOCAL_TEST_AUTH_READY =
   process.env.NEXT_PUBLIC_LOCAL_TEST_AUTH !== "false" && process.env.NEXT_PUBLIC_ENVIRONMENT !== "production";
 const LOCAL_AUTH_READY = MOCK_AUTH || LOCAL_TEST_AUTH_READY;
+const BACKEND_AUTH_READY = process.env.NEXT_PUBLIC_BACKEND_AUTH !== "false";
 const SMART_NOTIFICATION_REFRESH_MS = 60_000;
 
 type PwaInstallPromptEvent = Event & {
@@ -2566,8 +2567,8 @@ export default function HomePage() {
       return;
     }
 
-    if (!LOCAL_AUTH_READY) {
-        setLoginError("Use e-mail e senha do Supabase Auth. O fallback local está desligado.");
+    if (!BACKEND_AUTH_READY) {
+      setLoginError("A autenticação do backend Vulcan está desabilitada neste ambiente.");
       return;
     }
 
@@ -2602,7 +2603,7 @@ export default function HomePage() {
         setPendingDevices([]);
       }
     } catch {
-      if ((username === "admin" && password === "admin") || (username === "teste" && password === "teste")) {
+      if (LOCAL_AUTH_READY && ((username === "admin" && password === "admin") || (username === "teste" && password === "teste"))) {
         setToken(username === "teste" ? "dev-vulcan-test-token" : "dev-vulcan-admin-token");
         setAuthMode("local");
         setIdentity(username === "teste" ? "teste" : "admin local de demonstração");
@@ -2622,7 +2623,11 @@ export default function HomePage() {
         }
         return;
       }
-      setLoginError("Backend local indisponível. Use teste/teste, admin/admin ou inicie a API.");
+      setLoginError(
+        LOCAL_AUTH_READY
+          ? "Backend indisponível. O fallback local só deve ser usado em desenvolvimento isolado."
+          : "Não foi possível autenticar no backend Vulcan."
+      );
     }
   }
 
@@ -2871,7 +2876,7 @@ export default function HomePage() {
             onLogin={handleLogin}
             error={loginError}
             supabaseReady={SUPABASE_AUTH_READY}
-            mockAuth={LOCAL_AUTH_READY}
+            backendAuthReady={BACKEND_AUTH_READY}
           />
         ) : (
           <DashboardShell
@@ -3051,12 +3056,12 @@ function LoginExperience({
   onLogin,
   error,
   supabaseReady,
-  mockAuth
+  backendAuthReady
 }: {
   onLogin: (event: FormEvent<HTMLFormElement>) => void;
   error: string;
   supabaseReady: boolean;
-  mockAuth: boolean;
+  backendAuthReady: boolean;
 }) {
   const defaultUser = "";
   const defaultPassword = "";
@@ -3145,13 +3150,19 @@ function LoginExperience({
           <div className="relative">
             <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-orange-400/30 px-4 py-2 text-sm text-orange-200">
               <Lock className="h-4 w-4" />
-              {supabaseReady ? "Acesso seguro Supabase" : "Acesso local de desenvolvimento"}
+              {supabaseReady
+                ? "Acesso seguro Supabase"
+                : backendAuthReady
+                  ? "Acesso seguro Vulcan"
+                  : "Acesso local de desenvolvimento"}
             </div>
             <h2 className="text-3xl font-semibold">Entrar no Vulcan</h2>
             <p className="mt-3 text-sm leading-6 text-zinc-400">
               {supabaseReady
                 ? "Sessão Supabase Auth com acesso isolado por tenant."
-                : "Autenticação local temporária para desenvolvimento isolado."}
+                : backendAuthReady
+                  ? "Sessão assinada pelo backend Vulcan com acesso isolado por tenant."
+                  : "Autenticação local temporária para desenvolvimento isolado."}
             </p>
             <motion.div className="mt-8 grid gap-4" initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}>
               <motion.div variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>

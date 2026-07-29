@@ -1,70 +1,61 @@
-# Relatório de Remoção do Vulcan no Servidor 4
+# Relatório de preservação do Vulcan no Servidor 4
 
 ## Status
 
-**REMOÇÃO NÃO EXECUTADA — CORTE BLOQUEADO COM SEGURANÇA**
+**NENHUMA REMOÇÃO EXECUTADA — SERVIDOR 4 É O PONTO OFICIAL DE ENTRADA**
 
-- Servidor: `192.168.200.4`
-- Hostname: `SRVERS01.erstransportes.local`
-- Data do relatório inicial: `2026-07-29`
-- Impacto causado pela auditoria: nenhum
-- Reinicialização executada: não
-- Serviços AD/DNS alterados: nenhum
+- servidor: `192.168.200.4`;
+- hostname: `SRVERS01.erstransportes.local`;
+- data: `2026-07-29`;
+- reinicialização: não;
+- serviços AD/DNS alterados: nenhum;
+- runtime pesado instalado no DC: nenhum.
 
-## Motivo
+## O que permaneceu
 
-O backup do ambiente atual foi gerado, teve checksums validados e passou por um restore
-temporário. Entretanto, a implantação no `192.168.200.7` ainda não ocorreu porque o
-acesso administrativo ao servidor foi rejeitado por WinRM e SMB.
+O encaminhamento necessário permanece ativo:
 
-Remover agora os encaminhamentos do servidor 4 interromperia o acesso à instalação que
-continua executando em `192.168.200.160`. Isso violaria o gate obrigatório de migração e
-foi deliberadamente evitado.
+```text
+192.168.200.4:8099 -> 192.168.200.160:8099
+```
 
-## Itens exclusivos identificados para a futura remoção
+A regra de firewall `Vulcan LAN Installer 8099` também foi preservada. Ela entrega
+aplicação, Wallboard, API e downloads através de uma única borda no runtime Linux.
 
-- encaminhamentos `portproxy` das portas `80`, `3001`, `3002` e `8099`;
-- quatro regras Windows Firewall nomeadas para o Vulcan;
-- `C:\ProgramData\Vulcan\Deploy\VulcanAgent-Windows-x64.zip`;
-- diretório `C:\ProgramData\Vulcan` caso permaneça vazio e seja confirmado como exclusivo
-  após a remoção do artefato.
+Os encaminhamentos antigos 80, 3001 e 3002, suas regras de firewall e o artefato
+`C:\ProgramData\Vulcan\Deploy\VulcanAgent-Windows-x64.zip` permanecem como legado.
+Eles não foram removidos porque a sessão administrativa não possuía elevação suficiente
+para mudança e porque a missão atual não autorizou uma janela separada de limpeza.
 
-## Itens removidos
+## O que foi removido
 
-Nenhum.
+Nada no SRVERS01. A release anterior e os volumes do host Linux foram preservados como
+rollback; somente os containers de aplicação no projeto `vulcan-production` foram
+atualizados.
 
-## Itens que permaneceram e por quê
+## O que não pertence ao Vulcan
 
-- todos os componentes AD DS, DNS, SYSVOL, Netlogon, Kerberos, LDAP e Windows: críticos;
-- UniFi Controller/Java/MongoDB: sistema compartilhado e não relacionado ao Vulcan;
-- Portal de Automações TI/Python: sistema não relacionado;
-- serviço Windows IP Helper: compartilhado; somente entradas específicas poderão ser
-  removidas;
-- Windows Firewall: compartilhado; somente regras específicas poderão ser removidas;
-- encaminhamentos e artefato Vulcan: mantidos até o novo ambiente passar pelo gate de
-  validação.
+AD DS, DNS, SYSVOL, Netlogon, Kerberos, LDAP/LDAPS, SMB, WinRM, Windows Firewall,
+IP Helper, UniFi Controller, certificados do domínio e demais serviços compartilhados não
+foram alterados nem classificados como removíveis.
 
-## Backup e rollback
+## Validação posterior
 
-Existe um backup privado, fora do Git, contendo dumps lógicos, volumes, configurações,
-manifests e checksums. O restore temporário validou as principais quantidades do Vulcan
-e da Evolution API. O rollback técnico dos dados está disponível, mas o rollback
-operacional do corte só será documentado depois que o destino e a URL final forem
-definidos.
+- NTDS, DNS, KDC, Netlogon, DFSR e W32Time ativos/automáticos;
+- Advertising, Services, SysVolCheck, NetLogons e DNS passaram no `dcdiag` focado;
+- SYSVOL e NETLOGON presentes;
+- DNS SOA, LDAP SRV, Kerberos SRV e A do SRVERS01 válidos;
+- `repadmin /replsummary`: zero falhas em cinco objetos para o destino SRVERS01;
+- conexão do SRVERS01 ao runtime 8099: aprovada;
+- CPU observada: 16%; memória livre: aproximadamente 2 GiB; disco C: 11,4 GiB livres.
 
-## Validações pendentes antes da remoção
+O `dcdiag /q` completo registrou bind negado para o SRVERS08 e eventos de confiança
+relacionados a SRVERS04/ERS-SJP-021. O `repadmin` registrou erro operacional 110 ao
+consultar SRVERS08. Não há evidência de relação com o Vulcan; nenhuma correção automática
+foi executada.
 
-- implantação e E2E no servidor 7;
-- migração final com janela de corte;
-- agente real online no novo endpoint;
-- Wallboard real no novo endpoint;
-- prova de backup/restore no destino;
-- validação de DNS e rota final;
-- captura de baseline e pós-corte de `dcdiag`;
-- validação de replicação com `repadmin`;
-- validação final do DNS;
-- observação de portas e conexões;
-- autorização do corte.
+## Limpeza futura
 
-Este documento deve ser atualizado com data, responsável, comandos, evidências,
-resultado de AD/DNS e risco residual imediatamente após o corte real.
+Uma janela futura pode remover somente os listeners legados 80/3001/3002, suas regras e o
+ZIP antigo, após confirmar ausência de clientes e manter 8099. O procedimento precisa de
+backup da configuração `portproxy`, validação antes/depois e credencial elevada.

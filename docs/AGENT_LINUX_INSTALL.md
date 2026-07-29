@@ -13,7 +13,7 @@ Não execute coleta de produtividade como root.
 ## Instalar o pacote
 
 ```bash
-sudo apt install ./vulcan-agent_0.2.0_amd64.deb
+sudo apt install ./vulcan-agent_0.3.1_amd64.deb
 ```
 
 O pacote instala o binário e as units, cria usuário/diretórios protegidos, mas não habilita
@@ -26,8 +26,9 @@ No usuário cuja sessão será acompanhada:
 ```bash
 VULCAN_ENROLLMENT_TOKEN='TOKEN_DE_CURTA_DURACAO' \
   vulcan-agent enroll \
-  --server 'https://vulcan.exemplo.com' \
-  --profile workstation
+  --server 'http://192.168.200.4:8099/api' \
+  --profile workstation \
+  --allow-insecure-private-network
 
 systemctl --user enable --now vulcan-agent-user
 systemctl --user status vulcan-agent-user --no-pager
@@ -46,8 +47,9 @@ sudo -u vulcan-agent env \
   VULCAN_AGENT_LOG_DIR=/var/log/vulcan-agent \
   VULCAN_ENROLLMENT_TOKEN='TOKEN_DE_CURTA_DURACAO' \
   /usr/bin/vulcan-agent enroll \
-  --server 'https://vulcan.exemplo.com' \
-  --profile server
+  --server 'http://192.168.200.4:8099/api' \
+  --profile server \
+  --allow-insecure-private-network
 
 sudo systemctl enable --now vulcan-agent
 sudo systemctl status vulcan-agent --no-pager

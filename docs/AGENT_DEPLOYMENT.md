@@ -24,15 +24,15 @@ O script:
 
 ## Pacote
 
-Depois do corte validado, o pacote de produção deverá ser servido por:
+O pacote de produção é servido por:
 
 ```text
-http://192.168.200.7/downloads/agents/VulcanAgent-Windows-x64.msi
+http://192.168.200.4:8099/downloads/agents/VulcanAgent-Windows-x64.msi
 ```
 
-Essa URL de destino não deve ser usada até o health check e o download no servidor 7
-passarem. O endpoint legado no servidor 4 permanece somente durante a janela de migração e
-deve ser removido após os agentes validados aparecerem exclusivamente no novo ambiente.
+O endpoint do agente é `http://192.168.200.4:8099/api`. Enquanto HTTPS interno não estiver
+disponível, a instalação exige `ALLOW_INSECURE_PRIVATE_NETWORK=true`; o agente valida que o
+host é um IP privado e continua recusando HTTP público.
 
 O botão `Preparar disparo` no painel gera comando PowerShell/GPO com:
 

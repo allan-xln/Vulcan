@@ -32,12 +32,12 @@ O perfil `ERS` tem escopo `tenant`, portanto vê e administra todo o tenant ERS:
 ## Validação rápida
 
 ```bash
-curl -fsS -X POST http://192.168.200.7/api/auth/login \
+curl -fsS -X POST http://192.168.200.4:8099/api/auth/login \
   -H 'Content-Type: application/json' \
   --data '{"username":"ERS","password":"senha-runtime"}'
 ```
 
-O endereço acima é o destino definitivo e só pode ser anunciado depois da validação real
-no servidor 7. O servidor 4 não é mais um destino permitido.
+O endereço acima é o endpoint oficial. O servidor 4 apenas encaminha a porta 8099; API,
+frontend e banco permanecem no runtime Linux isolado `192.168.200.160`.
 
 Após login, o aviso deve indicar senha temporária. A troca forçada em primeiro login ainda depende da tela dedicada de troca de senha.
