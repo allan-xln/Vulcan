@@ -2250,7 +2250,7 @@ export default function HomePage() {
 
     const params = new URLSearchParams(window.location.search);
     const requestedView = params.get("view");
-    if (requestedView && ["dashboard", "hierarchy", "metrics", "insights", "infrastructure", "timeline", "notifications", "settings"].includes(requestedView)) {
+    if (requestedView && ["dashboard", "hierarchy", "metrics", "insights", "infrastructure", "agents", "timeline", "notifications", "settings"].includes(requestedView)) {
       setView(requestedView as ViewKey);
     }
 
