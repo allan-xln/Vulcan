@@ -310,5 +310,5 @@ Validações manuais:
 - dispositivo pendente aparece;
 - adoção existente funciona;
 - criar usuário e adotar funciona;
-- comando de deploy aponta para `192.168.200.4`;
+- comando de deploy aponta para `192.168.200.7` somente após o health check real;
 - descoberta ERS não instala nada.

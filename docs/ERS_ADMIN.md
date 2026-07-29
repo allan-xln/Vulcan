@@ -7,7 +7,7 @@ O tenant local de piloto ERS usa o UUID `00000000-0000-0000-0000-000000000301`, 
 Não grave senha em arquivo versionado. Para criar ou atualizar o usuário administrativo ERS:
 
 ```bash
-cd /home/allan/Dev/Vulcan
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:55432/vulcan' \
 ERS_INITIAL_PASSWORD='defina-em-runtime' \
 .venv/bin/python scripts/ensure_ers_admin.py
@@ -32,9 +32,12 @@ O perfil `ERS` tem escopo `tenant`, portanto vê e administra todo o tenant ERS:
 ## Validação rápida
 
 ```bash
-curl -fsS -X POST http://192.168.200.4:3001/auth/login \
+curl -fsS -X POST http://192.168.200.7/api/auth/login \
   -H 'Content-Type: application/json' \
   --data '{"username":"ERS","password":"senha-runtime"}'
 ```
+
+O endereço acima é o destino definitivo e só pode ser anunciado depois da validação real
+no servidor 7. O servidor 4 não é mais um destino permitido.
 
 Após login, o aviso deve indicar senha temporária. A troca forçada em primeiro login ainda depende da tela dedicada de troca de senha.

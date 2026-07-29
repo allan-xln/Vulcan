@@ -552,11 +552,11 @@ no start e diretório de trabalho incorreto — corrigidas e retestadas no conta
 ### Fase 5 — produção
 
 - [x] suíte ampliada para fundações novas
-- [ ] hardening
-- [ ] backup/restore testado
+- [x] hardening do runtime isolado
+- [x] backup/restore testado em ambiente temporário e em stack de produção isolada
 - [ ] retenção automática
 - [x] health básico da plataforma
-- [ ] runbook de produção
+- [x] runbook e release de produção
 
 ## Riscos e controles
 
@@ -628,6 +628,54 @@ Itens deliberadamente não apresentados como prontos:
    VictoriaMetrics, MinIO ou OpenTelemetry Collector.
 8. Quebrar gradualmente `page.tsx` e `repository.py`; nenhum refactor grande foi feito nesta
    entrega para preservar compatibilidade.
+
+## Preparação da migração para `192.168.200.7` — 2026-07-29
+
+Foi criada uma implantação de produção self-hosted incremental, sem substituir a
+arquitetura existente:
+
+- autenticação de produção pelo PostgreSQL com token assinado, revalidação de membership e
+  bloqueio de mutações para `read_only` e `auditor`;
+- provisionamento idempotente do tenant ERS, dos acessos root/admin/Wallboard e dos módulos
+  habilitados, sem rotacionar senhas existentes por padrão;
+- Wallboard real em `/wallboard`, com SSE, polling de recuperação, reconexão, estado da
+  fonte e nenhuma métrica fictícia;
+- imagens multi-stage, usuários não-root, root filesystem somente leitura, secrets por
+  arquivo, redes separadas, healthchecks, limites, logs estruturados e volumes nomeados;
+- backup criptografado, restore inicial protegido, restart, rollback de imagem, checksums e
+  SBOM CycloneDX por imagem;
+- `discovery` em profile separado, desabilitado por padrão e somente leitura.
+
+O restore do snapshot preservado foi executado em uma stack `vulcan-production` isolada,
+publicada apenas em `127.0.0.1:18080`. A validação confirmou:
+
+| Item | Resultado |
+| --- | ---: |
+| Tenants | 1 |
+| Usuários de autenticação | 15 (12 preservados + 3 acessos de produção) |
+| Memberships | 13 |
+| Dispositivos | 27 |
+| Identidades de agente | 21 |
+| Eventos unificados | 39.349 |
+| Logs de auditoria | 58.046 |
+| Evolution | 37 tabelas e 1 instância |
+
+Root, administrador ERS e Wallboard autenticaram pelo banco. O Wallboard acessou métricas,
+Infrastructure, Timeline, Agents e Incidents com `200`; uma tentativa de mutação pelo
+Wallboard foi recusada com `403`. Chromium validou a página real, e `/healthz`, `/readyz`,
+`/livez`, `/version`, `/` e `/wallboard` passaram pelo proxy.
+
+Limites mantidos de forma explícita:
+
+- o servidor `192.168.200.7` ainda não recebeu a release porque a credencial administrativa
+  foi rejeitada por WinRM e SMB;
+- o servidor `192.168.200.4` não sofreu remoção, alteração ou reinicialização;
+- agentes ainda não foram repontados;
+- Infrastructure não possui sites, redes ou ativos reais cadastrados neste snapshot;
+- nenhum Workstation, Server ou Collector foi validado contra o endpoint definitivo.
+
+O procedimento, os gates e os comandos operacionais estão em
+`docs/PRODUCTION_MIGRATION_192_168_200_7.md`.
 
 ## Expansão Vulcan Agent v2 — 2026-07-23
 

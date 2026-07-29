@@ -30,6 +30,41 @@ corepack pnpm dev
 - backup and restore policy
 - migration process with rollback plan
 
+## Release de produção self-hosted
+
+O destino definitivo é `192.168.200.7`. O servidor `192.168.200.4` é controlador de
+domínio/DNS e não pode receber runtime, banco ou containers do Vulcan.
+
+A release autocontida fica em `dist/vulcan-<versão>-linux-amd64.tar.gz` e contém somente
+imagens de runtime, Compose, migrations, scripts, manifests, checksums e SBOM. Ela não
+contém `.git`, árvore de código, testes nem secrets.
+
+```bash
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
+PATH="$HOME/.local/bin:$PATH" ./scripts/build-production-release.sh 0.3.0
+sha256sum -c dist/vulcan-0.3.0-linux-amd64.tar.gz.sha256
+```
+
+No host Linux isolado e aprovado do servidor 7:
+
+```bash
+tar -xzf vulcan-0.3.0-linux-amd64.tar.gz
+cd vulcan-0.3.0-linux-amd64
+cp .env.production.example .env.production
+chmod 0600 .env.production
+# Revisar URL, versão, commit e build antes do primeiro start.
+./deploy.sh --restore-dir /caminho/privado/backup-validado
+./healthcheck.sh
+```
+
+O Compose publica somente o proxy de borda. PostgreSQL, Evolution, Redis, API e frontend
+permanecem nas redes Docker internas. `discovery` usa o profile `network`, inicia
+desabilitado e exige aprovação explícita das redes do site.
+
+O deploy remoto e o corte ainda dependem de acesso administrativo válido ao servidor 7.
+Enquanto esse gate não passar, o servidor 4 e os agentes atuais devem permanecer
+inalterados.
+
 ## Domains And CORS
 
 Production must set explicit origins. Do not use `*` in production.

@@ -5,7 +5,7 @@ O Vulcan suporta instalação corporativa autorizada do agente Windows. Não use
 ## Descoberta controlada
 
 ```bash
-cd /home/allan/Dev/Vulcan
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 ERS_WINRM_USER='administrador-autorizado' \
 ERS_WINRM_PASSWORD='senha-runtime' \
 .venv/bin/python scripts/discover_ers_windows_targets.py \
@@ -24,11 +24,15 @@ O script:
 
 ## Pacote
 
-O pacote de teste LAN fica em:
+Depois do corte validado, o pacote de produção deverá ser servido por:
 
 ```text
-http://192.168.200.4:8099/VulcanAgent-Windows-x64.zip
+http://192.168.200.7/downloads/agents/VulcanAgent-Windows-x64.msi
 ```
+
+Essa URL de destino não deve ser usada até o health check e o download no servidor 7
+passarem. O endpoint legado no servidor 4 permanece somente durante a janela de migração e
+deve ser removido após os agentes validados aparecerem exclusivamente no novo ambiente.
 
 O botão `Preparar disparo` no painel gera comando PowerShell/GPO com:
 

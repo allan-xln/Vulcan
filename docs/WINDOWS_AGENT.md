@@ -68,7 +68,7 @@ Não implemente ocultação maliciosa, bypass de UAC, alteração de antivírus,
 Build:
 
 ```bash
-cd /home/allan/Dev/Vulcan
+cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
 corepack pnpm agent:windows:build
 ```
 
@@ -77,9 +77,12 @@ Instalação piloto autorizada:
 ```powershell
 .\install.ps1 `
   -TenantId "00000000-0000-0000-0000-000000000301" `
-  -BackendUrl "http://192.168.200.4:3001" `
+  -BackendUrl "http://192.168.200.7/api" `
   -EnrollmentToken "TOKEN_RUNTIME" `
   -LinkedUser "$env:COMPUTERNAME\$env:USERNAME" `
   -CorporateMonitoring `
   -NoElevationPrompt
 ```
+
+Use o endpoint do servidor 7 somente depois que `/readyz` e o enrollment forem validados
+nele. Não configure agentes novos para o servidor 4.
