@@ -113,7 +113,7 @@ else
     cd "$AGENT_ROOT"
     "$WIXL_BINARY" "${WIXL_ARGUMENTS[@]}" "$WIXL_SOURCE"
     "$MSIBUILD_BINARY" "$DIST_DIR/VulcanAgent-Windows-x64.msi" -q \
-      "UPDATE Property SET Value = 'WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED;VULCAN_SERVER;ENROLLMENT_TOKEN;AGENT_PROFILE;SITE' WHERE Property = 'SecureCustomProperties'
+      "UPDATE Property SET Value = 'WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED;VULCAN_SERVER;ENROLLMENT_TOKEN;AGENT_PROFILE;SITE;ALLOW_INSECURE_PRIVATE_NETWORK' WHERE Property = 'SecureCustomProperties'
        INSERT INTO Property (Property, Value) VALUES ('MsiHiddenProperties', 'VULCAN_SERVER;ENROLLMENT_TOKEN')
        UPDATE CustomAction SET Type = 10291 WHERE Action = 'SetEnrollAgentData'
        UPDATE CustomAction SET Type = 11282 WHERE Action = 'EnrollAgent'"

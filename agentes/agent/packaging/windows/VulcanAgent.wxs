@@ -20,6 +20,7 @@
     <Property Id="VULCAN_SERVER" Secure="yes" Hidden="yes" />
     <Property Id="ENROLLMENT_TOKEN" Secure="yes" Hidden="yes" />
     <Property Id="AGENT_PROFILE" Value="workstation" Secure="yes" />
+    <Property Id="ALLOW_INSECURE_PRIVATE_NETWORK" Value="false" Secure="yes" />
     <Property Id="SITE" Secure="yes" />
     <Condition Message="Informe VULCAN_SERVER, ENROLLMENT_TOKEN e AGENT_PROFILE para uma instalação nova.">
       Installed OR WIX_UPGRADE_DETECTED OR (VULCAN_SERVER AND ENROLLMENT_TOKEN AND AGENT_PROFILE)
@@ -71,7 +72,7 @@
     <CustomAction
       Id="SetEnrollAgentData"
       Property="EnrollAgent"
-      Value="enroll --server &quot;[VULCAN_SERVER]&quot; --token &quot;[ENROLLMENT_TOKEN]&quot; --profile &quot;[AGENT_PROFILE]&quot;"
+      Value="enroll --server &quot;[VULCAN_SERVER]&quot; --token &quot;[ENROLLMENT_TOKEN]&quot; --profile &quot;[AGENT_PROFILE]&quot; --allow-insecure-private-network=[ALLOW_INSECURE_PRIVATE_NETWORK]"
       HideTarget="yes" />
     <CustomAction
       Id="EnrollAgent"

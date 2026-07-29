@@ -4,28 +4,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/lanfuture/vulcan/agentes/agent/internal/contracts"
 )
 
 type Config struct {
-	ServerURL              string            `json:"serverUrl"`
-	Profile                contracts.Profile `json:"profile"`
-	TenantID               string            `json:"tenantId"`
-	DeviceID               string            `json:"deviceId"`
-	AgentID                string            `json:"agentId"`
-	PolicySigningPublicKey string            `json:"policySigningPublicKey"`
-	PolicyRevision         int64             `json:"policyRevision"`
-	PolicyStatus           string            `json:"policyStatus"`
-	DataDir                string            `json:"dataDir"`
-	LogDir                 string            `json:"logDir"`
-	AllowInsecureLoopback  bool              `json:"allowInsecureLoopback"`
-	EnrolledAt             time.Time         `json:"enrolledAt"`
+	ServerURL                   string            `json:"serverUrl"`
+	Profile                     contracts.Profile `json:"profile"`
+	TenantID                    string            `json:"tenantId"`
+	DeviceID                    string            `json:"deviceId"`
+	AgentID                     string            `json:"agentId"`
+	PolicySigningPublicKey      string            `json:"policySigningPublicKey"`
+	PolicyRevision              int64             `json:"policyRevision"`
+	PolicyStatus                string            `json:"policyStatus"`
+	DataDir                     string            `json:"dataDir"`
+	LogDir                      string            `json:"logDir"`
+	AllowInsecureLoopback       bool              `json:"allowInsecureLoopback"`
+	AllowInsecurePrivateNetwork bool              `json:"allowInsecurePrivateNetwork"`
+	EnrolledAt                  time.Time         `json:"enrolledAt"`
 }
 
 type Paths struct {
@@ -138,13 +140,22 @@ func (cfg Config) Validate() error {
 	if cfg.ServerURL == "" {
 		return errors.New("server URL is required")
 	}
-	if !strings.HasPrefix(cfg.ServerURL, "https://") {
-		loopback := strings.HasPrefix(cfg.ServerURL, "http://127.0.0.1") ||
-			strings.HasPrefix(cfg.ServerURL, "http://localhost") ||
-			strings.HasPrefix(cfg.ServerURL, "http://[::1]")
-		if !loopback || !cfg.AllowInsecureLoopback {
-			return errors.New("HTTPS is mandatory outside explicit loopback development")
-		}
+	parsed, err := url.Parse(cfg.ServerURL)
+	if err != nil {
+		return fmt.Errorf("invalid server URL: %w", err)
 	}
-	return nil
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	loopback := parsed.Scheme == "http" &&
+		(parsed.Hostname() == "localhost" || net.ParseIP(parsed.Hostname()) != nil && net.ParseIP(parsed.Hostname()).IsLoopback())
+	privateAddress := net.ParseIP(parsed.Hostname())
+	privateHTTP := parsed.Scheme == "http" && privateAddress != nil && privateAddress.IsPrivate()
+	if loopback && cfg.AllowInsecureLoopback {
+		return nil
+	}
+	if privateHTTP && cfg.AllowInsecurePrivateNetwork {
+		return nil
+	}
+	return errors.New("HTTPS is mandatory outside explicit loopback or private-network enrollment")
 }

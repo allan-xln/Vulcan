@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -35,13 +36,33 @@ type Client struct {
 	circuitOpen time.Time
 }
 
-func New(serverURL, agentID string, privateKey ed25519.PrivateKey, version string) (*Client, error) {
+type clientOptions struct {
+	allowInsecurePrivateNetwork bool
+}
+
+type Option func(*clientOptions)
+
+func WithInsecurePrivateNetwork() Option {
+	return func(options *clientOptions) {
+		options.allowInsecurePrivateNetwork = true
+	}
+}
+
+func New(serverURL, agentID string, privateKey ed25519.PrivateKey, version string, optionList ...Option) (*Client, error) {
+	options := clientOptions{}
+	for _, option := range optionList {
+		option(&options)
+	}
 	parsed, err := url.Parse(serverURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse server URL: %w", err)
 	}
-	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopback(parsed.Hostname())) {
-		return nil, errors.New("Vulcan Agent requires HTTPS outside loopback development")
+	loopbackHTTP := parsed.Scheme == "http" && isLoopback(parsed.Hostname())
+	privateHTTP := parsed.Scheme == "http" && isPrivateAddress(parsed.Hostname())
+	if parsed.Scheme != "https" && !loopbackHTTP && !(privateHTTP && options.allowInsecurePrivateNetwork) {
+		return nil, errors.New(
+			"Vulcan Agent requires HTTPS; private-address HTTP requires explicit --allow-insecure-private-network",
+		)
 	}
 	return &Client{
 		serverURL:  strings.TrimRight(serverURL, "/"),
@@ -50,6 +71,11 @@ func New(serverURL, agentID string, privateKey ed25519.PrivateKey, version strin
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		userAgent:  "Vulcan-Agent/" + version,
 	}, nil
+}
+
+func isPrivateAddress(hostname string) bool {
+	address := net.ParseIP(hostname)
+	return address != nil && address.IsPrivate()
 }
 
 func (client *Client) TestConnection(ctx context.Context) error {

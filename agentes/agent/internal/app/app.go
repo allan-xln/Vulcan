@@ -69,7 +69,11 @@ func New(paths config.Paths, version string) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open encrypted offline queue: %w", err)
 	}
-	client, err := transport.New(cfg.ServerURL, cfg.AgentID, material.PrivateKey, version)
+	transportOptions := []transport.Option{}
+	if cfg.AllowInsecurePrivateNetwork {
+		transportOptions = append(transportOptions, transport.WithInsecurePrivateNetwork())
+	}
+	client, err := transport.New(cfg.ServerURL, cfg.AgentID, material.PrivateKey, version, transportOptions...)
 	if err != nil {
 		eventQueue.Close()
 		return nil, err

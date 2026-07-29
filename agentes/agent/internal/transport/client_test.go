@@ -17,6 +17,34 @@ import (
 	"github.com/lanfuture/vulcan/agentes/agent/internal/contracts"
 )
 
+func TestPrivateHTTPRequiresExplicitOption(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New("http://192.168.200.4:8099/api", "", privateKey, "test"); err == nil {
+		t.Fatal("private HTTP was accepted without explicit option")
+	}
+	if _, err := New(
+		"http://192.168.200.4:8099/api",
+		"",
+		privateKey,
+		"test",
+		WithInsecurePrivateNetwork(),
+	); err != nil {
+		t.Fatalf("explicit private HTTP was rejected: %v", err)
+	}
+	if _, err := New(
+		"http://203.0.113.10/api",
+		"",
+		privateKey,
+		"test",
+		WithInsecurePrivateNetwork(),
+	); err == nil {
+		t.Fatal("public HTTP was accepted with private-network option")
+	}
+}
+
 func TestSignedHeartbeatRequestCanBeVerifiedByGatewayContract(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

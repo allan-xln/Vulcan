@@ -4,7 +4,7 @@ param(
     [string]$MsiPath,
 
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^https://')]
+    [ValidatePattern('^https?://')]
     [string]$VulcanServer,
 
     [Parameter(Mandatory = $true)]
@@ -15,10 +15,26 @@ param(
 
     [string]$Site = '',
 
+    [switch]$AllowInsecurePrivateNetwork,
+
     [string]$LogPath = "$env:ProgramData\Vulcan\Agent\install.log"
 )
 
 $ErrorActionPreference = 'Stop'
+$serverUri = [System.Uri]$VulcanServer
+if ($serverUri.Scheme -eq 'http') {
+    $address = $null
+    $isIpAddress = [System.Net.IPAddress]::TryParse($serverUri.Host, [ref]$address)
+    $bytes = if ($isIpAddress) { $address.GetAddressBytes() } else { @() }
+    $isPrivate = $bytes.Count -eq 4 -and (
+        $bytes[0] -eq 10 -or
+        ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) -or
+        ($bytes[0] -eq 192 -and $bytes[1] -eq 168)
+    )
+    if (-not $AllowInsecurePrivateNetwork -or -not $isPrivate) {
+        throw 'HTTP exige -AllowInsecurePrivateNetwork e um endereço IPv4 privado. Prefira HTTPS.'
+    }
+}
 $resolvedMsi = (Resolve-Path -LiteralPath $MsiPath).Path
 $logDirectory = Split-Path -Parent $LogPath
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
@@ -31,6 +47,7 @@ $arguments = @(
     "VULCAN_SERVER=`"$VulcanServer`""
     "ENROLLMENT_TOKEN=`"$EnrollmentToken`""
     "AGENT_PROFILE=`"$AgentProfile`""
+    "ALLOW_INSECURE_PRIVATE_NETWORK=$($AllowInsecurePrivateNetwork.IsPresent.ToString().ToLowerInvariant())"
     "SITE=`"$Site`""
     '/l*v'
     "`"$LogPath`""

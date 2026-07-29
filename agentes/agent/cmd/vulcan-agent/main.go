@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/signal"
@@ -92,6 +93,11 @@ func enroll(arguments []string) error {
 	tokenFile := flags.String("token-file", "", "arquivo protegido contendo o token de enrollment")
 	profileValue := flags.String("profile", "workstation", "workstation, server ou collector")
 	allowLoopback := flags.Bool("allow-insecure-loopback", false, "permite HTTP apenas em localhost para desenvolvimento")
+	allowPrivateNetwork := flags.Bool(
+		"allow-insecure-private-network",
+		false,
+		"permite HTTP somente para endereço IP privado, mediante aceite explícito",
+	)
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -115,8 +121,13 @@ func enroll(arguments []string) error {
 	}
 	loopbackHTTP := parsed.Scheme == "http" &&
 		(parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1")
-	if parsed.Scheme != "https" && !(loopbackHTTP && *allowLoopback) {
-		return errors.New("HTTPS is mandatory; use --allow-insecure-loopback only for local development")
+	privateHTTP := parsed.Scheme == "http" && isPrivateIPAddress(parsed.Hostname())
+	if parsed.Scheme != "https" &&
+		!(loopbackHTTP && *allowLoopback) &&
+		!(privateHTTP && *allowPrivateNetwork) {
+		return errors.New(
+			"HTTPS is mandatory; private-address HTTP requires --allow-insecure-private-network",
+		)
 	}
 	paths := runtimePaths()
 	if _, err := os.Stat(paths.ConfigFile()); err == nil {
@@ -137,7 +148,17 @@ func enroll(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := transport.New(strings.TrimRight(*serverURL, "/"), "", material.PrivateKey, version)
+	transportOptions := []transport.Option{}
+	if *allowPrivateNetwork {
+		transportOptions = append(transportOptions, transport.WithInsecurePrivateNetwork())
+	}
+	client, err := transport.New(
+		strings.TrimRight(*serverURL, "/"),
+		"",
+		material.PrivateKey,
+		version,
+		transportOptions...,
+	)
 	if err != nil {
 		return err
 	}
@@ -176,16 +197,17 @@ func enroll(arguments []string) error {
 		return fmt.Errorf("server returned an invalid signed policy: %w", err)
 	}
 	cfg := config.Config{
-		ServerURL:              strings.TrimRight(*serverURL, "/"),
-		Profile:                profile,
-		TenantID:               response.TenantID,
-		DeviceID:               response.DeviceID,
-		AgentID:                response.AgentID,
-		PolicySigningPublicKey: response.PolicySigningPublicKey,
-		PolicyRevision:         effective.Revision,
-		PolicyStatus:           "applied",
-		AllowInsecureLoopback:  *allowLoopback,
-		EnrolledAt:             time.Now().UTC(),
+		ServerURL:                   strings.TrimRight(*serverURL, "/"),
+		Profile:                     profile,
+		TenantID:                    response.TenantID,
+		DeviceID:                    response.DeviceID,
+		AgentID:                     response.AgentID,
+		PolicySigningPublicKey:      response.PolicySigningPublicKey,
+		PolicyRevision:              effective.Revision,
+		PolicyStatus:                "applied",
+		AllowInsecureLoopback:       *allowLoopback,
+		AllowInsecurePrivateNetwork: *allowPrivateNetwork,
+		EnrolledAt:                  time.Now().UTC(),
 	}
 	if err := config.Save(paths, cfg); err != nil {
 		return err
@@ -224,15 +246,16 @@ func statusCommand(checkConnection bool) error {
 		return err
 	}
 	payload := map[string]any{
-		"status":         "enrolled",
-		"version":        version,
-		"profile":        cfg.Profile,
-		"tenantId":       cfg.TenantID,
-		"deviceId":       cfg.DeviceID,
-		"agentId":        cfg.AgentID,
-		"server":         cfg.ServerURL,
-		"policyRevision": cfg.PolicyRevision,
-		"policyStatus":   cfg.PolicyStatus,
+		"status":            "enrolled",
+		"version":           version,
+		"profile":           cfg.Profile,
+		"tenantId":          cfg.TenantID,
+		"deviceId":          cfg.DeviceID,
+		"agentId":           cfg.AgentID,
+		"server":            cfg.ServerURL,
+		"policyRevision":    cfg.PolicyRevision,
+		"policyStatus":      cfg.PolicyStatus,
+		"transportSecurity": transportSecurity(cfg),
 	}
 	eventQueue, queueErr := queue.Open(paths.DataDir, queue.Limits{})
 	if queueErr == nil {
@@ -284,23 +307,24 @@ func diagnostics() error {
 		identityStatus = "invalid"
 	}
 	return printJSON(map[string]any{
-		"version":         version,
-		"commit":          commitSHA,
-		"service":         service.Name,
-		"profile":         cfg.Profile,
-		"tenantId":        cfg.TenantID,
-		"deviceId":        cfg.DeviceID,
-		"agentId":         cfg.AgentID,
-		"server":          cfg.ServerURL,
-		"identity":        identityStatus,
-		"policy":          policyStatus,
-		"connection":      connection,
-		"clock":           time.Now().UTC().Format(time.RFC3339Nano),
-		"operatingSystem": runtime.GOOS,
-		"architecture":    runtime.GOARCH,
-		"configDir":       paths.ConfigDir,
-		"dataDir":         paths.DataDir,
-		"logDir":          paths.LogDir,
+		"version":           version,
+		"commit":            commitSHA,
+		"service":           service.Name,
+		"profile":           cfg.Profile,
+		"tenantId":          cfg.TenantID,
+		"deviceId":          cfg.DeviceID,
+		"agentId":           cfg.AgentID,
+		"server":            cfg.ServerURL,
+		"identity":          identityStatus,
+		"policy":            policyStatus,
+		"connection":        connection,
+		"transportSecurity": transportSecurity(cfg),
+		"clock":             time.Now().UTC().Format(time.RFC3339Nano),
+		"operatingSystem":   runtime.GOOS,
+		"architecture":      runtime.GOARCH,
+		"configDir":         paths.ConfigDir,
+		"dataDir":           paths.DataDir,
+		"logDir":            paths.LogDir,
 	})
 }
 
@@ -354,7 +378,7 @@ func testConnection() error {
 	if err != nil {
 		return err
 	}
-	client, err := transport.New(cfg.ServerURL, cfg.AgentID, material.PrivateKey, version)
+	client, err := transport.New(cfg.ServerURL, cfg.AgentID, material.PrivateKey, version, transportOptions(cfg)...)
 	if err != nil {
 		return err
 	}
@@ -381,7 +405,7 @@ func unenroll(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := transport.New(cfg.ServerURL, cfg.AgentID, material.PrivateKey, version)
+	client, err := transport.New(cfg.ServerURL, cfg.AgentID, material.PrivateKey, version, transportOptions(cfg)...)
 	if err != nil {
 		return err
 	}
@@ -416,6 +440,28 @@ func runtimePaths() config.Paths {
 		paths.LogDir = value
 	}
 	return paths
+}
+
+func transportOptions(cfg config.Config) []transport.Option {
+	if cfg.AllowInsecurePrivateNetwork {
+		return []transport.Option{transport.WithInsecurePrivateNetwork()}
+	}
+	return nil
+}
+
+func transportSecurity(cfg config.Config) string {
+	if cfg.AllowInsecurePrivateNetwork {
+		return "http-private-network-explicit"
+	}
+	if cfg.AllowInsecureLoopback {
+		return "http-loopback-development"
+	}
+	return "https"
+}
+
+func isPrivateIPAddress(hostname string) bool {
+	address := net.ParseIP(hostname)
+	return address != nil && address.IsPrivate()
 }
 
 func installMode() string {

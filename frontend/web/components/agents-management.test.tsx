@@ -96,6 +96,8 @@ describe("AgentsManagement", () => {
     });
     expect(screen.getByText(/expira/i)).toBeInTheDocument();
     expect(screen.getByText(/ENROLLMENT_TOKEN="vulcan_enroll_short_lived_test_value"/)).toBeInTheDocument();
+    expect(screen.getByText(/ALLOW_INSECURE_PRIVATE_NETWORK=true/)).toBeInTheDocument();
+    expect(screen.getByText(/--allow-insecure-private-network/)).toBeInTheDocument();
     expect(screen.getByText(/systemctl --user enable --now vulcan-agent-user/)).toBeInTheDocument();
   });
 });

@@ -514,13 +514,14 @@ function InstallationView({ apiUrl, tenantId, token }: Props) {
     }
   }
 
+  const privateHttp = apiUrl.startsWith("http://");
   const powershell = enrollment
-    ? `msiexec.exe /i .\\VulcanAgent-Windows-x64.msi /qn /norestart VULCAN_SERVER="${apiUrl}" ENROLLMENT_TOKEN="${enrollment.token}" AGENT_PROFILE="${profile}" /l*v "$env:TEMP\\VulcanAgent-install.log"`
+    ? `msiexec.exe /i .\\VulcanAgent-Windows-x64.msi /qn /norestart VULCAN_SERVER="${apiUrl}" ENROLLMENT_TOKEN="${enrollment.token}" AGENT_PROFILE="${profile}"${privateHttp ? " ALLOW_INSECURE_PRIVATE_NETWORK=true" : ""} /l*v "$env:TEMP\\VulcanAgent-install.log"`
     : "";
   const linux = enrollment
     ? profile === "workstation"
-      ? `env VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${apiUrl}' --profile workstation\nsystemctl --user enable --now vulcan-agent-user`
-      : `sudo -u vulcan-agent env VULCAN_AGENT_CONFIG_DIR=/etc/vulcan-agent VULCAN_AGENT_DATA_DIR=/var/lib/vulcan-agent VULCAN_AGENT_LOG_DIR=/var/log/vulcan-agent VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${apiUrl}' --profile ${profile}\nsudo systemctl enable --now vulcan-agent`
+      ? `env VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${apiUrl}' --profile workstation${privateHttp ? " --allow-insecure-private-network" : ""}\nsystemctl --user enable --now vulcan-agent-user`
+      : `sudo -u vulcan-agent env VULCAN_AGENT_CONFIG_DIR=/etc/vulcan-agent VULCAN_AGENT_DATA_DIR=/var/lib/vulcan-agent VULCAN_AGENT_LOG_DIR=/var/log/vulcan-agent VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${apiUrl}' --profile ${profile}${privateHttp ? " --allow-insecure-private-network" : ""}\nsudo systemctl enable --now vulcan-agent`
     : "";
 
   return (
