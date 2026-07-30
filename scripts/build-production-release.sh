@@ -97,6 +97,12 @@ cp "$ROOT_DIR/deploy/production/secrets/.gitignore" "$RELEASE_DIR/secrets/.gitig
 
 if compgen -G "$ROOT_DIR/frontend/web/public/agent-v2/*" >/dev/null; then
   cp "$ROOT_DIR/frontend/web/public/agent-v2/"* "$RELEASE_DIR/agents/"
+  (
+    cd "$RELEASE_DIR/agents"
+    find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' \
+      | sort -z \
+      | xargs -0 sha256sum > SHA256SUMS
+  )
 fi
 
 cat > "$RELEASE_DIR/manifests/release.json" <<EOF

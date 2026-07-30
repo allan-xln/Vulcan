@@ -25,6 +25,14 @@ generate_password() {
   chmod 0600 "$target"
 }
 
+ensure_runtime_secret() {
+  local target="$1"
+  if [[ ! -e "$target" ]]; then
+    install -m 0600 /dev/null "$target"
+  fi
+  chmod 0600 "$target"
+}
+
 generate_hex "$SECRETS_DIR/postgres_password" 32
 generate_hex "$SECRETS_DIR/auth_signing_key" 48
 generate_hex "$SECRETS_DIR/agent_enrollment_token" 32
@@ -34,6 +42,10 @@ generate_password "$SECRETS_DIR/wallboard_initial_password"
 generate_hex "$SECRETS_DIR/evolution_db_password" 32
 generate_hex "$SECRETS_DIR/evolution_api_key" 32
 generate_hex "$SECRETS_DIR/evolution_webhook_token" 32
+ensure_runtime_secret "$SECRETS_DIR/unifi_username"
+ensure_runtime_secret "$SECRETS_DIR/unifi_password"
+ensure_runtime_secret "$SECRETS_DIR/proxmox_username"
+ensure_runtime_secret "$SECRETS_DIR/proxmox_password"
 
 evolution_password="$(<"$SECRETS_DIR/evolution_db_password")"
 evolution_api_key="$(<"$SECRETS_DIR/evolution_api_key")"
@@ -68,6 +80,10 @@ grant_read "$SECRETS_DIR/ers_admin_initial_password" 10001
 grant_read "$SECRETS_DIR/wallboard_initial_password" 10001
 grant_read "$SECRETS_DIR/evolution_api_key" 10001
 grant_read "$SECRETS_DIR/evolution_webhook_token" 10001
+grant_read "$SECRETS_DIR/unifi_username" 10001
+grant_read "$SECRETS_DIR/unifi_password" 10001
+grant_read "$SECRETS_DIR/proxmox_username" 10001
+grant_read "$SECRETS_DIR/proxmox_password" 10001
 
 echo "Secrets de produção prontos em diretório protegido: $SECRETS_DIR"
 echo "Os valores não foram exibidos e não devem ser adicionados ao Git."

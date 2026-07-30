@@ -48,6 +48,16 @@ x-api-environment: &api-environment
   OPENAI_MODEL: "${OPENAI_MODEL:-gpt-5.5}"
   AI_COMPLEX_MODEL: "${AI_COMPLEX_MODEL:-gpt-5.5}"
   AI_OPERATIONAL_MODEL: "${AI_OPERATIONAL_MODEL:-llama-4-maverick}"
+  VULCAN_UNIFI_BASE_URL: "${VULCAN_UNIFI_BASE_URL:-}"
+  VULCAN_UNIFI_SITE: "${VULCAN_UNIFI_SITE:-default}"
+  VULCAN_UNIFI_USERNAME_FILE: /run/secrets/unifi_username
+  VULCAN_UNIFI_PASSWORD_FILE: /run/secrets/unifi_password
+  VULCAN_UNIFI_VERIFY_TLS: "${VULCAN_UNIFI_VERIFY_TLS:-true}"
+  VULCAN_PROXMOX_BASE_URL: "${VULCAN_PROXMOX_BASE_URL:-}"
+  VULCAN_PROXMOX_USERNAME_FILE: /run/secrets/proxmox_username
+  VULCAN_PROXMOX_PASSWORD_FILE: /run/secrets/proxmox_password
+  VULCAN_PROXMOX_VERIFY_TLS: "${VULCAN_PROXMOX_VERIFY_TLS:-true}"
+  VULCAN_INFRASTRUCTURE_SYNC_INTERVAL_SECONDS: "${VULCAN_INFRASTRUCTURE_SYNC_INTERVAL_SECONDS:-120}"
 
 services:
   db:
@@ -142,6 +152,7 @@ services:
       - |
         export DATABASE_URL="$$(python -c 'from app.config import get_settings; print(get_settings().database_url or "")')"
         python /app/scripts/provision-production-access.py
+        python /app/scripts/seed_ers_infrastructure.py
     networks:
       - data
     read_only: true
@@ -266,6 +277,10 @@ services:
       - agent_enrollment_token
       - evolution_api_key
       - evolution_webhook_token
+      - unifi_username
+      - unifi_password
+      - proxmox_username
+      - proxmox_password
     volumes:
       - vulcan_runtime:/app/.runtime
     depends_on:
@@ -300,6 +315,42 @@ services:
           memory: 2G
         reservations:
           memory: 256M
+
+  infrastructure-worker:
+    profiles: ["core", "production"]
+    image: "vulcan/backend:${VULCAN_VERSION:?VULCAN_VERSION is required}"
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+    secrets:
+      - postgres_password
+      - auth_signing_key
+      - agent_enrollment_token
+      - evolution_api_key
+      - evolution_webhook_token
+      - unifi_username
+      - unifi_password
+      - proxmox_username
+      - proxmox_password
+    volumes:
+      - vulcan_runtime:/app/.runtime
+    command: ["python", "-m", "app.infrastructure_sync"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - application
+      - data
+      - internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 384M
 
   whatsapp-worker:
     profiles: ["core", "production"]
@@ -491,3 +542,11 @@ secrets:
     file: ./secrets/evolution_api_key
   evolution_webhook_token:
     file: ./secrets/evolution_webhook_token
+  unifi_username:
+    file: ./secrets/unifi_username
+  unifi_password:
+    file: ./secrets/unifi_password
+  proxmox_username:
+    file: ./secrets/proxmox_username
+  proxmox_password:
+    file: ./secrets/proxmox_password

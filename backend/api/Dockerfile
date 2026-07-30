@@ -39,6 +39,7 @@ RUN apt-get update \
 COPY database /app/database
 COPY scripts/apply-supabase-migrations.sh /app/scripts/apply-supabase-migrations.sh
 COPY scripts/provision-production-access.py /app/scripts/provision-production-access.py
+COPY scripts/seed_ers_infrastructure.py /app/scripts/seed_ers_infrastructure.py
 USER vulcan
 
 FROM runtime-base AS runtime

@@ -87,7 +87,15 @@ ADAPTER_CATALOG = (
         "description": "Inventário, clientes, APs e topologia via API do controlador.",
         "capabilities": ["inventory", "metrics", "events", "health", "topology"],
         "read_only": True,
-        "implemented": False,
+        "implemented": True,
+    },
+    {
+        "adapter_type": "proxmox",
+        "name": "Proxmox VE",
+        "description": "Cluster, nós e máquinas virtuais via API em modo somente leitura.",
+        "capabilities": ["inventory", "metrics", "health", "topology"],
+        "read_only": True,
+        "implemented": True,
     },
     {
         "adapter_type": "fortigate",

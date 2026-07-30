@@ -28,8 +28,14 @@ from app.platform_schemas import (
     PlatformHealth,
     ScoreComponent,
     SiteCreate,
+    SiteUpdate,
     TimelineEvent,
     TimelinePage,
+    WallboardPlaylistUpdate,
+    WallboardPlaylistItemsUpdate,
+    WallboardProfile,
+    WallboardProfileUpdate,
+    WallboardSnapshot,
 )
 from app.repository import VulcanRepository
 from app.security import AuthContext
@@ -313,12 +319,21 @@ class PlatformRepository:
                     "id": SIMULATED_SITE_ID,
                     "tenant_id": context.tenant_id,
                     "code": "DEMO-SJP",
+                    "slug": "unidade-demonstrativa",
                     "name": "Unidade demonstrativa",
                     "description": "Dados simulados para demonstrar a organização por site.",
+                    "city": "São José dos Pinhais",
+                    "state": "PR",
                     "address": {"city": "São José dos Pinhais", "country": "BR"},
                     "timezone": "America/Sao_Paulo",
                     "status": "active",
+                    "display_order": 0,
+                    "semantic_color": "#f97316",
+                    "rotation_enabled": True,
+                    "rotation_seconds": 30,
+                    "visible": True,
                     "tags": ["simulado"],
+                    "source": "simulator",
                     "data_origin": "simulated",
                     "created_at": now,
                     "updated_at": now,
@@ -329,11 +344,14 @@ class PlatformRepository:
             self._assert_infrastructure_read(access, context)
             rows = conn.execute(
                 """
-                select id, tenant_id, code, name, description, address, timezone, status, tags,
-                       'real' as data_origin, created_at, updated_at
+                select id, tenant_id, code, slug, name, description, city, state, address,
+                       timezone, status, display_order, semantic_color, rotation_enabled,
+                       rotation_seconds, visible, tags, source,
+                       case when source = 'manual' then 'real' else 'imported' end as data_origin,
+                       created_at, updated_at
                 from public.sites
                 where tenant_id = %s
-                order by status, name
+                order by visible desc, display_order, name
                 """,
                 (context.tenant_id,),
             ).fetchall()
@@ -347,7 +365,9 @@ class PlatformRepository:
             return {
                 "id": uuid4(),
                 **request.model_dump(),
+                "slug": request.slug or request.code.lower().replace("_", "-"),
                 "status": "active",
+                "source": "simulator",
                 "data_origin": "simulated",
                 "created_at": now,
                 "updated_at": now,
@@ -357,23 +377,96 @@ class PlatformRepository:
             self._assert_admin(access, context)
             row = conn.execute(
                 """
-                insert into public.sites (tenant_id, code, name, description, address, timezone, tags)
-                values (%s, upper(%s), %s, %s, %s, %s, %s)
-                returning id, tenant_id, code, name, description, address, timezone, status, tags,
-                          'real' as data_origin, created_at, updated_at
+                insert into public.sites (
+                  tenant_id, code, slug, name, description, city, state, address, timezone,
+                  display_order, semantic_color, rotation_enabled, rotation_seconds,
+                  visible, tags, source
+                )
+                values (
+                  %s, upper(%s), coalesce(%s, lower(replace(%s, '_', '-'))), %s, %s, %s,
+                  %s, %s, %s, %s, %s, %s, %s, %s, 'manual'
+                )
+                returning id, tenant_id, code, slug, name, description, city, state, address,
+                          timezone, status, display_order, semantic_color, rotation_enabled,
+                          rotation_seconds, visible, tags, source, 'real' as data_origin,
+                          created_at, updated_at
                 """,
                 (
                     request.tenant_id,
                     request.code,
+                    request.slug,
+                    request.code,
                     request.name,
                     request.description,
+                    request.city,
+                    request.state,
                     Jsonb(request.address),
                     request.timezone,
+                    request.display_order,
+                    request.semantic_color,
+                    request.rotation_enabled,
+                    request.rotation_seconds,
+                    request.visible,
                     request.tags,
                 ),
             ).fetchone()
             conn.commit()
             return dict(row)
+
+    def update_site(self, context: AuthContext, site_id: UUID, request: SiteUpdate) -> dict:
+        self._assert_active_tenant(context, request.tenant_id)
+        if not self.enabled:
+            self._assert_admin(None, context)
+            site = self.list_sites(context)[0]
+            return {**site, **request.model_dump(exclude_none=True), "id": site_id}
+        values = request.model_dump(exclude={"tenant_id"}, exclude_none=True)
+        if not values:
+            rows = self.list_sites(context)
+            try:
+                return next(row for row in rows if row["id"] == site_id)
+            except StopIteration as exc:
+                raise ValueError("site not found in active tenant") from exc
+        allowed_columns = {
+            "name",
+            "description",
+            "city",
+            "state",
+            "timezone",
+            "status",
+            "display_order",
+            "semantic_color",
+            "rotation_enabled",
+            "rotation_seconds",
+            "visible",
+            "tags",
+        }
+        assignments = [f"{column} = %s" for column in values if column in allowed_columns]
+        params = [values[column] for column in values if column in allowed_columns]
+        with self.base._connect() as conn:
+            access = self._access(conn, context)
+            self._assert_admin(access, context)
+            row = conn.execute(
+                f"""
+                update public.sites
+                set {", ".join(assignments)}
+                where tenant_id = %s and id = %s
+                returning id
+                """,
+                (*params, request.tenant_id, site_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("site not found in active tenant")
+            self.base.write_audit(
+                conn,
+                context,
+                request.tenant_id,
+                "infrastructure.branch.updated",
+                "site",
+                site_id,
+                {"fields": sorted(values)},
+            )
+            conn.commit()
+        return next(item for item in self.list_sites(context) if item["id"] == site_id)
 
     def list_networks(self, context: AuthContext, site_id: UUID | None = None) -> list[dict]:
         if not self.enabled:
@@ -397,6 +490,8 @@ class PlatformRepository:
                     "discovery_allowed": False,
                     "status": "active",
                     "tags": ["simulado"],
+                    "source": "simulator",
+                    "source_key": "demo-network",
                     "data_origin": "simulated",
                     "created_at": now,
                     "updated_at": now,
@@ -418,7 +513,9 @@ class PlatformRepository:
                        network.vlan_id,
                        coalesce(array(select host(value) from unnest(network.dns_servers) value), '{{}}') as dns_servers,
                        network.dhcp_enabled, network.discovery_allowed, network.status, network.tags,
-                       'real' as data_origin, network.created_at, network.updated_at
+                       network.source, network.source_key,
+                       case when network.source = 'manual' then 'real' else 'imported' end as data_origin,
+                       network.created_at, network.updated_at
                 from public.infrastructure_networks network
                 join public.sites site on site.tenant_id = network.tenant_id and site.id = network.site_id
                 where network.tenant_id = %s {site_filter}
@@ -438,6 +535,8 @@ class PlatformRepository:
                 **request.model_dump(),
                 "site_name": "Unidade simulada",
                 "status": "active",
+                "source": "simulator",
+                "source_key": f"simulated:{request.network_cidr}",
                 "data_origin": "simulated",
                 "created_at": now,
                 "updated_at": now,
@@ -455,13 +554,13 @@ class PlatformRepository:
                 """
                 insert into public.infrastructure_networks (
                   tenant_id, site_id, name, description, network_cidr, gateway, vlan_id,
-                  dns_servers, dhcp_enabled, discovery_allowed, tags
+                  dns_servers, dhcp_enabled, discovery_allowed, tags, source
                 )
-                values (%s, %s, %s, %s, %s::cidr, %s::inet, %s, %s::inet[], %s, %s, %s)
+                values (%s, %s, %s, %s, %s::cidr, %s::inet, %s, %s::inet[], %s, %s, %s, 'manual')
                 returning id, tenant_id, site_id, name, description, network_cidr::text as network_cidr,
                           host(gateway) as gateway, vlan_id,
                           coalesce(array(select host(value) from unnest(dns_servers) value), '{}') as dns_servers,
-                          dhcp_enabled, discovery_allowed, status, tags,
+                          dhcp_enabled, discovery_allowed, status, tags, source, source_key,
                           'real' as data_origin, created_at, updated_at
                 """,
                 (
@@ -511,8 +610,11 @@ class PlatformRepository:
                     "lifecycle_state": "managed",
                     "tags": ["simulado"],
                     "source": "simulator",
+                    "source_key": "demo-switch",
                     "confidence": 1,
                     "last_seen_at": now,
+                    "notes": None,
+                    "metadata": {"simulation": True},
                     "data_origin": "simulated",
                     "created_at": now,
                     "updated_at": now,
@@ -541,9 +643,15 @@ class PlatformRepository:
                        asset.manufacturer, asset.model, asset.serial_number, asset.asset_tag,
                        host(asset.ip_address) as ip_address, asset.mac_address, asset.operating_system,
                        asset.status, asset.criticality, asset.lifecycle_state, asset.responsible,
-                       asset.physical_location, asset.rack, asset.rack_position, asset.tags, asset.source,
+                       asset.physical_location, asset.rack, asset.rack_position, asset.tags,
+                       asset.source, asset.source_key,
                        asset.confidence, asset.discovered_at, asset.last_seen_at,
-                       'real' as data_origin, asset.created_at, asset.updated_at
+                       asset.notes, asset.metadata,
+                       case
+                         when asset.source in ('manual', 'agent', 'unifi', 'proxmox') then 'real'
+                         else 'imported'
+                       end as data_origin,
+                       asset.created_at, asset.updated_at
                 from public.infrastructure_assets asset
                 left join public.sites site on site.tenant_id = asset.tenant_id and site.id = asset.site_id
                 left join public.infrastructure_networks network
@@ -568,6 +676,8 @@ class PlatformRepository:
                 **request.model_dump(),
                 "lifecycle_state": "managed",
                 "source": "manual",
+                "source_key": None,
+                "metadata": {},
                 "data_origin": "simulated",
                 "created_at": now,
                 "updated_at": now,
@@ -1247,9 +1357,528 @@ class PlatformRepository:
             conn.commit()
             return dict(row)
 
+    def list_wallboard_profiles(self, context: AuthContext) -> list[WallboardProfile]:
+        if not self.enabled:
+            self._assert_infrastructure_read(None, context)
+            now = datetime.now(timezone.utc)
+            return [
+                WallboardProfile(
+                    id=uuid4(),
+                    tenantId=context.tenant_id,
+                    slug="demo-workforce",
+                    name="Workforce demonstrativo",
+                    wallboardType="workforce",
+                    viewMode="overview",
+                    enabled=True,
+                    refreshSeconds=30,
+                    fullscreen=True,
+                    nightMode=True,
+                    burnInPrevention=True,
+                    showClock=True,
+                    showLastUpdate=True,
+                    showConnectionStatus=True,
+                    config={"simulation": True, "generatedAt": now.isoformat()},
+                    playlists=[],
+                )
+            ]
+        with self.base._connect() as conn:
+            access = self._access(conn, context)
+            self._assert_infrastructure_read(access, context)
+            profiles = list(
+                conn.execute(
+                    """
+                    select profile.*, site.name as site_name
+                    from public.wallboard_profiles profile
+                    left join public.sites site
+                      on site.tenant_id = profile.tenant_id and site.id = profile.site_id
+                    where profile.tenant_id = %s
+                    order by profile.wallboard_type, profile.name
+                    """,
+                    (context.tenant_id,),
+                ).fetchall()
+            )
+            playlists = list(
+                conn.execute(
+                    """
+                    select *
+                    from public.wallboard_playlists
+                    where tenant_id = %s
+                    order by name
+                    """,
+                    (context.tenant_id,),
+                ).fetchall()
+            )
+            items = list(
+                conn.execute(
+                    """
+                    select item.*, site.name as site_name
+                    from public.wallboard_playlist_items item
+                    left join public.sites site
+                      on site.tenant_id = item.tenant_id and site.id = item.site_id
+                    where item.tenant_id = %s
+                    order by item.playlist_id, item.position
+                    """,
+                    (context.tenant_id,),
+                ).fetchall()
+            )
+        items_by_playlist: dict[UUID, list[dict]] = {}
+        for item in items:
+            items_by_playlist.setdefault(item["playlist_id"], []).append(dict(item))
+        playlists_by_profile: dict[UUID, list[dict]] = {}
+        for playlist in playlists:
+            playlists_by_profile.setdefault(playlist["profile_id"], []).append(
+                {**dict(playlist), "items": items_by_playlist.get(playlist["id"], [])}
+            )
+        return [
+            WallboardProfile.model_validate(
+                {**dict(profile), "playlists": playlists_by_profile.get(profile["id"], [])}
+            )
+            for profile in profiles
+        ]
+
+    def update_wallboard_profile(
+        self,
+        context: AuthContext,
+        profile_id: UUID,
+        request: WallboardProfileUpdate,
+    ) -> WallboardProfile:
+        self._assert_active_tenant(context, request.tenant_id)
+        if not self.enabled:
+            self._assert_admin(None, context)
+            profile = self.list_wallboard_profiles(context)[0]
+            return profile.model_copy(update=request.model_dump(exclude_none=True))
+        values = request.model_dump(exclude={"tenant_id"}, exclude_none=True)
+        if not values:
+            profiles = self.list_wallboard_profiles(context)
+            try:
+                return next(profile for profile in profiles if profile.id == profile_id)
+            except StopIteration as exc:
+                raise ValueError("wallboard profile not found in active tenant") from exc
+        columns = {
+            "enabled",
+            "refresh_seconds",
+            "fullscreen",
+            "night_mode",
+            "burn_in_prevention",
+            "show_clock",
+            "show_last_update",
+            "show_connection_status",
+            "config",
+        }
+        ordered = [(key, value) for key, value in values.items() if key in columns]
+        assignments = [f"{key} = %s" for key, _ in ordered]
+        params = [Jsonb(value) if key == "config" else value for key, value in ordered]
+        with self.base._connect() as conn:
+            access = self._access(conn, context)
+            self._assert_admin(access, context)
+            updated = conn.execute(
+                f"""
+                update public.wallboard_profiles
+                set {", ".join(assignments)}
+                where tenant_id = %s and id = %s
+                returning id
+                """,
+                (*params, request.tenant_id, profile_id),
+            ).fetchone()
+            if not updated:
+                raise ValueError("wallboard profile not found in active tenant")
+            self.base.write_audit(
+                conn,
+                context,
+                request.tenant_id,
+                "wallboard.profile.updated",
+                "wallboard_profile",
+                profile_id,
+                {"fields": sorted(values)},
+            )
+            conn.commit()
+        return next(profile for profile in self.list_wallboard_profiles(context) if profile.id == profile_id)
+
+    def update_wallboard_playlist(
+        self,
+        context: AuthContext,
+        playlist_id: UUID,
+        request: WallboardPlaylistUpdate,
+    ) -> dict:
+        self._assert_active_tenant(context, request.tenant_id)
+        values = request.model_dump(exclude={"tenant_id"}, exclude_none=True)
+        if not self.enabled:
+            self._assert_admin(None, context)
+            return {"id": playlist_id, "tenant_id": request.tenant_id, **values}
+        columns = {
+            "enabled",
+            "rotation_enabled",
+            "default_duration_seconds",
+            "transition",
+            "alert_priority_enabled",
+            "auto_return_seconds",
+        }
+        ordered = [(key, value) for key, value in values.items() if key in columns]
+        if not ordered:
+            raise ValueError("no wallboard playlist fields provided")
+        with self.base._connect() as conn:
+            access = self._access(conn, context)
+            self._assert_admin(access, context)
+            row = conn.execute(
+                f"""
+                update public.wallboard_playlists
+                set {", ".join(f"{key} = %s" for key, _ in ordered)}
+                where tenant_id = %s and id = %s
+                returning *
+                """,
+                (*[value for _, value in ordered], request.tenant_id, playlist_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("wallboard playlist not found in active tenant")
+            self.base.write_audit(
+                conn,
+                context,
+                request.tenant_id,
+                "wallboard.playlist.updated",
+                "wallboard_playlist",
+                playlist_id,
+                {"fields": sorted(values)},
+            )
+            conn.commit()
+            return dict(row)
+
+    def update_wallboard_playlist_items(
+        self,
+        context: AuthContext,
+        playlist_id: UUID,
+        request: WallboardPlaylistItemsUpdate,
+    ) -> None:
+        self._assert_active_tenant(context, request.tenant_id)
+        positions = [item.position for item in request.items]
+        if len(set(positions)) != len(positions):
+            raise ValueError("wallboard playlist positions must be unique")
+        if not self.enabled:
+            self._assert_admin(None, context)
+            return
+        item_ids = [item.id for item in request.items]
+        with self.base._connect() as conn:
+            access = self._access(conn, context)
+            self._assert_admin(access, context)
+            playlist = conn.execute(
+                """
+                select id
+                from public.wallboard_playlists
+                where tenant_id = %s and id = %s
+                """,
+                (request.tenant_id, playlist_id),
+            ).fetchone()
+            if not playlist:
+                raise ValueError("wallboard playlist not found in active tenant")
+            found_ids = {
+                row["id"]
+                for row in conn.execute(
+                    """
+                    select id
+                    from public.wallboard_playlist_items
+                    where tenant_id = %s and playlist_id = %s and id = any(%s)
+                    """,
+                    (request.tenant_id, playlist_id, item_ids),
+                ).fetchall()
+            }
+            if found_ids != set(item_ids):
+                raise ValueError("wallboard playlist item not found in active tenant")
+            for index, item in enumerate(request.items):
+                conn.execute(
+                    """
+                    update public.wallboard_playlist_items
+                    set position = %s
+                    where tenant_id = %s and playlist_id = %s and id = %s
+                    """,
+                    (100_000 + index, request.tenant_id, playlist_id, item.id),
+                )
+            for item in request.items:
+                conn.execute(
+                    """
+                    update public.wallboard_playlist_items
+                    set position = %s, duration_seconds = %s, enabled = %s
+                    where tenant_id = %s and playlist_id = %s and id = %s
+                    """,
+                    (
+                        item.position,
+                        item.duration_seconds,
+                        item.enabled,
+                        request.tenant_id,
+                        playlist_id,
+                        item.id,
+                    ),
+                )
+            self.base.write_audit(
+                conn,
+                context,
+                request.tenant_id,
+                "wallboard.playlist.items.updated",
+                "wallboard_playlist",
+                playlist_id,
+                {"itemCount": len(request.items), "itemIds": [str(value) for value in item_ids]},
+            )
+            conn.commit()
+
+    def wallboard_snapshot(
+        self,
+        context: AuthContext,
+        wallboard_type: str,
+        site_id: UUID | None = None,
+    ) -> WallboardSnapshot:
+        if wallboard_type not in {"workforce", "infrastructure"}:
+            raise ValueError("unsupported wallboard type")
+        if not self.enabled:
+            self._assert_infrastructure_read(None, context)
+            return WallboardSnapshot(
+                tenantId=context.tenant_id,
+                wallboardType=wallboard_type,
+                dataOrigin="real",
+                generatedAt=datetime.now(timezone.utc),
+                siteId=site_id,
+                kpis={},
+                sites=[],
+                statusGroups=[],
+                activity=[],
+                alerts=[],
+                integrations=[],
+            )
+        with self.base._connect() as conn:
+            access = self._access(conn, context)
+            self._assert_infrastructure_read(access, context)
+            site = None
+            if site_id:
+                site = conn.execute(
+                    "select id, name from public.sites where tenant_id = %s and id = %s",
+                    (context.tenant_id, site_id),
+                ).fetchone()
+                if not site:
+                    raise ValueError("site not found in active tenant")
+            site_filter = "and asset.site_id = %(site_id)s" if site_id else ""
+            agent_site_filter = (
+                "and nullif(device.metadata ->> 'siteId', '')::uuid = %(site_id)s"
+                if site_id
+                else ""
+            )
+            event_site_filter = "and site_id = %(site_id)s" if site_id else ""
+            incident_site_filter = "and site_id = %(site_id)s" if site_id else ""
+            kpis = conn.execute(
+                f"""
+                select
+                  count(*) filter (where asset.status <> 'retired') as assets,
+                  count(*) filter (where asset.status = 'online') as online_assets,
+                  count(*) filter (where asset.status = 'degraded') as degraded_assets,
+                  count(*) filter (where asset.status = 'offline') as offline_assets,
+                  count(*) filter (where asset.status = 'unknown') as unknown_assets,
+                  count(*) filter (where asset.asset_type = 'server') as servers,
+                  count(*) filter (where asset.asset_type = 'virtual_machine') as virtual_machines,
+                  count(*) filter (where asset.asset_type = 'switch') as switches,
+                  count(*) filter (where asset.asset_type = 'access_point') as access_points,
+                  count(*) filter (where asset.asset_type = 'printer') as printers
+                from public.infrastructure_assets asset
+                where asset.tenant_id = %(tenant_id)s {site_filter}
+                """,
+                {"tenant_id": context.tenant_id, "site_id": site_id},
+            ).fetchone()
+            agent_kpis = conn.execute(
+                f"""
+                select
+                  count(*) filter (
+                    where identity.status <> 'revoked'
+                      and identity.agent_version not ilike '%%simulator%%'
+                  ) as agents,
+                  count(*) filter (
+                    where identity.status <> 'revoked'
+                      and identity.agent_version not ilike '%%simulator%%'
+                      and identity.last_seen_at >= timezone('utc', now()) - interval '5 minutes'
+                  ) as online_agents,
+                  count(*) filter (
+                    where identity.status <> 'revoked'
+                      and identity.agent_version not ilike '%%simulator%%'
+                      and identity.last_seen_at < timezone('utc', now()) - interval '5 minutes'
+                      and identity.last_seen_at >= timezone('utc', now()) - interval '30 minutes'
+                  ) as delayed_agents,
+                  count(*) filter (
+                    where identity.status <> 'revoked'
+                      and identity.agent_version not ilike '%%simulator%%'
+                      and (
+                        identity.last_seen_at is null
+                        or identity.last_seen_at < timezone('utc', now()) - interval '30 minutes'
+                      )
+                  ) as offline_agents
+                from public.agent_identities identity
+                join public.devices device
+                  on device.tenant_id = identity.tenant_id and device.id = identity.device_id
+                where identity.tenant_id = %(tenant_id)s {agent_site_filter}
+                """,
+                {"tenant_id": context.tenant_id, "site_id": site_id},
+            ).fetchone()
+            event_kpis = conn.execute(
+                f"""
+                select
+                  count(*) filter (
+                    where received_at >= timezone('utc', now()) - interval '24 hours'
+                  ) as events_24h,
+                  count(distinct coalesce(actor ->> 'membershipId', actor ->> 'userId', actor ->> 'username'))
+                    filter (
+                      where received_at >= timezone('utc', now()) - interval '15 minutes'
+                        and category = 'workforce'
+                        and source <> 'vulcan-simulator'
+                    ) as active_people
+                from public.unified_events
+                where tenant_id = %(tenant_id)s
+                  and data_origin <> 'simulated'
+                  {event_site_filter}
+                """,
+                {"tenant_id": context.tenant_id, "site_id": site_id},
+            ).fetchone()
+            incident_kpis = conn.execute(
+                f"""
+                select
+                  count(*) filter (where status in ('open', 'investigating', 'monitoring')) as incidents,
+                  count(*) filter (
+                    where status in ('open', 'investigating', 'monitoring')
+                      and severity in ('error', 'critical')
+                  ) as critical_incidents
+                from public.incidents
+                where tenant_id = %(tenant_id)s {incident_site_filter}
+                """,
+                {"tenant_id": context.tenant_id, "site_id": site_id},
+            ).fetchone()
+            sites = list(
+                conn.execute(
+                    """
+                    select site.id, site.code, site.name, site.status, site.display_order,
+                           site.semantic_color, site.rotation_enabled, site.rotation_seconds,
+                           count(asset.id) filter (where asset.status <> 'retired') as assets,
+                           count(asset.id) filter (where asset.status = 'online') as online,
+                           count(asset.id) filter (where asset.status = 'degraded') as degraded,
+                           count(asset.id) filter (where asset.status = 'offline') as offline,
+                           (
+                             select count(*)
+                             from public.unified_events event
+                             where event.tenant_id = site.tenant_id
+                               and event.site_id = site.id
+                               and event.data_origin <> 'simulated'
+                               and event.received_at >= timezone('utc', now()) - interval '24 hours'
+                           ) as events_24h,
+                           (
+                             select count(distinct coalesce(
+                               event.actor ->> 'membershipId',
+                               event.actor ->> 'userId',
+                               event.actor ->> 'username'
+                             ))
+                             from public.unified_events event
+                             where event.tenant_id = site.tenant_id
+                               and event.site_id = site.id
+                               and event.data_origin <> 'simulated'
+                               and event.category = 'workforce'
+                               and event.source <> 'vulcan-simulator'
+                               and event.received_at >= timezone('utc', now()) - interval '15 minutes'
+                           ) as active_people
+                    from public.sites site
+                    left join public.infrastructure_assets asset
+                      on asset.tenant_id = site.tenant_id and asset.site_id = site.id
+                    where site.tenant_id = %s and site.visible
+                    group by site.id
+                    order by site.display_order, site.name
+                    """,
+                    (context.tenant_id,),
+                ).fetchall()
+            )
+            status_groups = list(
+                conn.execute(
+                    f"""
+                    select asset.asset_type as key, asset.status, count(*) as value
+                    from public.infrastructure_assets asset
+                    where asset.tenant_id = %(tenant_id)s
+                      and asset.status <> 'retired' {site_filter}
+                    group by asset.asset_type, asset.status
+                    order by asset.asset_type, asset.status
+                    """,
+                    {"tenant_id": context.tenant_id, "site_id": site_id},
+                ).fetchall()
+            )
+            activity = list(
+                conn.execute(
+                    f"""
+                    select date_trunc('hour', occurred_at) as bucket, category, count(*) as events
+                    from public.unified_events
+                    where tenant_id = %(tenant_id)s
+                      and data_origin <> 'simulated'
+                      and occurred_at >= timezone('utc', now()) - interval '12 hours'
+                      {event_site_filter}
+                    group by bucket, category
+                    order by bucket
+                    """,
+                    {"tenant_id": context.tenant_id, "site_id": site_id},
+                ).fetchall()
+            )
+            alerts = list(
+                conn.execute(
+                    f"""
+                    select id, title, severity, status, impact, last_occurred_at
+                    from public.incidents
+                    where tenant_id = %(tenant_id)s
+                      and status in ('open', 'investigating', 'monitoring')
+                      {incident_site_filter}
+                    order by
+                      case severity when 'critical' then 0 when 'error' then 1 when 'warning' then 2 else 3 end,
+                      last_occurred_at desc
+                    limit 8
+                    """,
+                    {"tenant_id": context.tenant_id, "site_id": site_id},
+                ).fetchall()
+            )
+            integrations = list(
+                conn.execute(
+                    """
+                    select adapter_type, name, status, last_success_at, last_error
+                    from public.integration_instances
+                    where tenant_id = %s and enabled
+                    order by adapter_type, name
+                    """,
+                    (context.tenant_id,),
+                ).fetchall()
+            )
+        all_kpis = {
+            **dict(kpis),
+            **dict(agent_kpis),
+            **dict(event_kpis),
+            **dict(incident_kpis),
+        }
+        monitored = int(all_kpis["assets"])
+        online = int(all_kpis["online_assets"])
+        degraded = int(all_kpis["degraded_assets"])
+        all_kpis["availability"] = (
+            round(((online + degraded * 0.5) / monitored) * 100, 1) if monitored else None
+        )
+        return WallboardSnapshot(
+            tenantId=context.tenant_id,
+            wallboardType=wallboard_type,
+            dataOrigin="real",
+            generatedAt=datetime.now(timezone.utc),
+            siteId=site_id,
+            siteName=site["name"] if site else None,
+            kpis=all_kpis,
+            sites=[dict(row) for row in sites],
+            statusGroups=[dict(row) for row in status_groups],
+            activity=[dict(row) for row in activity],
+            alerts=[dict(row) for row in alerts],
+            integrations=[dict(row) for row in integrations],
+        )
+
     @staticmethod
     def adapter_catalog() -> list[dict]:
         return [dict(item) for item in ADAPTER_CATALOG]
+
+    def sync_integration(self, context: AuthContext, adapter_type: str):
+        if not self.enabled:
+            raise ValueError("database is required for infrastructure synchronization")
+        with self.base._connect() as conn:
+            access = self._access(conn, context)
+            self._assert_admin(access, context)
+        from app.infrastructure_sync import InfrastructureSyncService
+
+        return InfrastructureSyncService(self.settings).sync(context.tenant_id, adapter_type)
 
     def list_incidents(self, context: AuthContext, status: str | None = None) -> list[dict]:
         if not self.enabled:

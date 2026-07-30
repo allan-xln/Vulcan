@@ -299,3 +299,34 @@ def test_integration_catalog_exposes_capabilities_without_fake_connections() -> 
     assert any(item["adapterType"] == "generic_webhook" and item["implemented"] for item in catalog)
     assert any(item["adapterType"] == "snmp" and not item["implemented"] for item in catalog)
     assert all(item["readOnly"] for item in catalog)
+
+
+def test_wallboard_contract_uses_real_empty_state_without_fake_kpis() -> None:
+    headers = admin_headers()
+    profiles = client.get("/wallboards/profiles", headers=headers)
+    workforce = client.get("/wallboards/snapshot?type=workforce", headers=headers)
+    infrastructure = client.get("/wallboards/snapshot?type=infrastructure", headers=headers)
+
+    assert profiles.status_code == 200
+    assert profiles.json()[0]["wallboardType"] == "workforce"
+    assert workforce.status_code == 200
+    assert workforce.json()["dataOrigin"] == "real"
+    assert workforce.json()["kpis"] == {}
+    assert infrastructure.status_code == 200
+    assert infrastructure.json()["dataOrigin"] == "real"
+    assert infrastructure.json()["kpis"] == {}
+
+
+def test_read_only_user_cannot_change_wallboard_profile() -> None:
+    profile = client.get("/wallboards/profiles", headers=admin_headers()).json()[0]
+    response = client.patch(
+        f"/wallboards/profiles/{profile['id']}",
+        headers=operator_headers(),
+        json={
+            "tenantId": TENANT_ID,
+            "refreshSeconds": 60,
+        },
+    )
+
+    assert response.status_code == 403
+    assert "permission" in response.json()["detail"]

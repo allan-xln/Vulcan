@@ -63,23 +63,56 @@ class SiteCreate(PlatformModel):
     tenant_id: UUID
     code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
     name: str = Field(min_length=2, max_length=160)
+    slug: str | None = Field(default=None, min_length=2, max_length=160, pattern=r"^[a-z0-9][a-z0-9-]*$")
     description: str | None = Field(default=None, max_length=1000)
+    city: str | None = Field(default=None, max_length=160)
+    state: str | None = Field(default=None, min_length=2, max_length=80)
     address: dict[str, Any] = Field(default_factory=dict)
     timezone: str = Field(default="America/Sao_Paulo", min_length=3, max_length=80)
+    display_order: int = Field(default=0, ge=0, le=10000)
+    semantic_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    rotation_enabled: bool = True
+    rotation_seconds: int = Field(default=30, ge=10, le=3600)
+    visible: bool = True
     tags: list[str] = Field(default_factory=list, max_length=50)
+
+
+class SiteUpdate(PlatformModel):
+    tenant_id: UUID
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    description: str | None = Field(default=None, max_length=1000)
+    city: str | None = Field(default=None, max_length=160)
+    state: str | None = Field(default=None, min_length=2, max_length=80)
+    timezone: str | None = Field(default=None, min_length=3, max_length=80)
+    status: Literal["active", "maintenance", "inactive"] | None = None
+    display_order: int | None = Field(default=None, ge=0, le=10000)
+    semantic_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    rotation_enabled: bool | None = None
+    rotation_seconds: int | None = Field(default=None, ge=10, le=3600)
+    visible: bool | None = None
+    tags: list[str] | None = Field(default=None, max_length=50)
 
 
 class Site(PlatformModel):
     id: UUID
     tenant_id: UUID
     code: str
+    slug: str
     name: str
     description: str | None = None
+    city: str | None = None
+    state: str | None = None
     address: dict[str, Any] = Field(default_factory=dict)
     timezone: str
     status: str
+    display_order: int
+    semantic_color: str | None = None
+    rotation_enabled: bool
+    rotation_seconds: int
+    visible: bool
     tags: list[str] = Field(default_factory=list)
-    data_origin: Literal["real", "simulated"] = "real"
+    source: str = "manual"
+    data_origin: Literal["real", "simulated", "imported"] = "real"
     created_at: datetime
     updated_at: datetime
 
@@ -122,7 +155,9 @@ class InfrastructureNetwork(PlatformModel):
     discovery_allowed: bool
     status: str
     tags: list[str] = Field(default_factory=list)
-    data_origin: Literal["real", "simulated"] = "real"
+    source: str = "manual"
+    source_key: str | None = None
+    data_origin: Literal["real", "simulated", "imported"] = "real"
     created_at: datetime
     updated_at: datetime
 
@@ -142,6 +177,14 @@ AssetType = Literal[
     "storage",
     "virtual_machine",
     "container",
+    "proxmox_cluster",
+    "virtualization_host",
+    "backup_server",
+    "backup_job",
+    "wan_link",
+    "vpn_tunnel",
+    "nat_service",
+    "network_service",
     "other",
 ]
 
@@ -217,10 +260,13 @@ class Asset(PlatformModel):
     rack_position: str | None = None
     tags: list[str] = Field(default_factory=list)
     source: str
+    source_key: str | None = None
     confidence: float | None = None
     discovered_at: datetime | None = None
     last_seen_at: datetime | None = None
-    data_origin: Literal["real", "simulated"] = "real"
+    notes: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    data_origin: Literal["real", "simulated", "imported"] = "real"
     created_at: datetime
     updated_at: datetime
 
@@ -445,6 +491,118 @@ class Incident(PlatformModel):
     source: str
     created_at: datetime
     updated_at: datetime
+
+
+class WallboardPlaylistItem(PlatformModel):
+    id: UUID
+    tenant_id: UUID
+    playlist_id: UUID
+    site_id: UUID | None = None
+    site_name: str | None = None
+    panel_key: str
+    title: str
+    position: int
+    duration_seconds: int | None = None
+    enabled: bool
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class WallboardPlaylist(PlatformModel):
+    id: UUID
+    tenant_id: UUID
+    profile_id: UUID
+    slug: str
+    name: str
+    enabled: bool
+    rotation_enabled: bool
+    default_duration_seconds: int
+    transition: Literal["none", "fade", "slide"]
+    schedule: dict[str, Any] = Field(default_factory=dict)
+    alert_priority_enabled: bool
+    auto_return_seconds: int
+    items: list[WallboardPlaylistItem] = Field(default_factory=list)
+
+
+class WallboardProfile(PlatformModel):
+    id: UUID
+    tenant_id: UUID
+    site_id: UUID | None = None
+    site_name: str | None = None
+    slug: str
+    name: str
+    wallboard_type: Literal["workforce", "infrastructure"]
+    view_mode: str
+    enabled: bool
+    refresh_seconds: int
+    fullscreen: bool
+    night_mode: bool
+    burn_in_prevention: bool
+    show_clock: bool
+    show_last_update: bool
+    show_connection_status: bool
+    config: dict[str, Any] = Field(default_factory=dict)
+    playlists: list[WallboardPlaylist] = Field(default_factory=list)
+
+
+class WallboardProfileUpdate(PlatformModel):
+    tenant_id: UUID
+    enabled: bool | None = None
+    refresh_seconds: int | None = Field(default=None, ge=5, le=3600)
+    fullscreen: bool | None = None
+    night_mode: bool | None = None
+    burn_in_prevention: bool | None = None
+    show_clock: bool | None = None
+    show_last_update: bool | None = None
+    show_connection_status: bool | None = None
+    config: dict[str, Any] | None = None
+
+
+class WallboardPlaylistUpdate(PlatformModel):
+    tenant_id: UUID
+    enabled: bool | None = None
+    rotation_enabled: bool | None = None
+    default_duration_seconds: int | None = Field(default=None, ge=10, le=3600)
+    transition: Literal["none", "fade", "slide"] | None = None
+    alert_priority_enabled: bool | None = None
+    auto_return_seconds: int | None = Field(default=None, ge=10, le=86400)
+
+
+class WallboardPlaylistItemUpdate(PlatformModel):
+    id: UUID
+    position: int = Field(ge=0)
+    duration_seconds: int | None = Field(default=None, ge=10, le=3600)
+    enabled: bool = True
+
+
+class WallboardPlaylistItemsUpdate(PlatformModel):
+    tenant_id: UUID
+    items: list[WallboardPlaylistItemUpdate] = Field(min_length=1, max_length=100)
+
+
+class WallboardSnapshot(PlatformModel):
+    tenant_id: UUID
+    wallboard_type: Literal["workforce", "infrastructure"]
+    data_origin: Literal["real"]
+    generated_at: datetime
+    site_id: UUID | None = None
+    site_name: str | None = None
+    kpis: dict[str, int | float | str | None] = Field(default_factory=dict)
+    sites: list[dict[str, Any]] = Field(default_factory=list)
+    status_groups: list[dict[str, Any]] = Field(default_factory=list)
+    activity: list[dict[str, Any]] = Field(default_factory=list)
+    alerts: list[dict[str, Any]] = Field(default_factory=list)
+    integrations: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class IntegrationSyncResult(PlatformModel):
+    adapter_type: str
+    status: Literal["ok", "degraded", "unavailable"]
+    data_origin: Literal["real"]
+    observed_at: datetime
+    assets_seen: int = 0
+    assets_updated: int = 0
+    relationships_updated: int = 0
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DependencyCheck(PlatformModel):

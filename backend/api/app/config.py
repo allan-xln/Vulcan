@@ -105,6 +105,16 @@ class Settings:
     agent_enrollment_token: str
     agent_public_backend_url: str | None
     agent_installer_package_url: str | None
+    unifi_base_url: str | None
+    unifi_site: str
+    unifi_username: str | None
+    unifi_password: str | None
+    unifi_verify_tls: bool
+    proxmox_base_url: str | None
+    proxmox_username: str | None
+    proxmox_password: str | None
+    proxmox_verify_tls: bool
+    infrastructure_sync_interval_seconds: int
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -319,4 +329,17 @@ def get_settings() -> Settings:
         ),
         agent_public_backend_url=getenv("AGENT_PUBLIC_BACKEND_URL") or None,
         agent_installer_package_url=getenv("AGENT_INSTALLER_PACKAGE_URL") or None,
+        unifi_base_url=getenv("VULCAN_UNIFI_BASE_URL") or None,
+        unifi_site=getenv("VULCAN_UNIFI_SITE", "default"),
+        unifi_username=_secret_env("VULCAN_UNIFI_USERNAME") or None,
+        unifi_password=_secret_env("VULCAN_UNIFI_PASSWORD") or None,
+        unifi_verify_tls=_bool_env("VULCAN_UNIFI_VERIFY_TLS", True),
+        proxmox_base_url=getenv("VULCAN_PROXMOX_BASE_URL") or None,
+        proxmox_username=_secret_env("VULCAN_PROXMOX_USERNAME") or None,
+        proxmox_password=_secret_env("VULCAN_PROXMOX_PASSWORD") or None,
+        proxmox_verify_tls=_bool_env("VULCAN_PROXMOX_VERIFY_TLS", True),
+        infrastructure_sync_interval_seconds=max(
+            30,
+            int(getenv("VULCAN_INFRASTRUCTURE_SYNC_INTERVAL_SECONDS", "120")),
+        ),
     )

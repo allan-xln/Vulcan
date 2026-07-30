@@ -27,12 +27,20 @@ from app.platform_schemas import (
     InfrastructureNetworkCreate,
     InfrastructureOverview,
     IntegrationAdapterDefinition,
+    IntegrationSyncResult,
     PlatformHealth,
     Site,
     SiteCreate,
+    SiteUpdate,
     TenantModule,
     TimelinePage,
     VersionInfo,
+    WallboardPlaylist,
+    WallboardPlaylistItemsUpdate,
+    WallboardPlaylistUpdate,
+    WallboardProfile,
+    WallboardProfileUpdate,
+    WallboardSnapshot,
 )
 from app.security import AuthContext, Authenticated
 
@@ -130,6 +138,19 @@ def create_site(
 ) -> Site:
     try:
         return Site.model_validate(repo.create_site(context, request))
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/infrastructure/sites/{site_id}", response_model=Site)
+def update_site(
+    site_id: UUID,
+    request: SiteUpdate,
+    context: AuthContext = Authenticated,
+    repo: PlatformRepository = Depends(platform_repository),
+) -> Site:
+    try:
+        return Site.model_validate(repo.update_site(context, site_id, request))
     except ValueError as exc:
         raise _bad_request(exc) from exc
 
@@ -360,6 +381,96 @@ def integration_catalog(
     repo: PlatformRepository = Depends(platform_repository),
 ) -> list[IntegrationAdapterDefinition]:
     return [IntegrationAdapterDefinition.model_validate(item) for item in repo.adapter_catalog()]
+
+
+@router.post(
+    "/infrastructure/integrations/{adapter_type}/sync",
+    response_model=IntegrationSyncResult,
+)
+def sync_integration(
+    adapter_type: str,
+    context: AuthContext = Authenticated,
+    repo: PlatformRepository = Depends(platform_repository),
+) -> IntegrationSyncResult:
+    try:
+        return repo.sync_integration(context, adapter_type)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.get("/wallboards/profiles", response_model=list[WallboardProfile])
+def list_wallboard_profiles(
+    context: AuthContext = Authenticated,
+    repo: PlatformRepository = Depends(platform_repository),
+) -> list[WallboardProfile]:
+    try:
+        return repo.list_wallboard_profiles(context)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/wallboards/profiles/{profile_id}", response_model=WallboardProfile)
+def update_wallboard_profile(
+    profile_id: UUID,
+    request: WallboardProfileUpdate,
+    context: AuthContext = Authenticated,
+    repo: PlatformRepository = Depends(platform_repository),
+) -> WallboardProfile:
+    try:
+        return repo.update_wallboard_profile(context, profile_id, request)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/wallboards/playlists/{playlist_id}", response_model=WallboardPlaylist)
+def update_wallboard_playlist(
+    playlist_id: UUID,
+    request: WallboardPlaylistUpdate,
+    context: AuthContext = Authenticated,
+    repo: PlatformRepository = Depends(platform_repository),
+) -> WallboardPlaylist:
+    try:
+        repo.update_wallboard_playlist(context, playlist_id, request)
+        profiles = repo.list_wallboard_profiles(context)
+        for profile in profiles:
+            for playlist in profile.playlists:
+                if playlist.id == playlist_id:
+                    return playlist
+        raise ValueError("wallboard playlist not found in active tenant")
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/wallboards/playlists/{playlist_id}/items", response_model=WallboardPlaylist)
+def update_wallboard_playlist_items(
+    playlist_id: UUID,
+    request: WallboardPlaylistItemsUpdate,
+    context: AuthContext = Authenticated,
+    repo: PlatformRepository = Depends(platform_repository),
+) -> WallboardPlaylist:
+    try:
+        repo.update_wallboard_playlist_items(context, playlist_id, request)
+        profiles = repo.list_wallboard_profiles(context)
+        for profile in profiles:
+            for playlist in profile.playlists:
+                if playlist.id == playlist_id:
+                    return playlist
+        raise ValueError("wallboard playlist not found in active tenant")
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.get("/wallboards/snapshot", response_model=WallboardSnapshot)
+def wallboard_snapshot(
+    wallboard_type: str = Query(default="workforce", alias="type"),
+    site_id: UUID | None = Query(default=None, alias="siteId"),
+    context: AuthContext = Authenticated,
+    repo: PlatformRepository = Depends(platform_repository),
+) -> WallboardSnapshot:
+    try:
+        return repo.wallboard_snapshot(context, wallboard_type, site_id)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.get("/incidents", response_model=list[Incident])
