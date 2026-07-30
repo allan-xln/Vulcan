@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { InfrastructureView, UnifiedTimelineView } from "@/components/platform-expansion";
@@ -20,7 +20,9 @@ function response(payload: unknown) {
 }
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
+  window.history.replaceState({}, "", "/");
 });
 
 describe("InfrastructureView", () => {
@@ -90,6 +92,7 @@ describe("InfrastructureView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ativos e redes" }));
     expect(await screen.findByText("Servidor ERP")).toBeInTheDocument();
     expect(screen.getByText(/SRV-ERP-01/)).toBeInTheDocument();
+    expect(window.location.search).toContain("infra=inventory");
   });
 });
 

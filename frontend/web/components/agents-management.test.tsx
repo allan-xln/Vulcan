@@ -61,6 +61,7 @@ describe("AgentsManagement", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    window.history.replaceState({}, "", "/");
   });
 
   it("renders real agent state without invasive capability claims", async () => {
@@ -89,6 +90,7 @@ describe("AgentsManagement", () => {
     );
     await screen.findByText("ERS-DEV-01");
     fireEvent.click(screen.getByRole("button", { name: "Instalação" }));
+    expect(window.location.search).toContain("agent=installation");
     fireEvent.click(screen.getByRole("button", { name: /Gerar token/ }));
 
     await waitFor(() => {

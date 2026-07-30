@@ -34,6 +34,7 @@ from app.schemas import (
     AgentStatusResponse,
     AnalyzeRequest,
     AnalyzeResponse,
+    AuthSessionResponse,
     AuditLog,
     CopilotRequest,
     CopilotResponse,
@@ -162,6 +163,20 @@ def login(request: LoginRequest) -> LoginResponse:
     if get_settings().auth_provider == "database":
         return login_with_database(request)
     return login_with_local_admin(request)
+
+
+@app.get("/auth/session", response_model=AuthSessionResponse)
+def auth_session(context: AuthContext = Authenticated) -> AuthSessionResponse:
+    return AuthSessionResponse(
+        user={
+            "id": context.user_id,
+            "name": context.email or "Usuário Vulcan",
+            "email": context.email,
+            "role": context.role,
+            "tenantId": str(context.tenant_id),
+            "provider": context.provider,
+        }
+    )
 
 
 def repository() -> VulcanRepository:

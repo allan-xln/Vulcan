@@ -23,6 +23,11 @@ class LoginResponse(ApiModel):
     warning: str
 
 
+class AuthSessionResponse(ApiModel):
+    authenticated: bool = True
+    user: dict[str, Any]
+
+
 class Tenant(ApiModel):
     id: UUID
     name: str

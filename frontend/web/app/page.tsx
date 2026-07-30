@@ -55,6 +55,7 @@ import {
 import { getSupabaseClient, isMockAuthEnabled, isSupabaseAuthAvailable } from "@/lib/supabase";
 import { InfrastructureView, UnifiedTimelineView } from "@/components/platform-expansion";
 import { AgentsManagement } from "@/components/agents-management";
+import { useUrlState } from "@/lib/url-state";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const DEMO_TENANT_ID = process.env.NEXT_PUBLIC_DEMO_TENANT_ID ?? "00000000-0000-0000-0000-000000000301";
@@ -115,6 +116,73 @@ type ViewKey =
   | "timeline"
   | "notifications"
   | "settings";
+
+const viewKeys: readonly ViewKey[] = [
+  "dashboard",
+  "hierarchy",
+  "metrics",
+  "insights",
+  "agents",
+  "infrastructure",
+  "timeline",
+  "notifications",
+  "settings"
+];
+const LOCAL_AUTH_SESSION_KEY = "vulcan.auth.local-session.v1";
+
+type LocalSessionUser = {
+  id?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  tenantId?: string;
+};
+
+type StoredLocalSession = {
+  accessToken: string;
+  user: LocalSessionUser;
+};
+
+type AuthSessionResponse = {
+  authenticated: boolean;
+  user: LocalSessionUser & {
+    provider?: string;
+  };
+};
+
+function readStoredLocalSession(): StoredLocalSession | null {
+  try {
+    const raw = window.sessionStorage.getItem(LOCAL_AUTH_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredLocalSession>;
+    if (!parsed.accessToken || typeof parsed.accessToken !== "string" || !parsed.user) {
+      window.sessionStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
+      return null;
+    }
+    return { accessToken: parsed.accessToken, user: parsed.user };
+  } catch {
+    return null;
+  }
+}
+
+function persistLocalSession(accessToken: string, user: LocalSessionUser) {
+  try {
+    window.sessionStorage.setItem(
+      LOCAL_AUTH_SESSION_KEY,
+      JSON.stringify({ accessToken, user } satisfies StoredLocalSession)
+    );
+  } catch {
+    // A sessão continua válida na aba atual mesmo se o navegador bloquear storage.
+  }
+}
+
+function clearStoredLocalSession() {
+  try {
+    window.sessionStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
+  } catch {
+    // Nenhum estado sensível adicional é mantido fora do React.
+  }
+}
 
 type MetricsIntent = {
   nonce: number;
@@ -2106,11 +2174,11 @@ function buildQualityByOs(rows: MetricsDetailedRow[], devices: Device[]): Qualit
 export default function HomePage() {
   const [token, setToken] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [authLoading, setAuthLoading] = useState(SUPABASE_AUTH_READY);
+  const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"supabase" | "local" | null>(null);
   const [identity, setIdentity] = useState("operador Vulcan");
   const [currentRole, setCurrentRole] = useState("guest");
-  const [view, setView] = useState<ViewKey>("dashboard");
+  const [view, setView] = useUrlState<ViewKey>("view", viewKeys, "dashboard");
   const [metricsIntent, setMetricsIntent] = useState<MetricsIntent | null>(null);
   const [loginError, setLoginError] = useState("");
   const [metrics, setMetrics] = useState<Metric[]>(fallbackMetrics);
@@ -2164,50 +2232,86 @@ export default function HomePage() {
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    if (!supabase) {
-      setAuthLoading(false);
-      return;
-    }
-
     let mounted = true;
+    let unsubscribeSupabase: (() => void) | null = null;
     const sessionRestoreTimeout = window.setTimeout(() => {
       if (mounted) {
         setAuthLoading(false);
       }
     }, 4000);
 
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) {
-        return;
+    const restoreSession = async () => {
+      const storedSession = readStoredLocalSession();
+      if (storedSession) {
+        try {
+          const response = await fetch(`${API_URL}/auth/session`, {
+            headers: {
+              Authorization: `Bearer ${storedSession.accessToken}`,
+              "X-Tenant-Id": storedSession.user.tenantId ?? DEMO_TENANT_ID
+            }
+          });
+          if (response.ok) {
+            const restored = (await response.json()) as AuthSessionResponse;
+            if (mounted && restored.authenticated) {
+              setToken(storedSession.accessToken);
+              setIdentity(
+                storedSession.user.name
+                  ?? restored.user.name
+                  ?? restored.user.email
+                  ?? "usuário Vulcan"
+              );
+              setCurrentRole(restored.user.role ?? storedSession.user.role ?? "user");
+              setAuthMode("local");
+              setAuthLoading(false);
+              window.clearTimeout(sessionRestoreTimeout);
+              return;
+            }
+          }
+        } catch {
+          // A sessão será descartada e o login será exibido novamente.
+        }
+        clearStoredLocalSession();
       }
-      if (data.session) {
-        setSession(data.session);
-        setToken(data.session.access_token);
-        setIdentity(data.session.user.email ?? "usuário Supabase");
-        setCurrentRole("supabase_user");
-        setAuthMode("supabase");
+
+      if (supabase) {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (mounted && data.session) {
+            setSession(data.session);
+            setToken(data.session.access_token);
+            setIdentity(data.session.user.email ?? "usuário Supabase");
+            setCurrentRole("supabase_user");
+            setAuthMode("supabase");
+          }
+        } catch {
+          // O estado sem sessão é tratado pela experiência de login.
+        }
+
+        const {
+          data: { subscription }
+        } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+          if (!mounted) return;
+          setSession(nextSession);
+          setToken(nextSession?.access_token ?? null);
+          setIdentity(nextSession?.user.email ?? "operador Vulcan");
+          setCurrentRole(nextSession ? "supabase_user" : "guest");
+          setAuthMode(nextSession ? "supabase" : null);
+        });
+        unsubscribeSupabase = () => subscription.unsubscribe();
       }
-      setAuthLoading(false);
-    }).catch(() => {
+
       if (mounted) {
         setAuthLoading(false);
       }
-    }).finally(() => window.clearTimeout(sessionRestoreTimeout));
+      window.clearTimeout(sessionRestoreTimeout);
+    };
 
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setToken(nextSession?.access_token ?? null);
-      setIdentity(nextSession?.user.email ?? "operador Vulcan");
-      setCurrentRole(nextSession ? "supabase_user" : "guest");
-      setAuthMode(nextSession ? "supabase" : null);
-    });
+    void restoreSession();
 
     return () => {
       mounted = false;
       window.clearTimeout(sessionRestoreTimeout);
-      subscription.unsubscribe();
+      unsubscribeSupabase?.();
     };
   }, []);
 
@@ -2247,12 +2351,6 @@ export default function HomePage() {
         .then(() => navigator.serviceWorker.ready)
         .then(() => updateDesktopNotificationRuntime({ serviceWorkerReady: true }))
         .catch(() => updateDesktopNotificationRuntime({ serviceWorkerReady: false }));
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const requestedView = params.get("view");
-    if (requestedView && ["dashboard", "hierarchy", "metrics", "insights", "infrastructure", "agents", "timeline", "notifications", "settings"].includes(requestedView)) {
-      setView(requestedView as ViewKey);
     }
 
     return () => {
@@ -2564,6 +2662,7 @@ export default function HomePage() {
       setIdentity(data.session.user.email ?? username);
       setCurrentRole("supabase_user");
       setAuthMode("supabase");
+      clearStoredLocalSession();
       return;
     }
 
@@ -2584,11 +2683,13 @@ export default function HomePage() {
         return;
       }
 
-      const data = (await response.json()) as { accessToken: string; user?: { name?: string; email?: string; role?: string } };
+      const data = (await response.json()) as { accessToken: string; user?: LocalSessionUser };
+      const authenticatedUser = data.user ?? { name: username, role: "user" };
+      persistLocalSession(data.accessToken, authenticatedUser);
       setToken(data.accessToken);
       setAuthMode("local");
-      setIdentity(data.user?.name ?? data.user?.email ?? username);
-      setCurrentRole(data.user?.role ?? "user");
+      setIdentity(authenticatedUser.name ?? authenticatedUser.email ?? username);
+      setCurrentRole(authenticatedUser.role ?? "user");
       if (username.toLowerCase() === "teste") {
         setMetrics(liveTestMetrics);
         setInsights([]);
@@ -2604,10 +2705,18 @@ export default function HomePage() {
       }
     } catch {
       if (LOCAL_AUTH_READY && ((username === "admin" && password === "admin") || (username === "teste" && password === "teste"))) {
-        setToken(username === "teste" ? "dev-vulcan-test-token" : "dev-vulcan-admin-token");
+        const fallbackToken = username === "teste" ? "dev-vulcan-test-token" : "dev-vulcan-admin-token";
+        const fallbackUser = {
+          name: username === "teste" ? "teste" : "admin local de demonstração",
+          email: username === "teste" ? "teste@vulcan.local" : "admin@vulcan.local",
+          role: username === "teste" ? "tenant_admin" : "owner",
+          tenantId: DEMO_TENANT_ID
+        };
+        persistLocalSession(fallbackToken, fallbackUser);
+        setToken(fallbackToken);
         setAuthMode("local");
-        setIdentity(username === "teste" ? "teste" : "admin local de demonstração");
-        setCurrentRole(username === "teste" ? "tenant_admin" : "owner");
+        setIdentity(fallbackUser.name);
+        setCurrentRole(fallbackUser.role);
         if (username === "teste") {
           setMetrics(liveTestMetrics);
           setInsights([]);
@@ -2636,6 +2745,7 @@ export default function HomePage() {
       await getSupabaseClient()?.auth.signOut();
     }
     setSession(null);
+    clearStoredLocalSession();
     setToken(null);
     setAuthMode(null);
     setIdentity("operador Vulcan");

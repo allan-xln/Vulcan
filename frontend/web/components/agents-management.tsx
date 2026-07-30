@@ -22,6 +22,7 @@ import {
   UsersRound
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useUrlState } from "@/lib/url-state";
 
 type AgentProfile = "workstation" | "server" | "collector";
 type AgentSection =
@@ -127,6 +128,7 @@ const navigation: { key: AgentSection; label: string; icon: typeof Activity }[] 
   { key: "events", label: "Eventos", icon: Activity },
   { key: "audit", label: "Auditoria", icon: FileClock }
 ];
+const agentSections = navigation.map((item) => item.key);
 
 async function fetchJson<T>(
   apiUrl: string,
@@ -209,7 +211,7 @@ function AgentDatum({ label, value }: { label: string; value: string }) {
 }
 
 export function AgentsManagement({ apiUrl, tenantId, token }: Props) {
-  const [section, setSection] = useState<AgentSection>("all");
+  const [section, setSection] = useUrlState<AgentSection>("agent", agentSections, "all");
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [policies, setPolicies] = useState<AgentPolicy[]>([]);
   const [events, setEvents] = useState<TimelineEvent[]>([]);

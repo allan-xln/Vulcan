@@ -29,6 +29,20 @@ def test_local_admin_login_and_protected_metrics() -> None:
     assert login_response.status_code == 200
     token = login_response.json()["accessToken"]
 
+    session_response = client.get("/auth/session", headers={"Authorization": f"Bearer {token}"})
+    assert session_response.status_code == 200
+    assert session_response.json() == {
+        "authenticated": True,
+        "user": {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "name": "admin@vulcan.local",
+            "email": "admin@vulcan.local",
+            "role": "owner",
+            "tenantId": "00000000-0000-0000-0000-000000000301",
+            "provider": "local",
+        },
+    }
+
     metrics_response = client.get("/metrics", headers={"Authorization": f"Bearer {token}"})
     assert metrics_response.status_code == 200
     assert len(metrics_response.json()) >= 1

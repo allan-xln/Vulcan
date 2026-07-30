@@ -25,6 +25,7 @@ import {
   X
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useUrlState } from "@/lib/url-state";
 
 type DataOrigin = "real" | "simulated" | "imported";
 
@@ -204,6 +205,14 @@ type TimelinePage = {
 };
 
 type InfrastructureSection = "overview" | "inventory" | "discovery" | "incidents" | "integrations" | "platform";
+const infrastructureSections: readonly InfrastructureSection[] = [
+  "overview",
+  "inventory",
+  "discovery",
+  "incidents",
+  "integrations",
+  "platform"
+];
 type CreateMode = "site" | "network" | "asset" | "discovery" | null;
 
 type PlatformProps = {
@@ -589,7 +598,11 @@ function CreatePanel({
 }
 
 export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
-  const [section, setSection] = useState<InfrastructureSection>("overview");
+  const [section, setSection] = useUrlState<InfrastructureSection>(
+    "infra",
+    infrastructureSections,
+    "overview"
+  );
   const [overview, setOverview] = useState<InfrastructureOverview | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [networks, setNetworks] = useState<InfrastructureNetwork[]>([]);
