@@ -16,10 +16,9 @@ test("keeps the authenticated Infrastructure subsection after a full reload", as
   await expect(
     page.getByRole("heading", { name: /Infraestrutura explicada pelo impacto/i })
   ).toBeVisible();
-  await page.getByRole("button", { name: "Ativos e redes" }).click();
-  await expect(page.getByRole("heading", { name: "Inventário de ativos" })).toBeVisible();
-  await expect(page).toHaveURL(/view=infrastructure/);
-  await expect(page).toHaveURL(/infra=inventory/);
+  await page.getByRole("button", { name: "Ativos", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Ativos — inventário real" })).toBeVisible();
+  await expect(page).toHaveURL(/\/infrastructure\/assets$/);
 
   await page.reload();
 
@@ -27,7 +26,12 @@ test("keeps the authenticated Infrastructure subsection after a full reload", as
   await expect(
     page.getByRole("heading", { name: /Infraestrutura explicada pelo impacto/i })
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Inventário de ativos" })).toBeVisible();
-  await expect(page).toHaveURL(/view=infrastructure/);
-  await expect(page).toHaveURL(/infra=inventory/);
+  await expect(page.getByRole("heading", { name: "Ativos — inventário real" })).toBeVisible();
+  await expect(page).toHaveURL(/\/infrastructure\/assets$/);
+
+  await page.getByRole("button", { name: "Filiais", exact: true }).click();
+  await expect(page).toHaveURL(/\/infrastructure\/branches$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/infrastructure\/assets$/);
+  await expect(page.getByRole("heading", { name: "Ativos — inventário real" })).toBeVisible();
 });
