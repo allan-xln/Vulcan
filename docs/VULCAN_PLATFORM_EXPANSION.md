@@ -532,6 +532,7 @@ no start e diretório de trabalho incorreto — corrigidas e retestadas no conta
 - [x] módulos por tenant
 - [x] discovery somente leitura
 - [x] framework de adapters
+- [x] adapters UniFi e Proxmox somente leitura
 
 ### Fase 3 — rede e incidentes
 
@@ -615,8 +616,9 @@ no start e diretório de trabalho incorreto — corrigidas e retestadas no conta
 Itens deliberadamente não apresentados como prontos:
 
 1. Implementar APIs/UI de interfaces, relacionamentos e topologia sem criar grafo ilegível.
-2. Implementar adapters SNMP/UniFi/FortiGate e receivers syslog/traps com credenciais por
-   secret reference, rate limit e dead-letter queue.
+2. Implementar adapters SNMP/FortiGate e receivers syslog/traps com credenciais por
+   secret reference, rate limit e dead-letter queue. UniFi e Proxmox já reconciliam
+   inventário real em modo somente leitura.
 3. Criar regras de alerta e correlator determinístico para produzir incidentes; a tabela e
    a leitura existem, mas não há causa provável inventada.
 4. Relacionar impacto de infraestrutura aos indicadores do Workforce e à visão executiva.

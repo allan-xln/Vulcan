@@ -7,9 +7,14 @@ Vulcan is organized as a modular SaaS monorepo. The platform separates collectio
 ## Runtime Components
 
 - Frontend: Next.js in `frontend/web`.
-- Backend APIs: FastAPI services in `backend/ingestion-gateway` and `backend/query-api`.
+- Backend principal: FastAPI em `backend/api`, incluindo autenticação, Workforce,
+  Infrastructure, Timeline, Agents, Wallboards e realtime.
+- Serviços especializados preservados em `backend/ingestion-gateway` e
+  `backend/query-api`, ativados conforme o perfil de execução.
 - Platform API: router modular em `backend/api/app/platform_routes.py`, composto à API existente.
 - Discovery: worker Python independente em `backend/discovery`, somente leitura e desativado por padrão.
+- Infrastructure sync: worker de reconciliação somente leitura para UniFi e Proxmox,
+  sem expor credenciais ao frontend.
 - Jobs: Python workers in `backend/jobs`.
 - AI: FastAPI service in `ai/api`, using hybrid GPT + Llama routing.
 - Database: one Supabase PostgreSQL database in `database/supabase`.
@@ -35,6 +40,11 @@ relacionamentos, políticas/execuções/achados de descoberta, incidentes, reten
 por tenant. O inventário nunca armazena o valor de credenciais: integrações guardam apenas
 uma referência de segredo.
 
+Os Wallboards Workforce e Infrastructure consomem snapshots reais do mesmo banco,
+respeitam site/tenant, recebem sinais de atualização por SSE e não possuem endpoints
+privilegiados próprios. Perfis, playlists e ordem dos painéis são persistidos com RLS e
+auditoria.
+
 ## Architectural Decisions
 
 - One database, not one database per customer.
@@ -51,7 +61,13 @@ uma referência de segredo.
 
 ## Current Risks
 
-- Linux and Windows agents are MVP-functional, but still need signed per-device enrollment tokens, auto-update and full enterprise hardening before production rollout.
-- Linux collection quality depends on the desktop session. GNOME/Wayland can block active-window detail; Vulcan reports this as limited collection instead of bypassing OS privacy controls.
-- Supabase Auth must replace local fallback users before production.
-- Some production CRUD flows and provider credentials still need final hardening.
+- O MSI e o serviço Windows ainda precisam de homologação em Windows real antes de
+  implantação em massa.
+- A coleta Linux depende da sessão gráfica. GNOME/Wayland pode limitar a janela ativa; o
+  agente reporta a limitação e não contorna controles de privacidade do sistema.
+- A produção usa autenticação real pelo PostgreSQL; o modo local/demo é bloqueado em
+  ambiente `production`.
+- UniFi e Proxmox possuem adapters somente leitura. SNMP, FortiGate, syslog, traps e flows
+  continuam explicitamente não implementados.
+- HTTP privado é permitido para a rede interna atual com opt-in explícito no agente; TLS
+  interno confiável permanece como hardening prioritário.
