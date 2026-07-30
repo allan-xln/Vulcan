@@ -22,7 +22,7 @@ import {
   UsersRound
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { useUrlState } from "@/lib/url-state";
+import { usePathState } from "@/lib/url-state";
 
 type AgentProfile = "workstation" | "server" | "collector";
 type AgentSection =
@@ -35,6 +35,7 @@ type AgentSection =
   | "updates"
   | "policies"
   | "installation"
+  | "deployments"
   | "diagnostics"
   | "events"
   | "audit";
@@ -124,11 +125,27 @@ const navigation: { key: AgentSection; label: string; icon: typeof Activity }[] 
   { key: "updates", label: "Atualizações", icon: Download },
   { key: "policies", label: "Políticas", icon: Settings2 },
   { key: "installation", label: "Instalação", icon: TerminalSquare },
+  { key: "deployments", label: "Instalação em massa", icon: Network },
   { key: "diagnostics", label: "Diagnóstico", icon: HardDrive },
   { key: "events", label: "Eventos", icon: Activity },
   { key: "audit", label: "Auditoria", icon: FileClock }
 ];
 const agentSections = navigation.map((item) => item.key);
+const agentRoutes: Readonly<Record<AgentSection, string>> = {
+  all: "/agents",
+  workstations: "/agents/workstations",
+  servers: "/agents/servers",
+  collectors: "/agents/collectors",
+  pending: "/agents/pending",
+  offline: "/agents/offline",
+  updates: "/agents/updates",
+  policies: "/agents/policies",
+  installation: "/agents/installation",
+  deployments: "/agents/deployments",
+  diagnostics: "/agents/diagnostics",
+  events: "/agents/events",
+  audit: "/agents/audit"
+};
 
 async function fetchJson<T>(
   apiUrl: string,
@@ -211,7 +228,12 @@ function AgentDatum({ label, value }: { label: string; value: string }) {
 }
 
 export function AgentsManagement({ apiUrl, tenantId, token }: Props) {
-  const [section, setSection] = useUrlState<AgentSection>("agent", agentSections, "all");
+  const [section, setSection] = usePathState<AgentSection>(
+    agentRoutes,
+    "all",
+    "agent",
+    agentSections
+  );
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [policies, setPolicies] = useState<AgentPolicy[]>([]);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
@@ -340,7 +362,7 @@ export function AgentsManagement({ apiUrl, tenantId, token }: Props) {
         {section === "policies" ? (
           <PoliciesView apiUrl={apiUrl} tenantId={tenantId} token={token} policies={policies} onCreated={load} />
         ) : null}
-        {section === "installation" ? (
+        {["installation", "deployments"].includes(section) ? (
           <InstallationView apiUrl={apiUrl} tenantId={tenantId} token={token} />
         ) : null}
         {section === "diagnostics" ? <DiagnosticsView agents={agents} /> : null}

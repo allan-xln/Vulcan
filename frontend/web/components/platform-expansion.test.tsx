@@ -89,10 +89,10 @@ describe("InfrastructureView", () => {
     expect(screen.getByText("Disponibilidade dos ativos")).toBeInTheDocument();
     expect(screen.getAllByText("Real").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Ativos e redes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ativos" }));
     expect(await screen.findByText("Servidor ERP")).toBeInTheDocument();
     expect(screen.getByText(/SRV-ERP-01/)).toBeInTheDocument();
-    expect(window.location.search).toContain("infra=inventory");
+    expect(window.location.pathname).toBe("/infrastructure/assets");
   });
 });
 

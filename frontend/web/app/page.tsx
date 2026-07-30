@@ -10,7 +10,6 @@ import {
   Activity,
   BarChart3,
   BellRing,
-  Brain,
   Building2,
   CalendarClock,
   CheckCircle2,
@@ -31,7 +30,6 @@ import {
   RadioTower,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   UserRound,
   X,
   Zap
@@ -55,7 +53,8 @@ import {
 import { getSupabaseClient, isMockAuthEnabled, isSupabaseAuthAvailable } from "@/lib/supabase";
 import { InfrastructureView, UnifiedTimelineView } from "@/components/platform-expansion";
 import { AgentsManagement } from "@/components/agents-management";
-import { useUrlState } from "@/lib/url-state";
+import { WallboardSettings } from "@/components/wallboard-settings";
+import { usePathState } from "@/lib/url-state";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const DEMO_TENANT_ID = process.env.NEXT_PUBLIC_DEMO_TENANT_ID ?? "00000000-0000-0000-0000-000000000301";
@@ -67,6 +66,9 @@ const LOCAL_TEST_AUTH_READY =
   process.env.NEXT_PUBLIC_LOCAL_TEST_AUTH !== "false" && process.env.NEXT_PUBLIC_ENVIRONMENT !== "production";
 const LOCAL_AUTH_READY = MOCK_AUTH || LOCAL_TEST_AUTH_READY;
 const BACKEND_AUTH_READY = process.env.NEXT_PUBLIC_BACKEND_AUTH !== "false";
+const ALLOW_DEMO_FALLBACK =
+  process.env.NEXT_PUBLIC_ENVIRONMENT !== "production" &&
+  process.env.NEXT_PUBLIC_ALLOW_DEMO_FALLBACK === "true";
 const SMART_NOTIFICATION_REFRESH_MS = 60_000;
 
 type PwaInstallPromptEvent = Event & {
@@ -128,6 +130,23 @@ const viewKeys: readonly ViewKey[] = [
   "notifications",
   "settings"
 ];
+const viewRoutes: Readonly<Record<ViewKey, string>> = {
+  dashboard: "/",
+  hierarchy: "/workforce/hierarchy",
+  metrics: "/workforce/metrics",
+  insights: "/intelligence",
+  agents: "/agents",
+  infrastructure: "/infrastructure",
+  timeline: "/timeline",
+  notifications: "/notifications",
+  settings: "/settings"
+};
+type SettingsRoute = "general" | "wallboards";
+const settingsRouteKeys: readonly SettingsRoute[] = ["general", "wallboards"];
+const settingsRoutes: Readonly<Record<SettingsRoute, string>> = {
+  general: "/settings",
+  wallboards: "/settings/wallboards"
+};
 const LOCAL_AUTH_SESSION_KEY = "vulcan.auth.local-session.v1";
 
 type LocalSessionUser = {
@@ -1150,14 +1169,6 @@ const departments = [
 
 const weekdayOrder = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 const weekdayMap: Record<number, string> = { 0: "Dom", 1: "Seg", 2: "Ter", 3: "Qua", 4: "Qui", 5: "Sex", 6: "Sáb" };
-const traceRows = Array.from({ length: 7 }, (_, index) => ({ top: 10 + index * 12, delay: index * 0.45, width: 14 + (index % 3) * 6 }));
-const verticalScans = Array.from({ length: 5 }, (_, index) => ({ left: 12 + index * 18, delay: index * 0.55 }));
-const signalNodes = Array.from({ length: 12 }, (_, index) => ({
-  left: 4 + ((index * 17) % 92),
-  top: 6 + ((index * 29) % 86),
-  delay: index * 0.13,
-  scale: 0.72 + (index % 5) * 0.08
-}));
 
 function emptyFlowData() {
   return weekdayOrder.map((name) => ({ name, events: 0, bottlenecks: 0, automation: 0 }));
@@ -1476,7 +1487,7 @@ const commands: { key: ViewKey; label: string; icon: typeof Gauge }[] = [
   { key: "dashboard", label: "Comando", icon: Gauge },
   { key: "hierarchy", label: "Hierarquia", icon: Network },
   { key: "metrics", label: "Métricas", icon: Activity },
-  { key: "insights", label: "Insights", icon: Brain },
+  { key: "insights", label: "Insights", icon: Activity },
   { key: "agents", label: "Agentes", icon: RadioTower },
   { key: "infrastructure", label: "Infrastructure", icon: DatabaseZap },
   { key: "timeline", label: "Timeline", icon: CalendarClock },
@@ -1490,7 +1501,7 @@ const commandSummary: Record<ViewKey, string> = {
   metrics: "Concentração de uso, setores, tendências e carga de contexto.",
   insights: "Recomendações de IA híbrida e oportunidades de automação.",
   agents: "Estações, servidores, coletores, políticas e instalação segura.",
-  infrastructure: "Sites, redes, ativos, descoberta segura e integrações.",
+  infrastructure: "Filiais, redes, ativos, descoberta segura e integrações.",
   timeline: "Pessoas, dispositivos e infraestrutura em uma sequência unificada.",
   notifications: "Sistema, Windows, WhatsApp, e-mail e agendamentos.",
   settings: "Empresa, Supabase, IA, segurança, WhatsApp, e-mail e integrações."
@@ -2178,19 +2189,42 @@ export default function HomePage() {
   const [authMode, setAuthMode] = useState<"supabase" | "local" | null>(null);
   const [identity, setIdentity] = useState("operador Vulcan");
   const [currentRole, setCurrentRole] = useState("guest");
-  const [view, setView] = useUrlState<ViewKey>("view", viewKeys, "dashboard");
+  const [view, setView] = usePathState<ViewKey>(
+    viewRoutes,
+    "dashboard",
+    "view",
+    viewKeys
+  );
+  const [settingsRoute] = usePathState<SettingsRoute>(
+    settingsRoutes,
+    "general",
+    "settings",
+    settingsRouteKeys
+  );
   const [metricsIntent, setMetricsIntent] = useState<MetricsIntent | null>(null);
   const [loginError, setLoginError] = useState("");
-  const [metrics, setMetrics] = useState<Metric[]>(fallbackMetrics);
-  const [insights, setInsights] = useState<Insight[]>(fallbackInsights);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(fallbackNotifications);
-  const [notificationSummary, setNotificationSummary] = useState<NotificationSummary>(fallbackNotificationSummary);
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationSummary, setNotificationSummary] = useState<NotificationSummary>({
+    ...fallbackNotificationSummary,
+    total: 0,
+    pending: 0,
+    sent: 0,
+    failed: 0,
+    unread: 0,
+    critical: 0,
+    agentReady: false,
+    byChannel: {},
+    byStatus: {},
+    byPriority: {}
+  });
   const [notificationTypes, setNotificationTypes] = useState<NotificationTypeDefinition[]>(fallbackNotificationTypes);
   const [notificationTemplates, setNotificationTemplates] = useState<NotificationTemplate[]>(fallbackNotificationTemplates);
-  const [devices, setDevices] = useState<Device[]>(fallbackDevices);
+  const [devices, setDevices] = useState<Device[]>([]);
   const [operationalMetrics, setOperationalMetrics] = useState<OperationalMetric[]>([]);
   const [operationalIntelligence, setOperationalIntelligence] = useState<OperationalIntelligence>(emptyOperationalIntelligence);
-  const [hierarchy, setHierarchy] = useState<HierarchyNode[]>(fallbackHierarchy);
+  const [hierarchy, setHierarchy] = useState<HierarchyNode[]>([]);
   const [departments, setDepartments] = useState<DepartmentOption[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -2363,11 +2397,15 @@ export default function HomePage() {
     if (!token) {
       return;
     }
-    const metricFallback = liveTestMode ? liveTestMetrics : fallbackMetrics;
-    const insightFallback = liveTestMode ? [] : fallbackInsights;
-    const notificationFallback = liveTestMode ? [] : fallbackNotifications;
-    const deviceFallback = liveTestMode ? [] : fallbackDevices;
-    const hierarchyFallback = liveTestMode ? [] : fallbackHierarchy;
+    const metricFallback = liveTestMode
+      ? liveTestMetrics
+      : ALLOW_DEMO_FALLBACK
+        ? fallbackMetrics
+        : [];
+    const insightFallback = ALLOW_DEMO_FALLBACK ? fallbackInsights : [];
+    const notificationFallback = ALLOW_DEMO_FALLBACK ? fallbackNotifications : [];
+    const deviceFallback = ALLOW_DEMO_FALLBACK ? fallbackDevices : [];
+    const hierarchyFallback = ALLOW_DEMO_FALLBACK ? fallbackHierarchy : [];
 
     if (liveTestMode) {
       setMetrics(liveTestMetrics);
@@ -2504,7 +2542,7 @@ export default function HomePage() {
     }
     const interval = window.setInterval(() => {
       void Promise.all([
-        fetchProtected<NotificationItem[]>("/notifications", token, liveTestMode ? [] : fallbackNotifications),
+        fetchProtected<NotificationItem[]>("/notifications", token, ALLOW_DEMO_FALLBACK ? fallbackNotifications : []),
         fetchProtected<NotificationSummary>("/notifications/summary", token, fallbackNotificationSummary)
       ]).then(([nextNotifications, nextSummary]) => {
         setNotifications(nextNotifications);
@@ -2769,7 +2807,7 @@ export default function HomePage() {
       if (!response.ok) {
         return;
       }
-      const refreshed = await fetchProtected<Device[]>("/devices", token, liveTestMode ? [] : fallbackDevices);
+      const refreshed = await fetchProtected<Device[]>("/devices", token, ALLOW_DEMO_FALLBACK ? fallbackDevices : []);
       setDevices(refreshed);
     } catch {
       // A tela continua funcional mesmo se o backend local estiver fora do ar.
@@ -2790,8 +2828,8 @@ export default function HomePage() {
       return;
     }
     const [nextHierarchy, nextDevices, nextDepartments, nextRoles, nextTeams, nextPendingDevices] = await Promise.all([
-      fetchProtected<HierarchyNode[]>("/hierarchy", token, liveTestMode ? [] : fallbackHierarchy),
-      fetchProtected<Device[]>("/devices", token, liveTestMode ? [] : fallbackDevices),
+      fetchProtected<HierarchyNode[]>("/hierarchy", token, ALLOW_DEMO_FALLBACK ? fallbackHierarchy : []),
+      fetchProtected<Device[]>("/devices", token, ALLOW_DEMO_FALLBACK ? fallbackDevices : []),
       fetchProtected<DepartmentOption[]>("/departments", token, []),
       fetchProtected<RoleOption[]>("/roles", token, []),
       fetchProtected<Team[]>("/teams", token, []),
@@ -2976,7 +3014,6 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#070707] text-zinc-100">
-      <AnimatedAtmosphere />
       <AnimatePresence mode="wait">
         {authLoading ? (
           <AuthLoading key="auth-loading" />
@@ -2992,6 +3029,7 @@ export default function HomePage() {
           <DashboardShell
             key="dashboard"
             activeView={view}
+            settingsRoute={settingsRoute}
             setView={setView}
             onLogout={handleLogout}
             identity={identity}
@@ -3023,7 +3061,7 @@ export default function HomePage() {
             onlineAgents={onlineAgents}
             liveStatusLabel={liveStatusLabel}
             desktopNotifications={desktopNotifications}
-            allowDemoFallback={!liveTestMode}
+            allowDemoFallback={ALLOW_DEMO_FALLBACK}
             token={token}
             metricsIntent={metricsIntent}
             onOpenMetrics={openMetricsWithFilters}
@@ -3065,100 +3103,14 @@ function AuthLoading() {
   );
 }
 
-function AnimatedAtmosphere() {
-  return (
-    <div className="pointer-events-none fixed inset-0 overflow-hidden">
-      <motion.div
-        className="absolute inset-0 opacity-35"
-        style={{
-          background:
-            "repeating-linear-gradient(115deg, rgba(249,115,22,0.025) 0px, rgba(249,115,22,0.025) 1px, transparent 1px, transparent 32px)"
-        }}
-        animate={{ x: [-40, 40, -40], y: [-18, 18, -18] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute inset-x-0 top-0 h-56 bg-[linear-gradient(110deg,transparent,rgba(249,115,22,0.055),rgba(250,204,21,0.025),transparent)] blur-lg"
-        animate={{ x: ["-35%", "35%", "-35%"], opacity: [0.12, 0.28, 0.12] }}
-        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute bottom-0 left-0 h-72 w-full bg-[linear-gradient(0deg,rgba(249,115,22,0.045),transparent)]"
-        animate={{ opacity: [0.12, 0.24, 0.12] }}
-        transition={{ duration: 5.5, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:44px_44px] opacity-22" />
-      <motion.div
-        className="absolute inset-0 bg-[linear-gradient(90deg,transparent,rgba(249,115,22,0.035),transparent)]"
-        animate={{ x: ["-115%", "115%"], opacity: [0, 0.32, 0] }}
-        transition={{ duration: 6.8, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-400 to-transparent"
-        animate={{ opacity: [0.14, 0.55, 0.14] }}
-        transition={{ duration: 2.8, repeat: Infinity }}
-      />
-      <motion.div
-        className="absolute inset-x-0 top-1/2 h-px bg-orange-300/16"
-        animate={{ y: [-260, 260, -260], opacity: [0, 0.42, 0] }}
-        transition={{ duration: 6.2, repeat: Infinity, ease: "easeInOut" }}
-      />
-      {verticalScans.map((scan, index) => (
-        <motion.div
-          key={`vscan-${index}`}
-          className="absolute top-0 h-full w-px bg-gradient-to-b from-transparent via-orange-300/16 to-transparent"
-          style={{ left: `${scan.left}%` }}
-          animate={{ opacity: [0.02, 0.28, 0.02], scaleY: [0.7, 1, 0.7] }}
-          transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut", delay: scan.delay }}
-        />
-      ))}
-      {traceRows.map((row, index) => (
-        <motion.div
-          key={`trace-${index}`}
-          className="absolute h-px bg-gradient-to-r from-transparent via-orange-300/28 to-transparent"
-          style={{ top: `${row.top}%`, width: `${row.width}%` }}
-          animate={{ x: ["-35vw", "115vw"], opacity: [0, 0.38, 0] }}
-          transition={{ duration: 5.4 + index * 0.16, repeat: Infinity, ease: "easeInOut", delay: row.delay }}
-        />
-      ))}
-      {signalNodes.map((node, index) => (
-        <motion.div
-          key={`node-${index}`}
-          className="absolute h-1.5 w-1.5 border border-orange-300/30 bg-black/45 shadow-[0_0_8px_rgba(249,115,22,0.25)]"
-          style={{ left: `${node.left}%`, top: `${node.top}%` }}
-          animate={{ opacity: [0.08, 0.45, 0.08], scale: [node.scale, node.scale + 0.24, node.scale], rotate: [0, 180, 360] }}
-          transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut", delay: node.delay }}
-        />
-      ))}
-      <motion.div
-        className="absolute left-[-10%] top-[18%] h-56 w-[120%] border-y border-orange-400/10 bg-[linear-gradient(90deg,transparent,rgba(249,115,22,0.05),transparent)]"
-        animate={{ rotate: [-2, 2, -2], y: [-18, 18, -18], opacity: [0.18, 0.55, 0.18] }}
-        transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
-      />
-    </div>
-  );
-}
-
 function BrandMark({ size, className = "" }: { size: number; className?: string }) {
   return (
-    <motion.div
+    <div
       className={`relative grid shrink-0 place-items-center ${className}`}
       style={{ width: size, height: size }}
-      animate={{ filter: ["drop-shadow(0 0 6px rgba(249,115,22,0.18))", "drop-shadow(0 0 14px rgba(249,115,22,0.30))", "drop-shadow(0 0 6px rgba(249,115,22,0.18))"] }}
-      transition={{ duration: 2.7, repeat: Infinity, ease: "easeInOut" }}
     >
-      <motion.div
-        className="absolute inset-0 border border-orange-300/35"
-        animate={{ rotate: [0, 90, 180, 270, 360], scale: [1, 1.08, 1] }}
-        transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-      />
-      <motion.div
-        className="absolute inset-1 border border-orange-500/25"
-        animate={{ rotate: [360, 270, 180, 90, 0], opacity: [0.25, 0.75, 0.25] }}
-        transition={{ duration: 5, repeat: Infinity, ease: "linear" }}
-      />
       <Image src="/vulcan-symbol.svg" alt="Vulcan" width={size} height={size} className="relative z-10 h-full w-full" />
-    </motion.div>
+    </div>
   );
 }
 
@@ -3184,7 +3136,7 @@ function LoginExperience({
       exit={{ opacity: 0 }}
     >
       <div className="grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
-        <motion.div initial={{ x: -70, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.8 }}>
+        <div>
           <div className="mb-8 flex items-center gap-4">
             <BrandMark size={76} />
             <div>
@@ -3195,39 +3147,10 @@ function LoginExperience({
           <p className="max-w-2xl text-xl leading-9 text-zinc-300">
             Transformando operações em inteligência com dados reais, IA híbrida e recomendações executivas.
           </p>
-          <div className="mt-10 grid max-w-2xl gap-4 sm:grid-cols-3">
-            {[
-              ["42,8 mil", "eventos processados"],
-              ["17", "gargalos encontrados"],
-              ["219h", "potencial de automação"]
-            ].map(([value, label], index) => (
-              <motion.div
-                key={label}
-                className="group relative overflow-hidden border border-orange-400/20 bg-zinc-950/70 p-5 shadow-[0_0_24px_rgba(249,115,22,0.08)] backdrop-blur"
-                initial={{ y: 35, opacity: 0 }}
-                animate={{
-                  y: [0, -5, 0],
-                  opacity: 1,
-                  boxShadow: [
-                    "0 0 18px rgba(249,115,22,0.08)",
-                    "0 0 32px rgba(249,115,22,0.14)",
-                    "0 0 18px rgba(249,115,22,0.08)"
-                  ]
-                }}
-                whileHover={{ y: -8, scale: 1.035, borderColor: "rgba(251,146,60,0.62)" }}
-                transition={{ delay: 0.2 + index * 0.12, duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
-              >
-                <motion.span
-                  className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
-                  animate={{ x: ["-100%", "100%"] }}
-                  transition={{ duration: 2.8 + index * 0.35, repeat: Infinity, ease: "easeInOut" }}
-                />
-                <p className="text-3xl font-semibold text-orange-300">{value}</p>
-                <p className="mt-2 text-xs uppercase tracking-[0.25em] text-zinc-500">{label}</p>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
+          <p className="mt-8 border-l-2 border-orange-500 pl-4 text-sm leading-6 text-zinc-500">
+            Gestão do trabalho, produtividade e infraestrutura no mesmo contexto operacional.
+          </p>
+        </div>
 
         <motion.form
           onSubmit={onLogin}
@@ -3312,6 +3235,7 @@ function LoginExperience({
 
 function DashboardShell({
   activeView,
+  settingsRoute,
   setView,
   onLogout,
   identity,
@@ -3358,6 +3282,7 @@ function DashboardShell({
   onDepartmentCreate
 }: {
   activeView: ViewKey;
+  settingsRoute: SettingsRoute;
   setView: (view: ViewKey) => void;
   onLogout: () => void;
   identity: string;
@@ -3407,16 +3332,6 @@ function DashboardShell({
 
   return (
     <motion.section className="relative z-10 min-h-screen px-4 py-4 md:px-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <motion.div
-        className="pointer-events-none fixed left-5 top-6 hidden h-[calc(100vh-3rem)] w-px bg-gradient-to-b from-transparent via-orange-400/24 to-transparent xl:block"
-        animate={{ opacity: [0.12, 0.55, 0.12], scaleY: [0.86, 1, 0.86] }}
-        transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="pointer-events-none fixed right-5 top-6 hidden h-[calc(100vh-3rem)] w-px bg-gradient-to-b from-transparent via-orange-400/24 to-transparent xl:block"
-        animate={{ opacity: [0.55, 0.12, 0.55], scaleY: [1, 0.86, 1] }}
-        transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
-      />
       <div className="mx-auto min-h-[calc(100vh-2rem)] w-full max-w-[1920px]">
         <Header
           activeView={activeView}
@@ -3542,7 +3457,15 @@ function DashboardShell({
               onTestDesktopNotification={onTestDesktopNotification}
             />
           )}
-          {activeView === "settings" && (
+          {activeView === "settings" && settingsRoute === "wallboards" && (
+            <WallboardSettings
+              key="wallboard-settings"
+              apiUrl={API_URL}
+              tenantId={DEMO_TENANT_ID}
+              token={token}
+            />
+          )}
+          {activeView === "settings" && settingsRoute === "general" && (
             <SettingsView
               key="settings"
               settingsCenter={settingsCenter}
@@ -3608,20 +3531,10 @@ function Header({
 
   return (
     <motion.header
-      className="relative mb-4 grid gap-4 overflow-hidden border border-zinc-800 bg-zinc-950/65 p-4 backdrop-blur-xl lg:grid-cols-[1fr_auto]"
+      className="relative mb-4 grid gap-4 overflow-hidden border border-zinc-800 bg-zinc-950 p-4 lg:grid-cols-[1fr_auto]"
       initial={{ y: -18, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
     >
-      <motion.div
-        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
-        animate={{ x: ["-100%", "100%"], opacity: [0, 1, 0] }}
-        transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute bottom-0 right-0 h-24 w-2/3 bg-[linear-gradient(120deg,transparent,rgba(249,115,22,0.08),transparent)]"
-        animate={{ x: ["35%", "-15%", "35%"], opacity: [0.25, 0.75, 0.25] }}
-        transition={{ duration: 5.8, repeat: Infinity, ease: "easeInOut" }}
-      />
       <div className="flex min-w-0 gap-4">
         <div className="hidden h-16 w-16 shrink-0 place-items-center border border-orange-400/25 bg-black/60 md:grid">
           <BrandMark size={42} />
@@ -3647,7 +3560,7 @@ function Header({
           {currentCommand.label}
         </motion.button>
         <StatusPill icon={ShieldCheck} label="empresa isolada" />
-        <StatusPill icon={Brain} label={`${highImpact} alto impacto`} />
+        <StatusPill icon={Activity} label={`${highImpact} alto impacto`} />
         <StatusPill icon={DatabaseZap} label={supabaseLabel} />
         <StatusPill icon={UserRound} label={`${authMode}: ${identity}`} />
         <motion.button
@@ -5216,7 +5129,7 @@ function DashboardView({
             ))}
           </div>
 
-          <Panel title="Ação recomendada agora" icon={Brain}>
+          <Panel title="Ação recomendada agora" icon={Activity}>
             <div className="grid gap-4 xl:grid-cols-[1fr_auto]">
               <div>
                 <p className="text-xs uppercase tracking-[0.22em] text-orange-300">Prioridade</p>
@@ -5779,7 +5692,7 @@ function MetricsView({
           tone={analytics.contextSwitchesPerHour > 18 ? "warn" : "ok"}
         />
         <MetricSignalCard
-          icon={Brain}
+          icon={Activity}
           label="Ação analítica"
           value="Prioridade atual"
           detail={actionNow}
@@ -5874,7 +5787,7 @@ function MetricsView({
       </div>
 
       <div className="mt-5">
-        <Panel title="Resumo analítico" icon={Brain}>
+        <Panel title="Resumo analítico" icon={Activity}>
           <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
             <div className="border border-orange-400/20 bg-black/45 p-5">
               <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Recorte atual</p>
@@ -5890,7 +5803,7 @@ function MetricsView({
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.06 }}
                 >
-                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-orange-300" />
+                  <Activity className="mt-0.5 h-4 w-4 shrink-0 text-orange-300" />
                   <span>{recommendation}</span>
                 </motion.div>
               ))}
@@ -6489,7 +6402,7 @@ function InsightsView({
   if (compact) {
     return (
       <ViewFrame compact>
-        <Panel title="Fluxo de insights de IA" icon={Sparkles}>
+        <Panel title="Fluxo de inteligência operacional" icon={Activity}>
           <div className="grid gap-4">
             {items.length ? (
               items.slice(0, 4).map((insight, index) => (
@@ -6546,7 +6459,7 @@ function InsightsView({
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <MetricSignalCard icon={Flame} label="Críticos" value={`${criticalCount}`} detail="Prioridades com risco operacional ou financeiro." tone={criticalCount ? "critical" : "ok"} />
             <MetricSignalCard icon={Zap} label="Automações" value={`${automationCount}`} detail="Processos com indício de repetição automatizável." tone={automationCount ? "warn" : "ok"} />
-            <MetricSignalCard icon={Brain} label="Economia potencial" value={formatMoneyBRL(totalSavings)} detail="Estimativa a partir dos insights visíveis." tone={totalSavings > 0 ? "ok" : "warn"} />
+            <MetricSignalCard icon={Activity} label="Economia potencial" value={formatMoneyBRL(totalSavings)} detail="Estimativa a partir dos insights visíveis." tone={totalSavings > 0 ? "ok" : "warn"} />
           </div>
         </Tremor.Card>
 
@@ -6603,7 +6516,7 @@ function InsightsView({
           )}
         </div>
 
-        <Panel title="Detalhe, IA e ação" icon={Brain}>
+        <Panel title="Detalhe, inteligência e ação" icon={Activity}>
           {selectedInsight ? (
             <div className="grid gap-5">
               <div className="border border-orange-400/20 bg-black/45 p-5">
@@ -6850,7 +6763,7 @@ function insightIcon(type: string): typeof Gauge {
   if (normalized.includes("econom")) return Flame;
   if (normalized.includes("equipe") || normalized.includes("supervisor")) return Network;
   if (normalized.includes("foco") || normalized.includes("produt")) return Gauge;
-  return Brain;
+  return Activity;
 }
 
 function NotificationsView({
@@ -7199,7 +7112,7 @@ function NotificationsView({
           </div>
         </Panel>
 
-        <Panel title="Regra inteligente" icon={Brain}>
+        <Panel title="Regra inteligente" icon={Activity}>
           <div className="grid gap-3">
             <ConnectionSummary label="Dispara toast" value="alto, crítico ou ação necessária" tone="ok" />
             <ConnectionSummary label="Anti-ruído" value="snapshot inicial silenciado" tone="ok" />
@@ -8154,7 +8067,7 @@ function settingsIcon(sectionId: string): typeof Gauge {
     agents: RadioTower,
     collection: ShieldCheck,
     metrics: Gauge,
-    ai: Brain,
+    ai: Activity,
     notifications: BellRing,
     whatsapp: MessageCircle,
     email: Mail,

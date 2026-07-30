@@ -3,7 +3,24 @@
 @tailwind utilities;
 
 :root {
+  --vulcan-bg: #080808;
+  --vulcan-surface: #111111;
+  --vulcan-surface-raised: #171717;
+  --vulcan-border: #292929;
+  --vulcan-text: #f4f4f5;
+  --vulcan-text-secondary: #a1a1aa;
+  --vulcan-text-muted: #71717a;
+  --vulcan-accent: #f97316;
+  --vulcan-success: #34d399;
+  --vulcan-warning: #fbbf24;
+  --vulcan-critical: #f87171;
+  --vulcan-information: #60a5fa;
   color-scheme: dark;
+}
+
+.vulcan-tv {
+  background: var(--vulcan-bg);
+  font-variant-numeric: tabular-nums;
 }
 
 body {

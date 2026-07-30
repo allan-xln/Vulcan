@@ -90,7 +90,7 @@ describe("AgentsManagement", () => {
     );
     await screen.findByText("ERS-DEV-01");
     fireEvent.click(screen.getByRole("button", { name: "Instalação" }));
-    expect(window.location.search).toContain("agent=installation");
+    expect(window.location.pathname).toBe("/agents/installation");
     fireEvent.click(screen.getByRole("button", { name: /Gerar token/ }));
 
     await waitFor(() => {

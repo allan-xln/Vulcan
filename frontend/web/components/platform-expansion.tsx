@@ -20,12 +20,11 @@ import {
   Search,
   Server,
   ShieldCheck,
-  Sparkles,
   Unplug,
   X
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useUrlState } from "@/lib/url-state";
+import { usePathState } from "@/lib/url-state";
 
 type DataOrigin = "real" | "simulated" | "imported";
 
@@ -57,10 +56,17 @@ type InfrastructureOverview = {
 type Site = {
   id: string;
   code: string;
+  slug: string;
   name: string;
   description: string | null;
+  city: string | null;
+  state: string | null;
   timezone: string;
   status: string;
+  displayOrder: number;
+  rotationEnabled: boolean;
+  rotationSeconds: number;
+  visible: boolean;
   tags: string[];
   dataOrigin: DataOrigin;
 };
@@ -204,15 +210,56 @@ type TimelinePage = {
   dataOrigin: "real" | "simulated";
 };
 
-type InfrastructureSection = "overview" | "inventory" | "discovery" | "incidents" | "integrations" | "platform";
+type InfrastructureSection =
+  | "overview"
+  | "inventory"
+  | "branches"
+  | "networks"
+  | "servers"
+  | "virtualization"
+  | "firewalls"
+  | "links"
+  | "switches"
+  | "access-points"
+  | "printers"
+  | "discovery"
+  | "incidents"
+  | "integrations"
+  | "platform";
 const infrastructureSections: readonly InfrastructureSection[] = [
   "overview",
   "inventory",
+  "branches",
+  "networks",
+  "servers",
+  "virtualization",
+  "firewalls",
+  "links",
+  "switches",
+  "access-points",
+  "printers",
   "discovery",
   "incidents",
   "integrations",
   "platform"
 ];
+const infrastructureRoutes: Readonly<Record<InfrastructureSection, string>> = {
+  overview: "/infrastructure",
+  inventory: "/infrastructure/assets",
+  branches: "/infrastructure/branches",
+  networks: "/infrastructure/networks",
+  servers: "/infrastructure/servers",
+  virtualization: "/infrastructure/virtualization",
+  firewalls: "/infrastructure/firewalls",
+  links: "/infrastructure/links",
+  switches: "/infrastructure/switches",
+  "access-points": "/infrastructure/access-points",
+  printers: "/infrastructure/printers",
+  discovery: "/infrastructure/discovery",
+  incidents: "/infrastructure/incidents",
+  integrations: "/infrastructure/integrations",
+  platform: "/infrastructure/platform-health"
+};
 type CreateMode = "site" | "network" | "asset" | "discovery" | null;
 
 type PlatformProps = {
@@ -228,14 +275,22 @@ const assetTypeLabels: Record<string, string> = {
   access_point: "Ponto de acesso",
   firewall: "Firewall",
   printer: "Impressora",
+  virtual_machine: "Máquina virtual",
+  virtualization_host: "Host de virtualização",
+  proxmox_cluster: "Cluster Proxmox",
+  backup_server: "Servidor de backup",
+  backup_job: "Rotina de backup",
+  wan_link: "Link WAN",
+  vpn_tunnel: "Túnel VPN",
+  gateway: "Gateway",
+  nat_service: "Publicação NAT",
   ups: "Nobreak",
   controller: "Controlador",
-  gateway: "Gateway",
   service: "Serviço",
   application: "Aplicação",
   storage: "Storage",
-  virtual_machine: "Máquina virtual",
   container: "Container",
+  network_service: "Serviço de rede",
   other: "Outro"
 };
 
@@ -392,6 +447,8 @@ function CreatePanel({
         code: String(form.get("code") ?? ""),
         name: String(form.get("name") ?? ""),
         description: String(form.get("description") ?? "") || null,
+        city: String(form.get("city") ?? "") || null,
+        state: String(form.get("state") ?? "") || null,
         timezone: "America/Sao_Paulo",
         address: {},
         tags: []
@@ -448,7 +505,7 @@ function CreatePanel({
   }
 
   const title = {
-    site: "Cadastrar site",
+    site: "Cadastrar filial",
     network: "Cadastrar rede",
     asset: "Cadastrar ativo",
     discovery: "Criar política segura"
@@ -485,6 +542,12 @@ function CreatePanel({
                   <input className={inputClass} name="description" placeholder="Função operacional da unidade" />
                 </Field>
               </div>
+              <Field label="Cidade">
+                <input className={inputClass} name="city" placeholder="São José dos Pinhais" />
+              </Field>
+              <Field label="Estado">
+                <input className={inputClass} name="state" placeholder="PR" maxLength={2} />
+              </Field>
             </>
           ) : null}
 
@@ -598,10 +661,11 @@ function CreatePanel({
 }
 
 export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
-  const [section, setSection] = useUrlState<InfrastructureSection>(
+  const [section, setSection] = usePathState<InfrastructureSection>(
+    infrastructureRoutes,
+    "overview",
     "infra",
-    infrastructureSections,
-    "overview"
+    infrastructureSections
   );
   const [overview, setOverview] = useState<InfrastructureOverview | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
@@ -620,6 +684,8 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [syncingAdapter, setSyncingAdapter] = useState<string | null>(null);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
   const load = useCallback(async (quiet = false) => {
     if (quiet) setRefreshing(true);
@@ -673,14 +739,34 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
   }, [load]);
 
   const filteredAssets = useMemo(() => {
+    const sectionTypes: Partial<Record<InfrastructureSection, string[]>> = {
+      servers: ["server"],
+      virtualization: [
+        "proxmox_cluster",
+        "virtualization_host",
+        "virtual_machine",
+        "container",
+        "backup_server",
+        "backup_job"
+      ],
+      firewalls: ["firewall", "gateway", "nat_service"],
+      links: ["wan_link", "vpn_tunnel", "network_service"],
+      switches: ["switch"],
+      "access-points": ["access_point", "controller"],
+      printers: ["printer"]
+    };
+    const allowedTypes = sectionTypes[section];
+    const scopedAssets = allowedTypes
+      ? assets.filter((asset) => allowedTypes.includes(asset.assetType))
+      : assets;
     const normalized = query.trim().toLocaleLowerCase("pt-BR");
-    if (!normalized) return assets;
-    return assets.filter((asset) =>
+    if (!normalized) return scopedAssets;
+    return scopedAssets.filter((asset) =>
       [asset.name, asset.hostname, asset.ipAddress, asset.siteName, asset.manufacturer, asset.assetType]
         .filter(Boolean)
         .some((value) => String(value).toLocaleLowerCase("pt-BR").includes(normalized))
     );
-  }, [assets, query]);
+  }, [assets, query, section]);
 
   async function create(payload: Record<string, unknown>) {
     if (!createMode) return;
@@ -741,9 +827,60 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
     }
   }
 
+  async function updateSiteVisibility(site: Site) {
+    setError(null);
+    try {
+      await fetchJson(apiUrl, `/infrastructure/sites/${site.id}`, token, tenantId, {
+        method: "PATCH",
+        body: JSON.stringify({ tenantId, visible: !site.visible })
+      });
+      await load(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível alterar a visibilidade da filial.");
+    }
+  }
+
+  async function syncIntegration(adapter: IntegrationAdapter) {
+    setSyncingAdapter(adapter.adapterType);
+    setSyncFeedback(null);
+    setError(null);
+    try {
+      const result = await fetchJson<{
+        status: string;
+        assetsSeen: number;
+        assetsUpdated: number;
+        relationshipsUpdated: number;
+        warnings: string[];
+      }>(
+        apiUrl,
+        `/infrastructure/integrations/${adapter.adapterType}/sync`,
+        token,
+        tenantId,
+        { method: "POST" }
+      );
+      setSyncFeedback(
+        `${adapter.name}: ${result.assetsSeen} ativos observados, ${result.assetsUpdated} atualizados e ${result.relationshipsUpdated} relações reconciliadas.${result.warnings.length ? ` Atenção: ${result.warnings.join(" ")}` : ""}`
+      );
+      await load(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : `Não foi possível sincronizar ${adapter.name}.`);
+    } finally {
+      setSyncingAdapter(null);
+    }
+  }
+
   const navigation: { key: InfrastructureSection; label: string; icon: typeof Gauge }[] = [
     { key: "overview", label: "Visão geral", icon: Gauge },
-    { key: "inventory", label: "Ativos e redes", icon: Boxes },
+    { key: "branches", label: "Filiais", icon: Building2 },
+    { key: "networks", label: "Redes", icon: Network },
+    { key: "inventory", label: "Ativos", icon: Boxes },
+    { key: "servers", label: "Servidores", icon: Server },
+    { key: "virtualization", label: "Virtualização", icon: Boxes },
+    { key: "firewalls", label: "Firewalls", icon: ShieldCheck },
+    { key: "links", label: "Links e VPN", icon: Globe2 },
+    { key: "switches", label: "Switches", icon: Network },
+    { key: "access-points", label: "Wi-Fi", icon: Globe2 },
+    { key: "printers", label: "Impressoras", icon: Database },
     { key: "discovery", label: "Descoberta", icon: Radar },
     { key: "incidents", label: "Incidentes", icon: AlertTriangle },
     { key: "integrations", label: "Integrações", icon: Unplug },
@@ -763,7 +900,7 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
               Infraestrutura explicada pelo impacto na operação
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
-              Sites, redes e ativos no mesmo contexto das pessoas e do trabalho. Descoberta permanece desativada até aprovação explícita.
+              Filiais, redes e ativos no mesmo contexto das pessoas e do trabalho. Descoberta permanece desativada até aprovação explícita.
             </p>
           </div>
           <button
@@ -809,7 +946,7 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
         <div className="space-y-5">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             {[
-              { label: "Sites", value: overview.sites, icon: Building2 },
+              { label: "Filiais", value: overview.sites, icon: Building2 },
               { label: "Ativos", value: overview.assets, icon: Server },
               { label: "Online", value: overview.onlineAssets, icon: CheckCircle2 },
               { label: "Degradados", value: overview.degradedAssets, icon: AlertTriangle },
@@ -864,7 +1001,7 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
           <div className="grid gap-5 lg:grid-cols-3">
             <article className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
               <p className="text-xs uppercase tracking-[0.16em] text-zinc-500">Organização</p>
-              <p className="mt-3 text-sm leading-6 text-zinc-300">{overview.sites} sites e {overview.networks} redes cadastradas.</p>
+              <p className="mt-3 text-sm leading-6 text-zinc-300">{overview.sites} filiais e {overview.networks} redes cadastradas.</p>
               <button onClick={() => setSection("inventory")} className="mt-5 flex items-center gap-2 text-sm text-orange-300">Gerenciar inventário <ChevronRight className="h-4 w-4" /></button>
             </article>
             <article className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
@@ -881,7 +1018,18 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
         </div>
       ) : null}
 
-      {!loading && section === "inventory" ? (
+      {!loading && [
+        "inventory",
+        "branches",
+        "networks",
+        "servers",
+        "virtualization",
+        "firewalls",
+        "links",
+        "switches",
+        "access-points",
+        "printers"
+      ].includes(section) ? (
         <div className="space-y-5">
           <div className="flex flex-col justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 sm:flex-row sm:items-center">
             <div className="relative min-w-0 flex-1 sm:max-w-md">
@@ -889,21 +1037,26 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
               <input value={query} onChange={(event) => setQuery(event.target.value)} className={`${inputClass} pl-10`} placeholder="Buscar ativo, hostname, IP ou site" />
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => setCreateMode("site")} className="flex h-10 items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs text-zinc-200"><Plus className="h-4 w-4" /> Site</button>
+              <button onClick={() => setCreateMode("site")} className="flex h-10 items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs text-zinc-200"><Plus className="h-4 w-4" /> Filial</button>
               <button onClick={() => setCreateMode("network")} disabled={!sites.length} className="flex h-10 items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs text-zinc-200 disabled:opacity-40"><Plus className="h-4 w-4" /> Rede</button>
               <button onClick={() => setCreateMode("asset")} className="flex h-10 items-center gap-2 rounded-xl bg-orange-500 px-3 text-xs font-semibold text-black"><Plus className="h-4 w-4" /> Ativo</button>
             </div>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          {["inventory", "branches", "networks"].includes(section) ? <div className="grid gap-5 xl:grid-cols-2">
             <article className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-              <div className="flex items-center justify-between"><h2 className="font-semibold text-white">Sites</h2><span className="text-xs text-zinc-500">{sites.length}</span></div>
+              <div className="flex items-center justify-between"><h2 className="font-semibold text-white">Filiais</h2><span className="text-xs text-zinc-500">{sites.length}</span></div>
               {sites.length ? <div className="mt-4 space-y-2">{sites.map((site) => (
                 <div key={site.id} className="flex items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-black/30 p-3">
-                  <div className="min-w-0"><p className="truncate text-sm font-medium text-white">{site.name}</p><p className="mt-1 text-xs text-zinc-500">{site.code} · {site.timezone}</p></div>
-                  <OriginBadge origin={site.dataOrigin} />
+                  <div className="min-w-0"><p className="truncate text-sm font-medium text-white">{site.name}</p><p className="mt-1 text-xs text-zinc-500">{site.code} · {[site.city, site.state].filter(Boolean).join(" / ") || "localização não informada"} · TV {site.visible ? `${site.rotationSeconds}s` : "oculta"}</p></div>
+                  <div className="flex items-center gap-2">
+                    <OriginBadge origin={site.dataOrigin} />
+                    <button onClick={() => void updateSiteVisibility(site)} className="rounded-lg border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300">
+                      {site.visible ? "Ocultar da TV" : "Incluir na TV"}
+                    </button>
+                  </div>
                 </div>
-              ))}</div> : <p className="mt-4 text-sm text-zinc-500">Nenhum site cadastrado.</p>}
+              ))}</div> : <p className="mt-4 text-sm text-zinc-500">Nenhuma filial cadastrada.</p>}
             </article>
             <article className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
               <div className="flex items-center justify-between"><h2 className="font-semibold text-white">Redes</h2><span className="text-xs text-zinc-500">{networks.length}</span></div>
@@ -914,10 +1067,10 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
                 </div>
               ))}</div> : <p className="mt-4 text-sm text-zinc-500">Nenhuma rede cadastrada.</p>}
             </article>
-          </div>
+          </div> : null}
 
           <article className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70">
-            <div className="flex items-center justify-between border-b border-zinc-800 p-5"><h2 className="font-semibold text-white">Inventário de ativos</h2><span className="text-xs text-zinc-500">{filteredAssets.length} resultados</span></div>
+            <div className="flex items-center justify-between border-b border-zinc-800 p-5"><h2 className="font-semibold text-white">{navigation.find((item) => item.key === section)?.label ?? "Inventário"} — inventário real</h2><span className="text-xs text-zinc-500">{filteredAssets.length} resultados</span></div>
             {filteredAssets.length ? (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[800px] text-left text-sm">
@@ -968,7 +1121,7 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
               ))}
             </div>
           ) : (
-            <EmptyState icon={Radar} title="Nenhuma política de descoberta" description="Defina explicitamente o site, a rede permitida e o limite. A política nasce desativada e auditada." />
+            <EmptyState icon={Radar} title="Nenhuma política de descoberta" description="Defina explicitamente a filial, a rede permitida e o limite. A política nasce desativada e auditada." />
           )}
           <article className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70">
             <div className="border-b border-zinc-800 p-5"><h2 className="font-semibold text-white">Execuções recentes</h2></div>
@@ -981,16 +1134,27 @@ export function InfrastructureView({ apiUrl, tenantId, token }: PlatformProps) {
 
       {!loading && section === "integrations" ? (
         adapters.length ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {adapters.map((adapter) => (
+          <div className="space-y-4">
+            {syncFeedback ? <p className="border border-emerald-800 bg-emerald-950/20 p-4 text-sm text-emerald-200">{syncFeedback}</p> : null}
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{adapters.map((adapter) => (
               <article key={adapter.adapterType} className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
                 <div className="flex items-start justify-between gap-3"><div className="rounded-xl border border-orange-400/20 bg-orange-400/10 p-2"><Database className="h-5 w-5 text-orange-300" /></div><StatusPill status={adapter.implemented ? "implemented" : "planned"} /></div>
                 <h2 className="mt-5 font-semibold text-white">{adapter.name}</h2>
                 <p className="mt-2 min-h-12 text-sm leading-6 text-zinc-400">{adapter.description}</p>
                 <div className="mt-4 flex flex-wrap gap-1.5">{adapter.capabilities.map((capability) => <span key={capability} className="rounded-md bg-zinc-900 px-2 py-1 text-[10px] text-zinc-400">{capability}</span>)}</div>
                 <p className="mt-5 flex items-center gap-2 text-xs text-zinc-500"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" /> {adapter.readOnly ? "Contrato somente leitura" : "Requer revisão de permissão"}</p>
+                {["unifi", "proxmox"].includes(adapter.adapterType) ? (
+                  <button
+                    onClick={() => void syncIntegration(adapter)}
+                    disabled={syncingAdapter !== null}
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs text-zinc-200 disabled:opacity-40"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${syncingAdapter === adapter.adapterType ? "animate-spin" : ""}`} />
+                    {syncingAdapter === adapter.adapterType ? "Sincronizando" : "Sincronizar agora"}
+                  </button>
+                ) : null}
               </article>
-            ))}
+            ))}</div>
           </div>
         ) : <EmptyState icon={Unplug} title="Catálogo indisponível" description="A API não retornou adapters de integração." />
       ) : null}
@@ -1210,7 +1374,7 @@ export function UnifiedTimelineView({ apiUrl, tenantId, token }: PlatformProps) 
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">Trabalho, agentes e infraestrutura correlacionados pelo tempo, com origem, confiança e detalhes técnicos expansíveis.</p>
           </div>
           <button onClick={() => void simulate()} disabled={simulating} className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/8 px-4 text-sm text-amber-100 disabled:opacity-50">
-            {simulating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {simulating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
             Gerar cenário de desenvolvimento
           </button>
         </div>

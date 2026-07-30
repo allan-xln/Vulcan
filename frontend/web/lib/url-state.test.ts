@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { readUrlState, urlWithState } from "@/lib/url-state";
+import {
+  readPathState,
+  readUrlState,
+  urlWithPath,
+  urlWithState
+} from "@/lib/url-state";
 
 const views = ["dashboard", "infrastructure", "agents"] as const;
 
@@ -31,5 +36,31 @@ describe("URL state", () => {
         "dashboard"
       )
     ).toBe("/?tenant=ers");
+  });
+
+  it("restores modules and nested sections from real paths", () => {
+    const routes = {
+      dashboard: "/",
+      infrastructure: "/infrastructure",
+      agents: "/agents"
+    } as const;
+
+    expect(readPathState("/infrastructure/discovery", routes, "dashboard")).toBe(
+      "infrastructure"
+    );
+    expect(readPathState("/agents/installation/", routes, "dashboard")).toBe(
+      "agents"
+    );
+    expect(readPathState("/unknown", routes, "dashboard")).toBe("dashboard");
+  });
+
+  it("writes a real path without losing unrelated query state", () => {
+    expect(
+      urlWithPath(
+        "http://vulcan.local/?tenant=ers&view=infrastructure",
+        "/agents/installation",
+        ["view"]
+      )
+    ).toBe("/agents/installation?tenant=ers");
   });
 });
