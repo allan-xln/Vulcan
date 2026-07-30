@@ -546,6 +546,7 @@ class WallboardProfile(PlatformModel):
 
 class WallboardProfileUpdate(PlatformModel):
     tenant_id: UUID
+    name: str | None = Field(default=None, min_length=2, max_length=120)
     enabled: bool | None = None
     refresh_seconds: int | None = Field(default=None, ge=5, le=3600)
     fullscreen: bool | None = None
@@ -563,6 +564,7 @@ class WallboardPlaylistUpdate(PlatformModel):
     rotation_enabled: bool | None = None
     default_duration_seconds: int | None = Field(default=None, ge=10, le=3600)
     transition: Literal["none", "fade", "slide"] | None = None
+    schedule: dict[str, Any] | None = None
     alert_priority_enabled: bool | None = None
     auto_return_seconds: int | None = Field(default=None, ge=10, le=86400)
 
@@ -579,6 +581,54 @@ class WallboardPlaylistItemsUpdate(PlatformModel):
     items: list[WallboardPlaylistItemUpdate] = Field(min_length=1, max_length=100)
 
 
+class WallboardApplication(PlatformModel):
+    name: str
+    category: str
+    active_seconds: int
+    events: int
+    last_seen_at: datetime
+
+
+class WallboardAgent(PlatformModel):
+    id: UUID
+    hostname: str
+    profile: Literal["workstation", "server", "collector"]
+    operating_system: str
+    agent_version: str | None = None
+    effective_status: Literal["online", "delayed", "offline", "pending"]
+    queue_depth: int
+    policy_status: str
+    site_id: UUID | None = None
+    site_name: str | None = None
+    last_seen_at: datetime | None = None
+
+
+class WallboardTopologyNode(PlatformModel):
+    id: UUID
+    site_id: UUID | None = None
+    site_name: str | None = None
+    name: str
+    asset_type: str
+    status: str
+    criticality: str
+    source: str
+    ip_address: str | None = None
+    last_seen_at: datetime | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class WallboardTopologyLink(PlatformModel):
+    id: UUID
+    source_asset_id: UUID
+    target_asset_id: UUID
+    relationship_type: str
+    status: str
+    confidence: float
+    source: str
+    observed_at: datetime | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class WallboardSnapshot(PlatformModel):
     tenant_id: UUID
     wallboard_type: Literal["workforce", "infrastructure"]
@@ -592,6 +642,10 @@ class WallboardSnapshot(PlatformModel):
     activity: list[dict[str, Any]] = Field(default_factory=list)
     alerts: list[dict[str, Any]] = Field(default_factory=list)
     integrations: list[dict[str, Any]] = Field(default_factory=list)
+    applications: list[WallboardApplication] = Field(default_factory=list)
+    agents: list[WallboardAgent] = Field(default_factory=list)
+    topology_nodes: list[WallboardTopologyNode] = Field(default_factory=list)
+    topology_links: list[WallboardTopologyLink] = Field(default_factory=list)
 
 
 class IntegrationSyncResult(PlatformModel):

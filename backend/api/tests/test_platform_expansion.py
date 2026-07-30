@@ -11,6 +11,7 @@ os.environ.setdefault("NEXT_PUBLIC_ENVIRONMENT", "local")
 
 from app.main import app
 from app.platform_repository import PlatformAuthorizationError, PlatformRepository
+from app.platform_schemas import WallboardPlaylistUpdate
 from app.repository import AccessScope
 from app.security import AuthContext
 
@@ -317,6 +318,33 @@ def test_wallboard_contract_uses_real_empty_state_without_fake_kpis() -> None:
     assert infrastructure.json()["kpis"] == {}
 
 
+def test_wallboard_effective_asset_status_requires_recent_observation() -> None:
+    sql = PlatformRepository._effective_asset_status_sql()
+
+    assert "asset.last_seen_at is null then 'unknown'" in sql
+    assert "asset.last_seen_at < timezone('utc', now()) - interval '30 minutes'" in sql
+    with pytest.raises(ValueError):
+        PlatformRepository._effective_asset_status_sql("untrusted_alias")
+
+
+def test_wallboard_asset_availability_uses_only_confirmed_states() -> None:
+    monitored, availability = PlatformRepository._asset_availability(
+        online=8,
+        degraded=1,
+        offline=1,
+    )
+    empty_monitored, empty_availability = PlatformRepository._asset_availability(
+        online=0,
+        degraded=0,
+        offline=0,
+    )
+
+    assert monitored == 10
+    assert availability == 85.0
+    assert empty_monitored == 0
+    assert empty_availability is None
+
+
 def test_read_only_user_cannot_change_wallboard_profile() -> None:
     profile = client.get("/wallboards/profiles", headers=admin_headers()).json()[0]
     response = client.patch(
@@ -330,3 +358,43 @@ def test_read_only_user_cannot_change_wallboard_profile() -> None:
 
     assert response.status_code == 403
     assert "permission" in response.json()["detail"]
+
+
+def test_admin_can_update_wallboard_identity_schedule_and_command_config() -> None:
+    headers = admin_headers()
+    profile = client.get("/wallboards/profiles", headers=headers).json()[0]
+
+    updated_profile = client.patch(
+        f"/wallboards/profiles/{profile['id']}",
+        headers=headers,
+        json={
+            "tenantId": TENANT_ID,
+            "name": "Vulcan Workforce TV QA",
+            "config": {
+                "quality": "balanced",
+                "targetResolution": "1920x1080",
+                "displayName": "TV QA",
+            },
+        },
+    )
+    playlist_update = WallboardPlaylistUpdate.model_validate(
+        {
+            "tenantId": TENANT_ID,
+            "schedule": {
+                "timezone": "America/Sao_Paulo",
+                "start": "06:00",
+                "end": "22:00",
+            },
+            "autoReturnSeconds": 90,
+        }
+    )
+
+    assert updated_profile.status_code == 200
+    assert updated_profile.json()["name"] == "Vulcan Workforce TV QA"
+    assert updated_profile.json()["config"]["targetResolution"] == "1920x1080"
+    assert playlist_update.schedule == {
+        "timezone": "America/Sao_Paulo",
+        "start": "06:00",
+        "end": "22:00",
+    }
+    assert playlist_update.auto_return_seconds == 90

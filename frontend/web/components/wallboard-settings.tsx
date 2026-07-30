@@ -12,6 +12,11 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  INFRASTRUCTURE_SCENES,
+  SCENE_LABELS,
+  WORKFORCE_SCENES
+} from "./command-center/config";
 
 type PlaylistItem = {
   id: string;
@@ -31,6 +36,7 @@ type Playlist = {
   rotationEnabled: boolean;
   defaultDurationSeconds: number;
   transition: "none" | "fade" | "slide";
+  schedule: Record<string, unknown>;
   alertPriorityEnabled: boolean;
   autoReturnSeconds: number;
   items: PlaylistItem[];
@@ -48,6 +54,7 @@ type Profile = {
   showClock: boolean;
   showLastUpdate: boolean;
   showConnectionStatus: boolean;
+  config: Record<string, unknown>;
   playlists: Playlist[];
 };
 
@@ -119,6 +126,11 @@ export function WallboardSettings({ apiUrl, tenantId, token }: Props) {
     );
   }
 
+  function updateCommandConfig(patch: Record<string, unknown>) {
+    if (!selected) return;
+    updateSelected({ config: { ...selected.config, ...patch } });
+  }
+
   function updatePlaylist(patch: Partial<Playlist>) {
     if (!selected || !playlist) return;
     setProfiles((current) =>
@@ -166,6 +178,7 @@ export function WallboardSettings({ apiUrl, tenantId, token }: Props) {
           method: "PATCH",
           body: JSON.stringify({
             tenantId,
+            name: selected.name,
             enabled: selected.enabled,
             refreshSeconds: selected.refreshSeconds,
             fullscreen: selected.fullscreen,
@@ -173,7 +186,8 @@ export function WallboardSettings({ apiUrl, tenantId, token }: Props) {
             burnInPrevention: selected.burnInPrevention,
             showClock: selected.showClock,
             showLastUpdate: selected.showLastUpdate,
-            showConnectionStatus: selected.showConnectionStatus
+            showConnectionStatus: selected.showConnectionStatus,
+            config: selected.config
           })
         }
       );
@@ -190,6 +204,7 @@ export function WallboardSettings({ apiUrl, tenantId, token }: Props) {
             rotationEnabled: playlist.rotationEnabled,
             defaultDurationSeconds: playlist.defaultDurationSeconds,
             transition: playlist.transition,
+            schedule: playlist.schedule,
             alertPriorityEnabled: playlist.alertPriorityEnabled,
             autoReturnSeconds: playlist.autoReturnSeconds
           })
@@ -282,6 +297,12 @@ export function WallboardSettings({ apiUrl, tenantId, token }: Props) {
                 <div><h2 className="font-semibold text-white">Comportamento da TV</h2><p className="text-xs text-zinc-500">Mudanças entram na próxima atualização do perfil.</p></div>
               </div>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <TextField
+                  label="Nome do perfil / TV"
+                  value={selected.name}
+                  maxLength={120}
+                  onChange={(name) => updateSelected({ name })}
+                />
                 <NumberField label="Atualização (segundos)" value={selected.refreshSeconds} min={5} max={3600} onChange={(value) => updateSelected({ refreshSeconds: value })} />
                 <NumberField label="Rotação padrão (segundos)" value={playlist.defaultDurationSeconds} min={10} max={3600} onChange={(value) => updatePlaylist({ defaultDurationSeconds: value })} />
                 <label className="text-sm text-zinc-400">Transição
@@ -299,6 +320,255 @@ export function WallboardSettings({ apiUrl, tenantId, token }: Props) {
                 <Toggle label="Estado da conexão" checked={selected.showConnectionStatus} onChange={(showConnectionStatus) => updateSelected({ showConnectionStatus })} />
                 <Toggle label="Prevenção de burn-in" checked={selected.burnInPrevention} onChange={(burnInPrevention) => updateSelected({ burnInPrevention })} />
                 <Toggle label="Alerta prioritário" checked={playlist.alertPriorityEnabled} onChange={(alertPriorityEnabled) => updatePlaylist({ alertPriorityEnabled })} />
+              </div>
+            </article>
+
+            <article className="border border-zinc-800 bg-zinc-950 p-5">
+              <div className="mb-5 flex items-center gap-3 border-b border-zinc-800 pb-4">
+                <MonitorUp className="h-5 w-5 text-orange-400" />
+                <div>
+                  <h2 className="font-semibold text-white">Vulcan Command System</h2>
+                  <p className="text-xs text-zinc-500">
+                    Qualidade, movimento, abertura e fallback persistidos no perfil.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <SelectField
+                  label="Qualidade gráfica"
+                  value={configText(selected.config.quality, "auto")}
+                  options={[
+                    ["auto", "Automática"],
+                    ["low", "Low"],
+                    ["balanced", "Balanced"],
+                    ["cinematic", "Cinematic"],
+                    ["4k", "4K Cinematic"]
+                  ]}
+                  onChange={(quality) => updateCommandConfig({ quality })}
+                />
+                <SelectField
+                  label="Intensidade de movimento"
+                  value={configText(selected.config.motionIntensity, "balanced")}
+                  options={[
+                    ["minimal", "Mínima"],
+                    ["balanced", "Equilibrada"],
+                    ["cinematic", "Cinematográfica"]
+                  ]}
+                  onChange={(motionIntensity) => updateCommandConfig({ motionIntensity })}
+                />
+                <SelectField
+                  label="Transição de cena"
+                  value={configText(selected.config.transitionStyle, "scan")}
+                  options={[
+                    ["scan", "Varredura"],
+                    ["focus", "Mudança de foco"],
+                    ["energy", "Linha de energia"],
+                    ["rebuild", "Reconstrução de grid"]
+                  ]}
+                  onChange={(transitionStyle) => updateCommandConfig({ transitionStyle })}
+                />
+                <SelectField
+                  label="Fallback gráfico"
+                  value={configText(selected.config.fallbackMode, "automatic")}
+                  options={[
+                    ["automatic", "Automático"],
+                    ["always-2d", "Sempre 2D"]
+                  ]}
+                  onChange={(fallbackMode) => updateCommandConfig({ fallbackMode })}
+                />
+                <NumberField
+                  label="Intensidade visual (%)"
+                  value={configNumber(selected.config.visualIntensity, 70)}
+                  min={20}
+                  max={100}
+                  onChange={(visualIntensity) => updateCommandConfig({ visualIntensity })}
+                />
+                <NumberField
+                  label="FPS alvo"
+                  value={configNumber(selected.config.targetFps, 60)}
+                  min={30}
+                  max={60}
+                  onChange={(targetFps) =>
+                    updateCommandConfig({ targetFps: targetFps >= 45 ? 60 : 30 })
+                  }
+                />
+                <NumberField
+                  label="Abertura (segundos)"
+                  value={configNumber(selected.config.openingDurationSeconds, 3)}
+                  min={2}
+                  max={5}
+                  onChange={(openingDurationSeconds) =>
+                    updateCommandConfig({ openingDurationSeconds })
+                  }
+                />
+                <NumberField
+                  label="Ocultar controles (segundos)"
+                  value={configNumber(selected.config.controlsAutoHideSeconds, 5)}
+                  min={2}
+                  max={30}
+                  onChange={(controlsAutoHideSeconds) =>
+                    updateCommandConfig({ controlsAutoHideSeconds })
+                  }
+                />
+                <NumberField
+                  label="Takeover crítico (segundos)"
+                  value={configNumber(selected.config.alertTakeoverSeconds, 45)}
+                  min={10}
+                  max={600}
+                  onChange={(alertTakeoverSeconds) =>
+                    updateCommandConfig({ alertTakeoverSeconds })
+                  }
+                />
+                <SelectField
+                  label="Modo da abertura"
+                  value={configText(selected.config.openingMode, "full")}
+                  options={[
+                    ["full", "Completa"],
+                    ["reduced", "Reduzida"]
+                  ]}
+                  onChange={(openingMode) => updateCommandConfig({ openingMode })}
+                />
+                <SelectField
+                  label="Resolução-alvo"
+                  value={configText(selected.config.targetResolution, "auto")}
+                  options={[
+                    ["auto", "Automática"],
+                    ["1920x1080", "1920 × 1080"],
+                    ["2560x1440", "2560 × 1440"],
+                    ["3840x2160", "3840 × 2160"]
+                  ]}
+                  onChange={(targetResolution) => updateCommandConfig({ targetResolution })}
+                />
+                <TextField
+                  label="Identificação física da TV"
+                  value={configText(selected.config.displayName, "")}
+                  maxLength={80}
+                  placeholder="Ex.: TV Sala de Operações"
+                  onChange={(displayName) => updateCommandConfig({ displayName })}
+                />
+              </div>
+              <div className="mt-5 flex flex-wrap gap-4">
+                <Toggle
+                  label="Abertura cinematográfica"
+                  checked={configBoolean(selected.config.openingEnabled, true)}
+                  onChange={(openingEnabled) => updateCommandConfig({ openingEnabled })}
+                />
+                <Toggle
+                  label="Critical Event Takeover"
+                  checked={configBoolean(selected.config.alertTakeoverEnabled, true)}
+                  onChange={(alertTakeoverEnabled) =>
+                    updateCommandConfig({ alertTakeoverEnabled })
+                  }
+                />
+                <Toggle
+                  label="Mostrar logo"
+                  checked={configBoolean(selected.config.showLogo, true)}
+                  onChange={(showLogo) => updateCommandConfig({ showLogo })}
+                />
+                <Toggle
+                  label="Mostrar filial"
+                  checked={configBoolean(selected.config.showSite, true)}
+                  onChange={(showSite) => updateCommandConfig({ showSite })}
+                />
+              </div>
+              <p className="mt-4 border-l border-zinc-700 pl-3 text-xs leading-5 text-zinc-500">
+                Áudio permanece desativado por padrão e não é habilitado por esta versão.
+                AUTO reduz a qualidade quando o FPS cai e tenta recuperar gradualmente.
+              </p>
+            </article>
+
+            <article className="border border-zinc-800 bg-zinc-950 p-5">
+              <div className="mb-5 flex items-center gap-3 border-b border-zinc-800 pb-4">
+                <MonitorUp className="h-5 w-5 text-orange-400" />
+                <div>
+                  <h2 className="font-semibold text-white">Janela de exibição</h2>
+                  <p className="text-xs text-zinc-500">
+                    Horário operacional persistido para a TV, no fuso America/Sao_Paulo.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-3">
+                <TextField
+                  label="Início"
+                  type="time"
+                  value={configText(playlist.schedule.start, "00:00")}
+                  onChange={(start) =>
+                    updatePlaylist({ schedule: { ...playlist.schedule, start } })
+                  }
+                />
+                <TextField
+                  label="Fim"
+                  type="time"
+                  value={configText(playlist.schedule.end, "23:59")}
+                  onChange={(end) =>
+                    updatePlaylist({ schedule: { ...playlist.schedule, end } })
+                  }
+                />
+                <NumberField
+                  label="Retorno após alerta (segundos)"
+                  value={playlist.autoReturnSeconds}
+                  min={10}
+                  max={86400}
+                  onChange={(autoReturnSeconds) => updatePlaylist({ autoReturnSeconds })}
+                />
+              </div>
+              <p className="mt-4 text-xs leading-5 text-zinc-500">
+                A playlist continua segura fora da janela: esta versão registra a agenda para
+                ativação controlada, sem desligar ou reiniciar a TV automaticamente.
+              </p>
+            </article>
+
+            <article className="border border-zinc-800 bg-zinc-950">
+              <div className="border-b border-zinc-800 p-5">
+                <h2 className="font-semibold text-white">Cenas do Command Center</h2>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Ordem e visibilidade persistidas no perfil; ao menos uma cena permanece ativa.
+                </p>
+              </div>
+              <div className="divide-y divide-zinc-800">
+                {orderedScenes(selected).map((scene, index, scenes) => {
+                  const enabledScenes = configuredScenes(selected);
+                  const enabled = enabledScenes.includes(scene);
+                  const enabledIndex = enabledScenes.indexOf(scene);
+                  return (
+                    <div
+                      key={scene}
+                      className="grid gap-3 p-4 md:grid-cols-[auto_1fr_auto] md:items-center"
+                    >
+                      <div className="flex gap-1">
+                        <button
+                          disabled={!enabled || enabledIndex === 0}
+                          onClick={() => moveScene(selected, scene, -1)}
+                          className="grid h-9 w-9 place-items-center border border-zinc-700 text-zinc-300 disabled:opacity-30"
+                          aria-label={`Subir ${SCENE_LABELS[scene]}`}
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </button>
+                        <button
+                          disabled={!enabled || enabledIndex === enabledScenes.length - 1}
+                          onClick={() => moveScene(selected, scene, 1)}
+                          className="grid h-9 w-9 place-items-center border border-zinc-700 text-zinc-300 disabled:opacity-30"
+                          aria-label={`Descer ${SCENE_LABELS[scene]}`}
+                        >
+                          <ArrowDown className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          {SCENE_LABELS[scene] ?? scene}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Cena {String(index + 1).padStart(2, "0")} de {scenes.length}
+                        </p>
+                      </div>
+                      <Toggle
+                        label="Ativa"
+                        checked={enabled}
+                        onChange={(checked) => toggleScene(selected, scene, checked)}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </article>
 
@@ -333,6 +603,25 @@ export function WallboardSettings({ apiUrl, tenantId, token }: Props) {
       )}
     </section>
   );
+
+  function moveScene(profile: Profile, scene: string, direction: -1 | 1) {
+    const scenes = configuredScenes(profile);
+    const index = scenes.indexOf(scene);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= scenes.length) return;
+    const next = [...scenes];
+    [next[index], next[target]] = [next[target], next[index]];
+    updateCommandConfig({ sceneSequence: next });
+  }
+
+  function toggleScene(profile: Profile, scene: string, enabled: boolean) {
+    const scenes = configuredScenes(profile);
+    if (!enabled && scenes.length === 1) return;
+    const next = enabled
+      ? [...scenes, scene]
+      : scenes.filter((candidate) => candidate !== scene);
+    updateCommandConfig({ sceneSequence: [...new Set(next)] });
+  }
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
@@ -341,4 +630,98 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 
 function NumberField({ label, value, min, max, onChange, compact = false }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void; compact?: boolean }) {
   return <label className={`${compact ? "text-xs" : "text-sm"} text-zinc-400`}>{label}<input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Math.min(max, Math.max(min, Number(event.target.value))))} className="mt-2 h-11 w-full border border-zinc-700 bg-black px-3 text-zinc-200" /></label>;
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: Array<[string, string]>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-sm text-zinc-400">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-11 w-full border border-zinc-700 bg-black px-3 text-zinc-200"
+      >
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue}>{optionLabel}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  maxLength,
+  placeholder,
+  type = "text"
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  maxLength?: number;
+  placeholder?: string;
+  type?: "text" | "time";
+}) {
+  return (
+    <label className="text-sm text-zinc-400">
+      {label}
+      <input
+        type={type}
+        value={value}
+        maxLength={maxLength}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-11 w-full border border-zinc-700 bg-black px-3 text-zinc-200"
+      />
+    </label>
+  );
+}
+
+function configText(value: unknown, fallback: string) {
+  return typeof value === "string" && value ? value : fallback;
+}
+
+function configNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function configBoolean(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function availableScenes(profile: Profile) {
+  return profile.wallboardType === "workforce"
+    ? [...WORKFORCE_SCENES]
+    : [...INFRASTRUCTURE_SCENES];
+}
+
+function configuredScenes(profile: Profile) {
+  const available = availableScenes(profile);
+  if (!Array.isArray(profile.config.sceneSequence)) return available;
+  const configured = profile.config.sceneSequence.filter(
+    (scene): scene is string =>
+      typeof scene === "string" && available.includes(scene as never)
+  );
+  return configured.length ? configured : available;
+}
+
+function orderedScenes(profile: Profile) {
+  const configured = configuredScenes(profile);
+  return [
+    ...configured,
+    ...availableScenes(profile).filter((scene) => !configured.includes(scene))
+  ];
 }

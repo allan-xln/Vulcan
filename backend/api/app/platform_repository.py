@@ -1455,6 +1455,7 @@ class PlatformRepository:
             except StopIteration as exc:
                 raise ValueError("wallboard profile not found in active tenant") from exc
         columns = {
+            "name",
             "enabled",
             "refresh_seconds",
             "fullscreen",
@@ -1510,6 +1511,7 @@ class PlatformRepository:
             "rotation_enabled",
             "default_duration_seconds",
             "transition",
+            "schedule",
             "alert_priority_enabled",
             "auto_return_seconds",
         }
@@ -1526,7 +1528,14 @@ class PlatformRepository:
                 where tenant_id = %s and id = %s
                 returning *
                 """,
-                (*[value for _, value in ordered], request.tenant_id, playlist_id),
+                (
+                    *[
+                        Jsonb(value) if key == "schedule" else value
+                        for key, value in ordered
+                    ],
+                    request.tenant_id,
+                    playlist_id,
+                ),
             ).fetchone()
             if not row:
                 raise ValueError("wallboard playlist not found in active tenant")
@@ -1640,6 +1649,10 @@ class PlatformRepository:
                 activity=[],
                 alerts=[],
                 integrations=[],
+                applications=[],
+                agents=[],
+                topologyNodes=[],
+                topologyLinks=[],
             )
         with self.base._connect() as conn:
             access = self._access(conn, context)
@@ -1660,14 +1673,21 @@ class PlatformRepository:
             )
             event_site_filter = "and site_id = %(site_id)s" if site_id else ""
             incident_site_filter = "and site_id = %(site_id)s" if site_id else ""
+            critical_alert_site_filter = (
+                "and (incident.site_id = %(site_id)s "
+                "or incident.severity in ('error', 'critical'))"
+                if site_id
+                else ""
+            )
+            effective_asset_status = self._effective_asset_status_sql()
             kpis = conn.execute(
                 f"""
                 select
                   count(*) filter (where asset.status <> 'retired') as assets,
-                  count(*) filter (where asset.status = 'online') as online_assets,
-                  count(*) filter (where asset.status = 'degraded') as degraded_assets,
-                  count(*) filter (where asset.status = 'offline') as offline_assets,
-                  count(*) filter (where asset.status = 'unknown') as unknown_assets,
+                  count(*) filter (where ({effective_asset_status}) = 'online') as online_assets,
+                  count(*) filter (where ({effective_asset_status}) = 'degraded') as degraded_assets,
+                  count(*) filter (where ({effective_asset_status}) = 'offline') as offline_assets,
+                  count(*) filter (where ({effective_asset_status}) = 'unknown') as unknown_assets,
                   count(*) filter (where asset.asset_type = 'server') as servers,
                   count(*) filter (where asset.asset_type = 'virtual_machine') as virtual_machines,
                   count(*) filter (where asset.asset_type = 'switch') as switches,
@@ -1745,13 +1765,19 @@ class PlatformRepository:
             ).fetchone()
             sites = list(
                 conn.execute(
-                    """
+                    f"""
                     select site.id, site.code, site.name, site.status, site.display_order,
                            site.semantic_color, site.rotation_enabled, site.rotation_seconds,
                            count(asset.id) filter (where asset.status <> 'retired') as assets,
-                           count(asset.id) filter (where asset.status = 'online') as online,
-                           count(asset.id) filter (where asset.status = 'degraded') as degraded,
-                           count(asset.id) filter (where asset.status = 'offline') as offline,
+                           count(asset.id) filter (
+                             where ({effective_asset_status}) = 'online'
+                           ) as online,
+                           count(asset.id) filter (
+                             where ({effective_asset_status}) = 'degraded'
+                           ) as degraded,
+                           count(asset.id) filter (
+                             where ({effective_asset_status}) = 'offline'
+                           ) as offline,
                            (
                              select count(*)
                              from public.unified_events event
@@ -1787,12 +1813,14 @@ class PlatformRepository:
             status_groups = list(
                 conn.execute(
                     f"""
-                    select asset.asset_type as key, asset.status, count(*) as value
+                    select asset.asset_type as key,
+                           ({effective_asset_status}) as status,
+                           count(*) as value
                     from public.infrastructure_assets asset
                     where asset.tenant_id = %(tenant_id)s
                       and asset.status <> 'retired' {site_filter}
-                    group by asset.asset_type, asset.status
-                    order by asset.asset_type, asset.status
+                    group by asset.asset_type, ({effective_asset_status})
+                    order by asset.asset_type, ({effective_asset_status})
                     """,
                     {"tenant_id": context.tenant_id, "site_id": site_id},
                 ).fetchall()
@@ -1815,14 +1843,19 @@ class PlatformRepository:
             alerts = list(
                 conn.execute(
                     f"""
-                    select id, title, severity, status, impact, last_occurred_at
-                    from public.incidents
-                    where tenant_id = %(tenant_id)s
-                      and status in ('open', 'investigating', 'monitoring')
-                      {incident_site_filter}
+                    select incident.id, incident.site_id, site.name as site_name,
+                           incident.title, incident.severity, incident.status,
+                           incident.impact, incident.last_occurred_at
+                    from public.incidents incident
+                    left join public.sites site
+                      on site.tenant_id = incident.tenant_id
+                     and site.id = incident.site_id
+                    where incident.tenant_id = %(tenant_id)s
+                      and incident.status in ('open', 'investigating', 'monitoring')
+                      {critical_alert_site_filter}
                     order by
-                      case severity when 'critical' then 0 when 'error' then 1 when 'warning' then 2 else 3 end,
-                      last_occurred_at desc
+                      case incident.severity when 'critical' then 0 when 'error' then 1 when 'warning' then 2 else 3 end,
+                      incident.last_occurred_at desc
                     limit 8
                     """,
                     {"tenant_id": context.tenant_id, "site_id": site_id},
@@ -1839,17 +1872,205 @@ class PlatformRepository:
                     (context.tenant_id,),
                 ).fetchall()
             )
+            applications = list(
+                conn.execute(
+                    f"""
+                    select
+                      coalesce(nullif(activity.app_name, ''), 'Aplicação não identificada') as name,
+                      coalesce(nullif(activity.category, ''), 'operacional') as category,
+                      coalesce(sum(activity.duration_seconds), 0)::bigint as active_seconds,
+                      count(*)::bigint as events,
+                      max(activity.occurred_at) as last_seen_at
+                    from public.activity_events activity
+                    left join public.devices device
+                      on device.tenant_id = activity.tenant_id
+                     and device.id = activity.device_id
+                    where activity.tenant_id = %(tenant_id)s
+                      and activity.occurred_at >= timezone('utc', now()) - interval '24 hours'
+                      and coalesce(activity.metadata ->> 'source', '') <> 'vulcan-simulator'
+                      {
+                        "and device.metadata ->> 'siteId' = %(site_id)s::text"
+                        if site_id
+                        else ""
+                      }
+                    group by
+                      coalesce(nullif(activity.app_name, ''), 'Aplicação não identificada'),
+                      coalesce(nullif(activity.category, ''), 'operacional')
+                    order by active_seconds desc, events desc
+                    limit 12
+                    """,
+                    {"tenant_id": context.tenant_id, "site_id": site_id},
+                ).fetchall()
+            )
+            agents = list(
+                conn.execute(
+                    f"""
+                    select
+                      identity.id,
+                      identity.hostname,
+                      identity.profile,
+                      identity.operating_system,
+                      identity.agent_version,
+                      case
+                        when identity.status = 'pending' then 'pending'
+                        when identity.last_seen_at >= timezone('utc', now()) - interval '5 minutes'
+                          then 'online'
+                        when identity.last_seen_at >= timezone('utc', now()) - interval '30 minutes'
+                          then 'delayed'
+                        else 'offline'
+                      end as effective_status,
+                      identity.queue_depth,
+                      identity.policy_status,
+                      site.id as site_id,
+                      site.name as site_name,
+                      identity.last_seen_at
+                    from public.agent_identities identity
+                    join public.devices device
+                      on device.tenant_id = identity.tenant_id
+                     and device.id = identity.device_id
+                    left join public.sites site
+                      on site.tenant_id = identity.tenant_id
+                     and site.id::text = device.metadata ->> 'siteId'
+                    where identity.tenant_id = %(tenant_id)s
+                      and identity.status <> 'revoked'
+                      and identity.agent_version not ilike '%%simulator%%'
+                      {
+                        "and device.metadata ->> 'siteId' = %(site_id)s::text"
+                        if site_id
+                        else ""
+                      }
+                    order by identity.last_seen_at desc nulls last, identity.hostname
+                    limit 100
+                    """,
+                    {"tenant_id": context.tenant_id, "site_id": site_id},
+                ).fetchall()
+            )
+            topology_nodes = list(
+                conn.execute(
+                    f"""
+                    select
+                      asset.id,
+                      asset.site_id,
+                      site.name as site_name,
+                      asset.name,
+                      asset.asset_type,
+                      ({effective_asset_status}) as status,
+                      asset.criticality,
+                      asset.source,
+                      asset.ip_address::text as ip_address,
+                      asset.last_seen_at,
+                      jsonb_strip_nulls(jsonb_build_object(
+                        'manufacturer', asset.manufacturer,
+                        'model', asset.model,
+                        'firmware', asset.metadata -> 'firmware',
+                        'clients', asset.metadata -> 'clients',
+                        'uptimeSeconds', asset.metadata -> 'uptimeSeconds',
+                        'uplinkSpeedMbps', asset.metadata -> 'uplinkSpeedMbps',
+                        'uplinkRxErrors', asset.metadata -> 'uplinkRxErrors',
+                        'cpuUsage', asset.metadata -> 'cpuUsage',
+                        'cpuCores', asset.metadata -> 'cpuCores',
+                        'memoryBytes', asset.metadata -> 'memoryBytes',
+                        'memoryMaxBytes', asset.metadata -> 'memoryMaxBytes',
+                        'diskBytes', asset.metadata -> 'diskBytes',
+                        'diskMaxBytes', asset.metadata -> 'diskMaxBytes',
+                        'vmid', asset.metadata -> 'vmid',
+                        'node', asset.metadata -> 'node',
+                        'lastTask', asset.metadata -> 'lastTask',
+                        'toner', asset.metadata -> 'toner',
+                        'stock', asset.metadata -> 'stock',
+                        'ownership', asset.metadata -> 'ownership'
+                      )) as details
+                    from public.infrastructure_assets asset
+                    left join public.sites site
+                      on site.tenant_id = asset.tenant_id and site.id = asset.site_id
+                    where asset.tenant_id = %(tenant_id)s
+                      and asset.status <> 'retired'
+                      {"and asset.site_id = %(site_id)s" if site_id else ""}
+                    order by
+                      case asset.criticality
+                        when 'critical' then 0
+                        when 'high' then 1
+                        when 'medium' then 2
+                        else 3
+                      end,
+                      asset.name
+                    limit 180
+                    """,
+                    {"tenant_id": context.tenant_id, "site_id": site_id},
+                ).fetchall()
+            )
+            topology_links = list(
+                conn.execute(
+                    f"""
+                    select
+                      relationship.id,
+                      relationship.source_asset_id,
+                      relationship.target_asset_id,
+                      relationship.relationship_type,
+                      relationship.status,
+                      relationship.confidence,
+                      relationship.source,
+                      relationship.observed_at,
+                      jsonb_strip_nulls(jsonb_build_object(
+                        'sourceInterfaceId', relationship.source_interface_id,
+                        'targetInterfaceId', relationship.target_interface_id,
+                        'uplinkPort', relationship.metadata -> 'uplinkPort',
+                        'trafficBps', relationship.metadata -> 'trafficBps'
+                      )) as details
+                    from public.asset_relationships relationship
+                    join public.infrastructure_assets source_asset
+                      on source_asset.tenant_id = relationship.tenant_id
+                     and source_asset.id = relationship.source_asset_id
+                    join public.infrastructure_assets target_asset
+                      on target_asset.tenant_id = relationship.tenant_id
+                     and target_asset.id = relationship.target_asset_id
+                    where relationship.tenant_id = %(tenant_id)s
+                      and relationship.status = 'active'
+                      and source_asset.status <> 'retired'
+                      and target_asset.status <> 'retired'
+                      {
+                        "and source_asset.site_id = %(site_id)s and target_asset.site_id = %(site_id)s"
+                        if site_id
+                        else ""
+                      }
+                    order by relationship.relationship_type, relationship.id
+                    limit 320
+                    """,
+                    {"tenant_id": context.tenant_id, "site_id": site_id},
+                ).fetchall()
+            )
         all_kpis = {
             **dict(kpis),
             **dict(agent_kpis),
             **dict(event_kpis),
             **dict(incident_kpis),
         }
-        monitored = int(all_kpis["assets"])
         online = int(all_kpis["online_assets"])
         degraded = int(all_kpis["degraded_assets"])
-        all_kpis["availability"] = (
-            round(((online + degraded * 0.5) / monitored) * 100, 1) if monitored else None
+        offline = int(all_kpis["offline_assets"])
+        monitored, availability = self._asset_availability(
+            online=online,
+            degraded=degraded,
+            offline=offline,
+        )
+        all_kpis["monitored_assets"] = monitored
+        all_kpis["availability"] = availability
+        all_kpis.update(
+            {
+                "onlineAssets": all_kpis["online_assets"],
+                "degradedAssets": all_kpis["degraded_assets"],
+                "offlineAssets": all_kpis["offline_assets"],
+                "unknownAssets": all_kpis["unknown_assets"],
+                "monitoredAssets": all_kpis["monitored_assets"],
+                "virtualMachines": all_kpis["virtual_machines"],
+                "accessPoints": all_kpis["access_points"],
+                "onlineAgents": all_kpis["online_agents"],
+                "delayedAgents": all_kpis["delayed_agents"],
+                "offlineAgents": all_kpis["offline_agents"],
+                "events24h": all_kpis["events_24h"],
+                "activePeople": all_kpis["active_people"],
+                "criticalIncidents": all_kpis["critical_incidents"],
+            }
         )
         return WallboardSnapshot(
             tenantId=context.tenant_id,
@@ -1864,7 +2085,35 @@ class PlatformRepository:
             activity=[dict(row) for row in activity],
             alerts=[dict(row) for row in alerts],
             integrations=[dict(row) for row in integrations],
+            applications=[dict(row) for row in applications],
+            agents=[dict(row) for row in agents],
+            topologyNodes=[dict(row) for row in topology_nodes],
+            topologyLinks=[dict(row) for row in topology_links],
         )
+
+    @staticmethod
+    def _effective_asset_status_sql(alias: str = "asset") -> str:
+        if alias not in {"asset"}:
+            raise ValueError("unsupported infrastructure asset alias")
+        return f"""
+            case
+              when {alias}.status in ('retired', 'maintenance', 'unknown') then {alias}.status
+              when {alias}.last_seen_at is null then 'unknown'
+              when {alias}.last_seen_at < timezone('utc', now()) - interval '30 minutes'
+                then 'unknown'
+              else {alias}.status
+            end
+        """
+
+    @staticmethod
+    def _asset_availability(*, online: int, degraded: int, offline: int) -> tuple[int, float | None]:
+        monitored = online + degraded + offline
+        availability = (
+            round(((online + degraded * 0.5) / monitored) * 100, 1)
+            if monitored
+            else None
+        )
+        return monitored, availability
 
     @staticmethod
     def adapter_catalog() -> list[dict]:
