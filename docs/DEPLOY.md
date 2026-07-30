@@ -44,16 +44,16 @@ contém `.git`, árvore de código, testes nem secrets.
 
 ```bash
 cd /home/allan/Documentos/ProjetosLanFuture/Vulcan
-PATH="$PWD/.tools/syft/bin:$PATH" ./scripts/build-production-release.sh 0.3.5
-sha256sum -c dist/vulcan-0.3.5-linux-amd64.tar.gz.sha256
+PATH="$PWD/.tools/syft/bin:$PATH" ./scripts/build-production-release.sh 0.3.6
+(cd dist && sha256sum -c vulcan-0.3.6-linux-amd64.tar.gz.sha256)
 ```
 
 No host Linux isolado, instale previamente Docker Engine, Docker Compose e o pacote
 `acl`, necessário para preparar permissões dos volumes durante o restore:
 
 ```bash
-tar -xzf vulcan-0.3.5-linux-amd64.tar.gz
-cd vulcan-0.3.5-linux-amd64
+tar -xzf vulcan-0.3.6-linux-amd64.tar.gz
+cd vulcan-0.3.6-linux-amd64
 cp .env.production.example .env.production
 chmod 0600 .env.production
 # Revisar URL, versão, commit e build antes do primeiro start.

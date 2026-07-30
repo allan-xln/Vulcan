@@ -2,7 +2,7 @@
 
 ## Estado autoritativo
 
-Data do corte: `2026-07-29`
+Data do corte: `2026-07-29`; última atualização: `2026-07-30`
 
 O endereço oficial do Vulcan na rede ERS é:
 
@@ -35,7 +35,7 @@ usar o mesmo endereço oficial; a aplicação não foi publicada diretamente na 
 
 ## Releases
 
-- plataforma em produção: `0.3.5`;
+- plataforma em produção: `0.3.6`;
 - agente publicado: `0.3.1`;
 - rollback imediato: restore do backup pré-corte na VM; o runtime temporário anterior foi
   preservado desligado como contingência adicional;
@@ -45,10 +45,10 @@ usar o mesmo endereço oficial; a aplicação não foi publicada diretamente na 
 Release de produção:
 
 ```text
-arquivo: dist/vulcan-0.3.5-linux-amd64.tar.gz
-SHA-256: fad45b7f7929dbe49be9dede3e5df34865231462eaf66f5abde35ae0748d860f
-commit: 466e9bab376211bf74d5194af31c269b757b7425
-build: 20260729T184432Z
+arquivo: dist/vulcan-0.3.6-linux-amd64.tar.gz
+SHA-256: b27eaa3bdc3428f8e8e7c6ca864a0441a3bf73e0f519b08dca709ae86492c566
+commit: 2ddcf3f7e03d0daf1d12f3324119834072d7050a
+build: 20260730T114706Z
 ```
 
 A correção `0.3.1` acrescentou a autorização explícita de HTTP apenas para endereços IP
@@ -57,6 +57,17 @@ A correção de plataforma `0.3.3` habilitou a autenticação real do backend no
 sem reativar `admin/admin` ou o modo demo. A `0.3.4` fixou os entitlements finais do
 tenant, com Automations limitado a `read_only`. A `0.3.5` corrige o manifesto de backup
 para excluir `SHA256SUMS` do próprio cálculo e permitir validação integral.
+A `0.3.6` persiste a sessão local apenas na aba do navegador, revalida o token no
+backend e registra módulo e subárea na URL. Assim, F5, voltar/avançar e links diretos
+preservam Infrastructure, Agents e suas subseções sem retornar ao login.
+
+Na validação de `2026-07-30T09:04:01-03:00`, Chromium percorreu login real, Comando,
+Infrastructure, Ativos e redes e recarregamento completo. A mesma tela e os parâmetros
+`view=infrastructure&infra=inventory` foram preservados. Os E2E de Agentes e Wallboard
+também passaram (`3/3`). O backend registrava 1 tenant, 15 usuários, 13 memberships,
+27 dispositivos, 22 identidades de agente, 40.226 eventos unificados, 39.807 eventos de
+atividade e 59.207 registros de auditoria. Esses três últimos contadores continuam
+crescendo com a ingestão real.
 
 ## Serviços
 
@@ -132,6 +143,13 @@ O primeiro backup gerado já na VM é
 `vulcan-production-20260729T222956Z.tar.gz.enc`, SHA-256
 `7f449f66448d7942e1a7cedae41491b1d56b4e6c681c743b6384db48840d0706`.
 O manifesto interno, dumps, volumes e catálogos `pg_restore` passaram na validação.
+
+Antes da atualização `0.3.6`, foi criado o backup
+`vulcan-production-20260730T115536Z.tar.gz.enc`, SHA-256
+`3208fc38ec9e7e7416132cba9d2b729771cbd3395a6b710057d0e275a95295fb`.
+O arquivo cifrado, o manifesto interno e os catálogos `pg_restore` dos bancos Vulcan e
+Evolution foram validados. O restore integral mais recente continua sendo o ensaio
+descartável descrito abaixo; nenhum restore destrutivo foi executado sobre produção.
 
 O timer `vulcan-backup.timer` executa diariamente, com retenção local de 14 dias. No
 Proxmox, o job `vulcan-prod01-daily` protege a VMID `103` no storage `BACKUPSERS` às

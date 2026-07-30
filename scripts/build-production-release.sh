@@ -117,7 +117,7 @@ find "$RELEASE_DIR" -type f -name '*.sh' -exec chmod 0755 {} +
 (cd "$RELEASE_DIR" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 
 tar -C "$DIST_DIR" -czf "$DIST_DIR/$RELEASE_NAME.tar.gz" "$RELEASE_NAME"
-sha256sum "$DIST_DIR/$RELEASE_NAME.tar.gz" > "$DIST_DIR/$RELEASE_NAME.tar.gz.sha256"
+(cd "$DIST_DIR" && sha256sum "$RELEASE_NAME.tar.gz" > "$RELEASE_NAME.tar.gz.sha256")
 
 echo "Release criada: $DIST_DIR/$RELEASE_NAME.tar.gz"
 echo "Versão: $VERSION"
