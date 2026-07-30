@@ -45,6 +45,29 @@ respeitam site/tenant, recebem sinais de atualização por SSE e não possuem en
 privilegiados próprios. Perfis, playlists e ordem dos painéis são persistidos com RLS e
 auditoria.
 
+O frontend de TV possui uma camada `command-center` isolada do dashboard administrativo:
+
+- `CommandCenterShell` controla composição de TV, abertura, transições, alerta crítico,
+  relógio, conexão, fullscreen, burn-in e controles;
+- TanStack Query coordena snapshot/health/version e cache de recuperação;
+- GSAP anima a abertura e as trocas de cena; Motion é limitado a controles e takeover;
+- ECharts renderiza séries agregadas em canvas;
+- D3 calcula a malha determinística a partir das relações reais;
+- React Three Fiber/Drei renderiza a topologia quando WebGL e o preset permitem;
+- SVG fornece fallback acessível e funcional sem WebGL.
+
+Perfis abertos são revalidados em intervalo controlado e mantêm a cena quando a assinatura
+de itens/cenas não muda. Alertas críticos do tenant atravessam o filtro visual de filial;
+alertas não críticos continuam respeitando a filial solicitada. O nome exibido no takeover
+vem do incidente/site, não do painel que estava em rotação.
+
+Os pacotes gráficos não participam do backend nem definem a verdade operacional. A fonte
+permanece PostgreSQL e cada snapshot é resolvido no tenant autenticado pelo servidor.
+No snapshot de Infrastructure, o status visual é derivado da última observação: após 30
+minutos sem `last_seen_at`, o ativo passa a `unknown` no Wallboard. O cadastro original
+permanece intacto, mas não pode sustentar uma afirmação de disponibilidade. O score usa
+somente estados confirmados e retorna indisponível quando não existe telemetria recente.
+
 ## Architectural Decisions
 
 - One database, not one database per customer.
@@ -58,6 +81,10 @@ auditoria.
 - Workforce permanece o módulo inicial. Infrastructure e Timeline compartilham o mesmo
   backend, autenticação, tenant, RLS, permissões e auditoria.
 - Build artifacts, virtual environments, caches, and generated package metadata are not product source.
+- O preset visual `auto` é o padrão de produção; 4K/cinematic nunca é imposto a hardware
+  incapaz e a perda de contexto WebGL desmonta o canvas e troca para o caminho 2D.
+- Áudio permanece desabilitado. O Command Center não captura tela, entrada, câmera,
+  microfone ou conteúdo digitado.
 
 ## Current Risks
 

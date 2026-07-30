@@ -213,4 +213,3 @@ export function initialRuntimeMetrics(config: CommandCenterConfig): RuntimeMetri
   }
   return { fps: null, effectiveQuality, webglAvailable, reducedMotion };
 }
-

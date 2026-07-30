@@ -2,7 +2,34 @@
 
 ## Unreleased
 
-Nenhuma alteração pendente.
+- Corrigida a verdade operacional do Wallboard: inventário sem observação recente não é
+  mais contado como online, e disponibilidade usa apenas estados confirmados.
+
+## 0.5.0 — 2026-07-30
+
+- Rebuilt Workforce and Infrastructure Wallboards as the Vulcan Command Center without
+  changing the main Workforce-first product navigation.
+- Added independent real-data scene engines, GSAP transitions, a session-scoped opening,
+  critical incident takeover and TV-safe controls.
+- Added real topology contracts and 3D/2D rendering from persisted assets and
+  relationships, with no invented nodes, links or traffic.
+- Added ECharts/D3/Three.js lazy visualizations and TanStack Query cache/recovery.
+- Added `auto`, `low`, `balanced`, `cinematic` and `4k` quality presets with adaptive FPS
+  downgrade, reduced-motion behavior, WebGL context-loss recovery and SVG fallback.
+- Expanded persisted Wallboard settings for scene order, opening, motion, quality,
+  fallback, alert takeover, visual intensity, TV identity, target resolution and schedule.
+- Added silent profile/playlist revalidation for already-open TVs without resetting an
+  unchanged scene, plus tenant-global critical takeover while a branch panel is active.
+- Fixed the session-scoped GSAP opening mount sequence and disabled ECharts animation
+  when the operating system requests reduced motion.
+- Added real application, agent and topology fields to the tenant/site-scoped Wallboard
+  snapshot and kept rolling-deploy compatibility with 0.4.0 responses.
+- Added effective Infrastructure status based on a 30-minute observation window and a
+  transparent `monitoredAssets` denominator; no recent telemetry now renders as unknown.
+- Added 1080p/1440p/4K E2E checks, read-only mutation proof and a continuous soak harness
+  for heap, CPU, FPS, listeners, timers, canvases, SSE and reconnection.
+- Updated Next.js, Playwright, Sharp and PostCSS to audited patched versions; the
+  production dependency audit reports no known vulnerabilities.
 
 ## 0.4.0 — 2026-07-30
 

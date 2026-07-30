@@ -74,7 +74,6 @@ export function TelemetryLabel({
     </div>
   );
 }
-
 export function CommandFrame({
   title,
   eyebrow,
@@ -141,4 +140,3 @@ export function DataOriginBadge() {
     </span>
   );
 }
-

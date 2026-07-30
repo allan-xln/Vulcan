@@ -20,6 +20,15 @@ Estado de produção validado em `2026-07-30`: plataforma `0.4.0` na VM isolada
 redes, ativos, Wallboards e integrações UniFi/Proxmox são persistentes e tenant-aware;
 discovery e automações corretivas permanecem desativados.
 
+O candidato `0.5.0` evolui somente a experiência de TV e os contratos de leitura do
+Wallboard. A promoção para produção depende de soak, backup, restore e validação pela URL
+oficial; até esse gate, a versão operacional permanece `0.4.0`.
+
+No candidato, disponibilidade de Infrastructure não é inferida do cadastro: um ativo sem
+observação nos últimos 30 minutos aparece como `sem coleta`, e o score considera somente
+ativos com estado confirmado. A regra preserva o inventário e evita declarar saúde sem
+telemetria.
+
 ## Estado inicial registrado
 
 ### Worktree
@@ -505,7 +514,7 @@ PYTHONPATH=backend/ingestion-gateway .venv/bin/python -m pytest backend/ingestio
 PYTHONPATH=backend/query-api .venv/bin/python -m pytest backend/query-api/tests -q
 PYTHONPATH=backend/jobs .venv/bin/python -m pytest backend/jobs/tests -q
 PYTHONPATH=backend/discovery .venv/bin/python -m pytest backend/discovery/tests -q
-VULCAN_PLATFORM_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/vulcan \
+VULCAN_PLATFORM_DATABASE_URL="${VULCAN_LOCAL_TEST_DATABASE_URL}" \
   ./scripts/verify-platform-expansion.sh
 FRONTEND_PORT=3104 corepack pnpm --dir frontend/web test:e2e
 docker compose --profile network config --quiet

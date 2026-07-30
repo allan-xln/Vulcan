@@ -394,4 +394,3 @@ function aggregateCategories(snapshot: WallboardSnapshot) {
     .map(([name, seconds]) => ({ name, seconds, share: total ? Math.round((seconds / total) * 100) : 0 }))
     .sort((left, right) => right.seconds - left.seconds);
 }
-
