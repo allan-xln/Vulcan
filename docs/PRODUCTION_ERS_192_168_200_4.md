@@ -7,8 +7,9 @@ Data do corte: `2026-07-29`; última atualização: `2026-07-30`
 O endereço oficial do Vulcan na rede ERS é:
 
 - aplicação: `http://192.168.200.4:8099`;
-- Wallboard: `http://192.168.200.4:8099/wallboard`;
-- Agentes: `http://192.168.200.4:8099/?view=agents`;
+- Wallboard Workforce: `http://192.168.200.4:8099/wallboard/workforce`;
+- Wallboard Infrastructure: `http://192.168.200.4:8099/wallboard/infra`;
+- Agentes: `http://192.168.200.4:8099/agents`;
 - downloads: `http://192.168.200.4:8099/downloads/agents/`.
 
 O `SRVERS01` (`192.168.200.4`) continua dedicado a AD DS e DNS. Ele não executa
@@ -35,20 +36,20 @@ usar o mesmo endereço oficial; a aplicação não foi publicada diretamente na 
 
 ## Releases
 
-- plataforma em produção: `0.3.6`;
+- plataforma em produção: `0.4.0`;
 - agente publicado: `0.3.1`;
-- rollback imediato: restore do backup pré-corte na VM; o runtime temporário anterior foi
-  preservado desligado como contingência adicional;
+- rollback imediato de imagem: release `0.3.6` preservada em
+  `/opt/vulcan/releases/vulcan-0.3.6-linux-amd64`;
 - commit e build exatos: `/version` e `manifests/release.json`;
 - os pacotes possuem `SHA256SUMS` e SBOM CycloneDX.
 
 Release de produção:
 
 ```text
-arquivo: dist/vulcan-0.3.6-linux-amd64.tar.gz
-SHA-256: b27eaa3bdc3428f8e8e7c6ca864a0441a3bf73e0f519b08dca709ae86492c566
-commit: 2ddcf3f7e03d0daf1d12f3324119834072d7050a
-build: 20260730T114706Z
+arquivo: dist/vulcan-0.4.0-linux-amd64.tar.gz
+SHA-256: da50e45b3feb6e7bb354aaac1207ee7a304ab10d6949f7fa8d3e3e9676ecc19d
+commit da release: 334b8b56ad74e9fa8c4aac39ff2eced29b392bd6
+build: 20260730T140148Z
 ```
 
 A correção `0.3.1` acrescentou a autorização explícita de HTTP apenas para endereços IP
@@ -61,13 +62,23 @@ A `0.3.6` persiste a sessão local apenas na aba do navegador, revalida o token 
 backend e registra módulo e subárea na URL. Assim, F5, voltar/avançar e links diretos
 preservam Infrastructure, Agents e suas subseções sem retornar ao login.
 
-Na validação de `2026-07-30T09:04:01-03:00`, Chromium percorreu login real, Comando,
-Infrastructure, Ativos e redes e recarregamento completo. A mesma tela e os parâmetros
-`view=infrastructure&infra=inventory` foram preservados. Os E2E de Agentes e Wallboard
-também passaram (`3/3`). O backend registrava 1 tenant, 15 usuários, 13 memberships,
-27 dispositivos, 22 identidades de agente, 40.226 eventos unificados, 39.807 eventos de
-atividade e 59.207 registros de auditoria. Esses três últimos contadores continuam
-crescendo com a ingestão real.
+A `0.4.0` substitui os parâmetros históricos por rotas reais, preservando sessão,
+subárea, F5, voltar e avançar. Também entrega três filiais ERS, inventário relacional,
+Wallboards Workforce e Infrastructure persistidos, e reconciliação UniFi/Proxmox
+somente leitura. As dez políticas de discovery foram provisionadas desativadas, em modo
+seguro e sujeitas a aprovação.
+
+Na homologação de produção, Chromium percorreu `/infrastructure/assets`, F5,
+`/infrastructure/branches`, voltar, `/agents/installation`,
+`/wallboard/workforce` e `/wallboard/infra`; os três cenários passaram. O banco restaurado
+registrou 1 tenant, 15 usuários, 13 memberships, 3 filiais, 10 redes, 78 ativos,
+42 relacionamentos, 2 perfis de Wallboard, 8 itens de playlist, 22 identidades de agente,
+40.614 eventos unificados e 62.184 registros de auditoria. Os contadores de eventos e
+auditoria continuam crescendo com a ingestão real.
+
+Na conferência final ao vivo de `2026-07-30T12:26:02-03:00`, os contadores haviam
+avançado para 40.630 eventos e 62.657 auditorias; health, readiness, liveness e version
+responderam `200` pelo endereço oficial.
 
 ## Serviços
 
@@ -76,14 +87,18 @@ crescendo com a ingestão real.
 | `edge` | Nginx de borda | `192.168.200.26:8099` |
 | `frontend` | Vulcan Web | apenas rede Docker |
 | `backend` | API, realtime e Agent API v2 | apenas rede Docker |
+| `infrastructure-worker` | reconciliação read-only UniFi/Proxmox | sem porta publicada |
 | `whatsapp-worker` | worker assíncrono | sem porta publicada |
 | `db` | PostgreSQL 16 | apenas rede `data` |
 | `evolution` | Evolution API | apenas rede Docker |
 | `evolution-db` | PostgreSQL 15 | apenas rede `internal` |
 | `evolution-redis` | Redis 7.4 | apenas rede `internal` |
 
-`discovery` permanece no profile `network`, desabilitado até existirem redes permitidas e
-aprovação explícita. Não há descoberta agressiva nem automação corretiva ativa.
+Os nove containers retornaram automaticamente após o reboot controlado da VM. Seis
+serviços possuem healthcheck e ficaram saudáveis. O worker reconciliou 23 ativos UniFi e
+17 ativos Proxmox sem alterar equipamentos. `discovery` permanece no profile `network`,
+desabilitado até aprovação explícita. Não há descoberta agressiva nem automação
+corretiva ativa.
 
 ## Tenant e identidades
 
@@ -111,7 +126,9 @@ http://192.168.200.4:8099/api
 O piloto enviou heartbeat, inventário, saúde, rede e atividade para a Timeline. A fila
 SQLite criptografada foi testada apontando apenas o piloto para uma porta fechada:
 quatro eventos ficaram pendentes, nenhum tipo de evento foi encontrado em texto claro e
-o replay zerou a fila após a reconexão.
+o replay zerou a fila após a reconexão. No reboot da VM da release `0.4.0`, o agente
+registrou a indisponibilidade transitória, preservou quatro eventos e confirmou o lote
+após o retorno; a fila terminou novamente em zero.
 
 Não houve piloto Server porque nenhum servidor não crítico foi autorizado nesta janela.
 Não instalar primeiro no controlador de domínio. A implantação em massa e a GPO continuam
@@ -151,6 +168,25 @@ O arquivo cifrado, o manifesto interno e os catálogos `pg_restore` dos bancos V
 Evolution foram validados. O restore integral mais recente continua sendo o ensaio
 descartável descrito abaixo; nenhum restore destrutivo foi executado sobre produção.
 
+Antes da atualização `0.4.0`, foi criado:
+
+```text
+/var/backups/vulcan/pre-deploy/vulcan-production-20260730T140805Z.tar.gz.enc
+SHA-256: 8b6e8ad24e62fe99f15794e47ec58c0881fb03a3345e530df2ee3d4b9fc041a5
+```
+
+Depois do deploy foi criado e restaurado integralmente em dois PostgreSQL descartáveis:
+
+```text
+/var/backups/vulcan/post-deploy/vulcan-production-20260730T151307Z.tar.gz.enc
+SHA-256: f43a025f1a1c5d734fed0639871ffce34ded8614af8c23d192de0d6ec56f24cc
+```
+
+O ensaio pós-deploy validou os dois catálogos, todos os checksums internos, 1 tenant,
+15 usuários, 13 memberships, 3 filiais, 10 redes, 78 ativos, 2 perfis de Wallboard,
+22 identidades, 40.614 eventos, 62.184 auditorias e as 37 tabelas públicas da Evolution.
+Nenhum restore destrutivo foi executado no banco de produção.
+
 O timer `vulcan-backup.timer` executa diariamente, com retenção local de 14 dias. No
 Proxmox, o job `vulcan-prod01-daily` protege a VMID `103` no storage `BACKUPSERS` às
 `03:15`, em modo snapshot, com retenção de 7 diários, 4 semanais e 6 mensais.
@@ -165,11 +201,11 @@ agente e 11 módulos habilitados. Após o corte e o replay do piloto, a produç�
 39.909 eventos, 39.717 atividades e 58.946 registros de auditoria. A Evolution API possui
 37 tabelas. Os containers descartáveis usados no teste de restore foram removidos.
 
-Um reboot controlado somente da VM foi executado às `20:13:47 -03`. Docker, os oito
-containers, o backup timer e o QEMU Guest Agent voltaram automaticamente. O endereço
-oficial respondeu novamente, os endpoints de health/readiness passaram, o Workstation
-Agent reenviou os três eventos acumulados e zerou a fila. Chromium validou Agentes e
-Wallboard no IP oficial com `2/2` testes aprovados.
+Um novo reboot controlado somente da VM foi executado no fechamento da `0.4.0`; o boot
+registrado foi `2026-07-30T12:16:22-03:00`. Docker, os nove containers, o backup timer e
+o QEMU Guest Agent voltaram automaticamente. O endereço oficial recuperou health às
+`12:17:32-03:00`, o worker sincronizou novamente as integrações e o Workstation Agent
+reenviou o lote acumulado. O SRVERS01 não foi reiniciado.
 
 Comandos operacionais:
 
@@ -177,7 +213,7 @@ Comandos operacionais:
 ssh vulcanops@192.168.200.26
 cd /opt/vulcan/current
 sudo ./healthcheck.sh
-sudo ./logs.sh backend frontend edge
+sudo ./logs.sh backend frontend edge infrastructure-worker
 sudo ./restart.sh
 VULCAN_BACKUP_ROOT=/caminho/privado \
   sudo ./backup.sh
@@ -200,6 +236,12 @@ Após o corte:
 - o SRVERS01 alcançou `192.168.200.26:8099`;
 - nenhuma reinicialização, correção automática, GPO ou zona DNS foi alterada.
 
+Na validação posterior ao reboot da VM, `DFSR`, `DNS`, `Kdc`, `Netlogon`, `NTDS` e
+`W32Time` permaneceram `Running/Automatic`; `SYSVOL` e `NETLOGON` permaneceram
+compartilhados. Os testes focados de `dcdiag` (Advertising, Services, SysVolCheck,
+NetLogons e DNS) terminaram com código zero. Não houve evento crítico de Directory
+Service ou DNS Server nas duas horas verificadas.
+
 O `dcdiag /q` completo não está limpo por causas externas ao Vulcan: bind negado ao
 `SRVERS08` e eventos de confiança referentes a `SRVERS04` e `ERS-SJP-021`.
 `repadmin` também registrou erro operacional 110 ao consultar o `SRVERS08`, embora o
@@ -209,9 +251,12 @@ AD e não foram reparados por esta entrega.
 ## Riscos restantes
 
 - o endpoint oficial ainda usa HTTP interno; planejar certificado confiável e HTTPS;
-- encaminhamentos antigos `80`, `3001` e `3002` no DC permanecem como legado inativo;
+- encaminhamentos antigos `80`, `3001` e `3002` no DC permanecem como legado; não foram
+  removidos porque a auditoria de dependências compartilhadas ainda não foi concluída;
 - o MSI não foi instalado em Windows real nesta janela;
 - não há Server Agent piloto nem implantação GPO aprovada;
+- ainda não há piloto Collector, receivers syslog/traps/flows ou SNMP homologado;
+- incidentes permanecem vazios porque o correlator determinístico ainda não foi ativado;
 - o `dcdiag /q` completo contém pendências de AD não causadas pelo Vulcan.
 
 Prioridade operacional: homologar MSI e Server Agent em hosts Windows não críticos e

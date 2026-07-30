@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Nenhuma alteração pendente.
+
+## 0.4.0 — 2026-07-30
+
 - Added durable first-class routes for Workforce, Infrastructure, Agents, Timeline,
   Intelligence, Notifications and Settings, preserving session and subsection on reload.
 - Added tenant-scoped Workforce and Infrastructure Wallboards with persisted profiles,
@@ -10,6 +14,9 @@
 - Added read-only UniFi and Proxmox inventory reconciliation with runtime-only secrets.
 - Added dedicated Infrastructure inventory views for servers, virtualization, firewalls,
   switches, access points and printers without fabricated placeholder data.
+
+## Histórico anterior à 0.4.0
+
 - Added the unified Go Vulcan Agent with Workstation, Server and Collector profiles.
 - Added v2 one-time enrollment, Ed25519 request/policy signatures and replay protection.
 - Added encrypted SQLite offline queue, real canonical event ingestion and typed commands.

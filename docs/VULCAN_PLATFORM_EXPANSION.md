@@ -14,6 +14,12 @@ Repositório auditado: `/home/allan/Documentos/ProjetosLanFuture/Vulcan`
 
 Branch inicial: `main` em `07a8cc9`, alinhado com `origin/main`
 
+Estado de produção validado em `2026-07-30`: plataforma `0.4.0` na VM isolada
+`VULCAN-PROD01` (`192.168.200.26`), publicada por
+`http://192.168.200.4:8099`. Workforce permanece a entrada principal. As filiais,
+redes, ativos, Wallboards e integrações UniFi/Proxmox são persistentes e tenant-aware;
+discovery e automações corretivas permanecem desativados.
+
 ## Estado inicial registrado
 
 ### Worktree
@@ -598,6 +604,22 @@ no start e diretório de trabalho incorreto — corrigidas e retestadas no conta
 - [x] Push do branch correto é confirmado.
 
 ## Status de execução
+
+Fechamento da release `0.4.0`:
+
+| Item | Resultado |
+| --- | --- |
+| Rotas reais, F5, voltar e avançar | homologados no Chromium |
+| Wallboards Workforce/Infrastructure | dados reais, playlist persistida e read-only |
+| Filiais/redes/ativos/relações | 3 / 10 / 78 / 42 |
+| UniFi/Proxmox | reconciliação somente leitura operacional |
+| Políticas de discovery | 10, todas desativadas e seguras |
+| Backup pós-deploy | restaurado em dois bancos descartáveis |
+| Reboot controlado | somente VM Vulcan; serviços e fila recuperados |
+| AD/DNS | preservados; testes focados aprovados |
+
+O runbook autoritativo e os checksums estão em
+`docs/PRODUCTION_ERS_192_168_200_4.md`.
 
 | Marco | Estado |
 | --- | --- |
