@@ -140,6 +140,23 @@ O relatório JSON e as capturas inicial/final são gravados com permissão restr
 `/tmp`. O script mede heap, CPU aproximada da página, FPS, listeners, timers, canvases,
 contextos WebGL, cenas, painéis, conexões SSE, desconexões e erros de console.
 
+Resultado do candidato publicado como `0.5.0`:
+
+- 180 minutos solicitados e 496,18 minutos observados na janela local;
+- heap de 7.718.885 para 6.636.526 bytes, pico de 18.575.914 bytes;
+- FPS mínimo 8, média 53,5 e máximo 60 no preset adaptativo;
+- CPU aproximada da página em 1,29%;
+- listeners de 304 para 292, sem crescimento contínuo;
+- 14 conexões SSE e nove desconexões forçadas, com reconexão;
+- entrada e saída do takeover crítico observadas;
+- uma falha transitória de chunk ao tentar carregar recurso durante a queda forçada. A
+  amostra otimizada separada recuperou o SSE sem erro de página, e a homologação de
+  produção posterior ao reboot terminou com zero erro de console/página.
+
+O caminho Three.js foi homologado separadamente com WebGL/SwiftShader. A perda de
+contexto removeu o canvas, reduziu o preset e apresentou a topologia 2D sem erro. Em
+hardware sem WebGL, o fallback SVG/2D é a operação esperada.
+
 ## Diagnóstico
 
 ```bash

@@ -14,17 +14,18 @@ Repositório auditado: `/home/allan/Documentos/ProjetosLanFuture/Vulcan`
 
 Branch inicial: `main` em `07a8cc9`, alinhado com `origin/main`
 
-Estado de produção validado em `2026-07-30`: plataforma `0.4.0` na VM isolada
+Estado de produção validado em `2026-08-01`: plataforma `0.5.0` na VM isolada
 `VULCAN-PROD01` (`192.168.200.26`), publicada por
 `http://192.168.200.4:8099`. Workforce permanece a entrada principal. As filiais,
 redes, ativos, Wallboards e integrações UniFi/Proxmox são persistentes e tenant-aware;
 discovery e automações corretivas permanecem desativados.
 
-O candidato `0.5.0` evolui somente a experiência de TV e os contratos de leitura do
-Wallboard. A promoção para produção depende de soak, backup, restore e validação pela URL
-oficial; até esse gate, a versão operacional permanece `0.4.0`.
+A release `0.5.0` evolui a experiência de TV e os contratos de leitura do Wallboard. Ela
+foi promovida depois de testes unitários, integração, SQL real, regressão visual,
+backup/restore, soak e validação pela URL oficial. A `0.4.0` permanece intacta como
+rollback de imagens e configuração.
 
-No candidato, disponibilidade de Infrastructure não é inferida do cadastro: um ativo sem
+Nesta release, disponibilidade de Infrastructure não é inferida do cadastro: um ativo sem
 observação nos últimos 30 minutos aparece como `sem coleta`, e o score considera somente
 ativos com estado confirmado. A regra preserva o inventário e evita declarar saúde sem
 telemetria.
@@ -613,6 +614,32 @@ no start e diretório de trabalho incorreto — corrigidas e retestadas no conta
 - [x] Push do branch correto é confirmado.
 
 ## Status de execução
+
+Fechamento da release `0.5.0` em produção (`2026-08-01`):
+
+| Item | Resultado |
+| --- | --- |
+| Release/commit/build | `0.5.0` / `70faa0eac8b0` / `20260730T190051Z` |
+| Runtime | VM 103 `VULCAN-PROD01`, nove serviços reiniciados e saudáveis |
+| Entrada oficial | `http://192.168.200.4:8099` |
+| Workforce/Infrastructure | Command Centers reais, ambos homologados em Chromium |
+| 1080p / 1440p / 4K | sem overflow; F5 preservou rota e sessão |
+| Autorização da TV | `read_only`; mutação recusada com `403` |
+| Dados após reboot | 1 tenant, 15 usuários, 3 filiais, 78 ativos, 42 relações, 22 agentes |
+| Eventos após reboot | 41.912 unificados e 40.960 de atividade |
+| SSE | `ready` recebido; reconexão e polling de recuperação comprovados |
+| Soak solicitado | 180 min; 496,18 min observados por extensão da janela local |
+| Heap / FPS / CPU de página | 7,72→6,64 MB; média 53,5 FPS; aproximadamente 1,29% |
+| Backup pré-deploy | cifrado, checksum e 1.071/217 objetos de catálogo validados |
+| Restore | dois bancos descartáveis restaurados com contagens preservadas |
+| Reboot | somente VM 103; symlink e restart policies recuperaram a `0.5.0` |
+| Rollback | release `0.4.0` e backup pré-deploy preservados |
+
+Durante a desconexão deliberada do soak houve um erro transitório de carregamento de
+chunk, além do erro de recurso esperado sem rede. O SSE reconectou, a amostra curta
+otimizada terminou sem erros e a validação Chromium posterior — inclusive após reboot —
+ficou limpa. Recarregar a TV exatamente durante uma interrupção total ainda depende de o
+navegador já possuir os chunks da release em cache.
 
 Fechamento da release `0.4.0`:
 

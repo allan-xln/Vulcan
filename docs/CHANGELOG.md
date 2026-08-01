@@ -2,10 +2,14 @@
 
 ## Unreleased
 
-- Corrigida a verdade operacional do Wallboard: inventário sem observação recente não é
-  mais contado como online, e disponibilidade usa apenas estados confirmados.
+- Nenhuma alteração pendente após a publicação da `0.5.0`.
 
 ## 0.5.0 — 2026-07-30
+
+- Published to the isolated `VULCAN-PROD01` runtime and revalidated after a controlled
+  reboot on 2026-08-01. The official entry point remains
+  `http://192.168.200.4:8099`, with the domain controller acting only as the existing
+  network forwarder.
 
 - Rebuilt Workforce and Infrastructure Wallboards as the Vulcan Command Center without
   changing the main Workforce-first product navigation.
