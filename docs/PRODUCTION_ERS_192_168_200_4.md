@@ -2,7 +2,7 @@
 
 ## Estado autoritativo
 
-Data do corte: `2026-07-29`; última atualização: `2026-07-30`
+Data do corte: `2026-07-29`; última atualização: `2026-08-01`
 
 O endereço oficial do Vulcan na rede ERS é:
 
@@ -36,20 +36,20 @@ usar o mesmo endereço oficial; a aplicação não foi publicada diretamente na 
 
 ## Releases
 
-- plataforma em produção: `0.4.0`;
+- plataforma em produção: `0.5.0`;
 - agente publicado: `0.3.1`;
-- rollback imediato de imagem: release `0.3.6` preservada em
-  `/opt/vulcan/releases/vulcan-0.3.6-linux-amd64`;
+- rollback imediato de imagem: release `0.4.0` preservada em
+  `/opt/vulcan/releases/vulcan-0.4.0-linux-amd64`; a `0.3.6` também permanece arquivada;
 - commit e build exatos: `/version` e `manifests/release.json`;
 - os pacotes possuem `SHA256SUMS` e SBOM CycloneDX.
 
 Release de produção:
 
 ```text
-arquivo: dist/vulcan-0.4.0-linux-amd64.tar.gz
-SHA-256: da50e45b3feb6e7bb354aaac1207ee7a304ab10d6949f7fa8d3e3e9676ecc19d
-commit da release: 334b8b56ad74e9fa8c4aac39ff2eced29b392bd6
-build: 20260730T140148Z
+arquivo: dist/vulcan-0.5.0-linux-amd64.tar.gz
+SHA-256: 4e20de45c056517e9ebff95f6cc39f649dd7df17b1f7bf41940649f537eea577
+commit da release: 70faa0eac8b00c5363ff96869b6e74d8135fe892
+build: 20260730T190051Z
 ```
 
 A correção `0.3.1` acrescentou a autorização explícita de HTTP apenas para endereços IP
@@ -68,6 +68,12 @@ Wallboards Workforce e Infrastructure persistidos, e reconciliação UniFi/Proxm
 somente leitura. As dez políticas de discovery foram provisionadas desativadas, em modo
 seguro e sujeitas a aprovação.
 
+A `0.5.0` publica o Vulcan Command Center nos Wallboards Workforce e Infrastructure,
+com cenas independentes, perfis adaptativos, topologia 3D/2D, transições, takeover de
+alerta, atualização silenciosa da playlist, reduced motion e fallback sem WebGL. O
+snapshot continua exclusivamente tenant-aware e baseado em dados reais; ativo sem
+observação recente aparece como `sem coleta`, não como online.
+
 Na homologação de produção, Chromium percorreu `/infrastructure/assets`, F5,
 `/infrastructure/branches`, voltar, `/agents/installation`,
 `/wallboard/workforce` e `/wallboard/infra`; os três cenários passaram. O banco restaurado
@@ -79,6 +85,12 @@ auditoria continuam crescendo com a ingestão real.
 Na conferência final ao vivo de `2026-07-30T12:26:02-03:00`, os contadores haviam
 avançado para 40.630 eventos e 62.657 auditorias; health, readiness, liveness e version
 responderam `200` pelo endereço oficial.
+
+Após a promoção e o reboot controlado somente da VM 103 em `2026-08-01`, os nove
+serviços voltaram por `unless-stopped`; `/healthz`, `/readyz`, `/livez` e `/version`
+responderam `200`. Chromium revalidou os dois Command Centers e o F5 sem erro. O banco
+preservou 1 tenant, 15 usuários, 3 filiais, 78 ativos, 42 relações e 22 identidades de
+agente, com 41.912 eventos unificados e 40.960 eventos de atividade na conferência.
 
 ## Serviços
 
