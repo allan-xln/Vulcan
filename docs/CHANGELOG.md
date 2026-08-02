@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-- Nenhuma alteração pendente após a publicação da `0.5.0`.
+- Nenhuma alteração pendente após a publicação da `0.5.1`.
+
+## 0.5.1 — 2026-08-02
+
+- Fixed the Agent installation page to turn the browser-relative `/api` endpoint into the
+  official absolute origin before generating installation commands.
+- Private HTTP deployments now include `ALLOW_INSECURE_PRIVATE_NETWORK=true` automatically
+  in Windows MSI commands and `--allow-insecure-private-network` in Linux enrollment.
+- The installation page displays the exact endpoint delivered to the agent before a token
+  is generated.
 
 ## 0.5.0 — 2026-07-30
 

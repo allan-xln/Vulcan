@@ -83,7 +83,7 @@ describe("AgentsManagement", () => {
     installFetchMock();
     render(
       <AgentsManagement
-        apiUrl="http://localhost:3001"
+        apiUrl="/api"
         tenantId={agent.tenantId}
         token="test-token"
       />
@@ -97,8 +97,9 @@ describe("AgentsManagement", () => {
       expect(screen.getByText("PowerShell elevado")).toBeInTheDocument();
     });
     expect(screen.getByText(/expira/i)).toBeInTheDocument();
-    expect(screen.getByText(/ENROLLMENT_TOKEN="vulcan_enroll_short_lived_test_value"/)).toBeInTheDocument();
-    expect(screen.getByText(/ALLOW_INSECURE_PRIVATE_NETWORK=true/)).toBeInTheDocument();
+    const powershellCommand = screen.getByText(/ENROLLMENT_TOKEN="vulcan_enroll_short_lived_test_value"/).textContent;
+    expect(powershellCommand).toContain(`VULCAN_SERVER="${window.location.origin}/api"`);
+    expect(powershellCommand).toContain("ALLOW_INSECURE_PRIVATE_NETWORK=true");
     expect(screen.getByText(/--allow-insecure-private-network/)).toBeInTheDocument();
     expect(screen.getByText(/systemctl --user enable --now vulcan-agent-user/)).toBeInTheDocument();
   });
