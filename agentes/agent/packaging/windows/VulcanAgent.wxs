@@ -19,6 +19,7 @@
 
     <Property Id="VULCAN_SERVER" Secure="yes" Hidden="yes" />
     <Property Id="ENROLLMENT_TOKEN" Secure="yes" Hidden="yes" />
+    <Property Id="EnrollAgent" Hidden="yes" />
     <Property Id="AGENT_PROFILE" Value="workstation" Secure="yes" />
     <Property Id="ALLOW_INSECURE_PRIVATE_NETWORK" Value="false" Secure="yes" />
     <Property Id="SITE" Secure="yes" />
@@ -72,8 +73,7 @@
     <CustomAction
       Id="SetEnrollAgentData"
       Property="EnrollAgent"
-      Value="enroll --server &quot;[VULCAN_SERVER]&quot; --token &quot;[ENROLLMENT_TOKEN]&quot; --profile &quot;[AGENT_PROFILE]&quot; --allow-insecure-private-network=[ALLOW_INSECURE_PRIVATE_NETWORK]"
-      HideTarget="yes" />
+      Value="enroll --server &quot;[VULCAN_SERVER]&quot; --token &quot;[ENROLLMENT_TOKEN]&quot; --profile &quot;[AGENT_PROFILE]&quot; --allow-insecure-private-network=[ALLOW_INSECURE_PRIVATE_NETWORK]" />
     <CustomAction
       Id="EnrollAgent"
       FileKey="VulcanAgentExe"

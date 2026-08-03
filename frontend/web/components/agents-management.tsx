@@ -559,7 +559,8 @@ function InstallationView({ apiUrl, tenantId, token }: Props) {
     ? new URL("/agent-v2/vulcan-agent_amd64.deb", agentServerUrl).toString()
     : "/agent-v2/vulcan-agent_amd64.deb";
   const powershell = enrollment
-    ? `$ErrorActionPreference = 'Stop'
+    ? `& {
+$ErrorActionPreference = 'Stop'
 $Msi = Join-Path $env:TEMP 'VulcanAgent-Windows-x64.msi'
 $Log = Join-Path $env:TEMP 'VulcanAgent-install.log'
 $ExpectedHash = 'EA8F9000CDA22F900BA4553D34460A903DAE5C2DE1471F2B156196270D23F308'
@@ -591,7 +592,8 @@ Start-Sleep -Seconds 3
 $Service = Get-Service VulcanAgent -ErrorAction Stop
 $Agent = Join-Path $env:ProgramFiles 'Vulcan\\Agent\\VulcanAgent.exe'
 & $Agent status
-Write-Host "Vulcan Agent instalado. Servico: $($Service.Status). Codigo: $($Install.ExitCode)." -ForegroundColor Green`
+Write-Host "Vulcan Agent instalado. Servico: $($Service.Status). Codigo: $($Install.ExitCode)." -ForegroundColor Green
+}`
     : "";
   const linux = enrollment
     ? `set -euo pipefail

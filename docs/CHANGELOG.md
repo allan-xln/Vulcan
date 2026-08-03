@@ -8,6 +8,10 @@
 - A seleção de perfil foi transformada em opções explícitas de Estação, Servidor e Coletor.
   Trocar o perfil descarta o comando/token anterior para impedir enrollment com perfil
   divergente.
+- Corrigido o erro MSI 2717 da ação `SetEnrollAgentData`: o preparador de
+  `CustomActionData` volta a ser uma ação imediata tipo 51 válida, com validação automática
+  da tabela MSI no build. O PowerShell gerado também passa a executar dentro de um único
+  bloco, sem continuar ou exibir sucesso após uma falha.
 
 ## 0.5.1 — 2026-08-02
 

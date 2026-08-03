@@ -1,13 +1,13 @@
 # Vulcan Agent — release
 
-## Versão 0.3.1
+## Versão 0.3.2
 
 Artefatos:
 
 - `VulcanAgent.exe`;
 - `VulcanAgent-Windows-x64.msi`;
-- `vulcan-agent_0.3.1_amd64.deb`;
-- `vulcan-agent_0.3.1_sbom.cdx.json`;
+- `vulcan-agent_0.3.2_amd64.deb`;
+- `vulcan-agent_0.3.2_sbom.cdx.json`;
 - `SHA256SUMS`.
 
 `dist/` e os downloads copiados ao frontend são gerados e ignorados pelo Git.
@@ -19,7 +19,7 @@ Requisitos: Go compatível com o `go.mod`, `dpkg-deb` e WiX 3 em Windows ou
 
 ```bash
 cd agentes/agent
-VERSION=0.3.1 ./build-release.sh
+VERSION=0.3.2 ./build-release.sh
 ```
 
 Em um ambiente com ferramentas extraídas:
@@ -29,14 +29,15 @@ LD_LIBRARY_PATH=/caminho/msitools/usr/lib/x86_64-linux-gnu \
 WIXL_BINARY=/caminho/msitools/usr/bin/wixl \
 MSIBUILD_BINARY=/caminho/msitools/usr/bin/msibuild \
 WIXL_WXIDIR=/caminho/msitools/usr/share/wixl/include \
-VERSION=0.3.1 ./build-release.sh
+VERSION=0.3.2 ./build-release.sh
 ```
 
 O fallback Linux ajusta explicitamente no banco MSI:
 
 - `SecureCustomProperties`;
 - `MsiHiddenProperties`;
-- `HideTarget` das ações que transportam o token.
+- tipo 51 imediato de `SetEnrollAgentData`;
+- `HideTarget` somente na ação diferida `EnrollAgent` que transporta o token.
 
 Isso deve ser validado a cada alteração do WXS.
 
@@ -45,7 +46,7 @@ Isso deve ser validado a cada alteração do WXS.
 ```bash
 corepack pnpm verify:agent
 sha256sum --check dist/SHA256SUMS
-dpkg-deb --info dist/vulcan-agent_0.3.1_amd64.deb
+dpkg-deb --info dist/vulcan-agent_0.3.2_amd64.deb
 ```
 
 Além da inspeção do pacote, execute:

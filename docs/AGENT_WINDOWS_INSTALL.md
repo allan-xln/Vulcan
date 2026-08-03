@@ -3,9 +3,13 @@
 ## Compatibilidade e estado
 
 O mesmo binário `amd64` atende Workstation, Server e Collector em Windows 10/11 e
-Windows Server 2016–2025. A entrega `0.3.1` foi compilada para Windows, teve o CLI executado
+Windows Server 2016–2025. A entrega `0.3.2` foi compilada para Windows, teve o CLI executado
 via Wine e o MSI foi inspecionado estruturalmente. A instalação e o ciclo do Windows Service
 Manager ainda precisam ser homologados em uma VM Windows antes de distribuição ampla.
+
+A `0.3.2` corrige o erro MSI 2717 observado no primeiro piloto Windows da `0.3.1`: a ação
+imediata que preenche `CustomActionData` agora usa o tipo 51 válido, enquanto somente a ação
+de enrollment diferida permanece elevada e com alvo oculto.
 
 O pacote ainda não possui assinatura Authenticode. Não distribua como release de produção
 até configurar o certificado de code signing e verificar a assinatura no pipeline.

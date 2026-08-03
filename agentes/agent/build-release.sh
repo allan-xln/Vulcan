@@ -12,6 +12,7 @@ GO_BINARY="${GO_BINARY:-$REPOSITORY_ROOT/.tools/go/bin/go}"
 WIXL_BINARY="${WIXL_BINARY:-$(command -v wixl || true)}"
 WIXL_WXIDIR="${WIXL_WXIDIR:-}"
 MSIBUILD_BINARY="${MSIBUILD_BINARY:-$(command -v msibuild || true)}"
+MSIINFO_BINARY="${MSIINFO_BINARY:-$(command -v msiinfo || true)}"
 WIX_CANDLE="${WIX_CANDLE:-}"
 WIX_LIGHT="${WIX_LIGHT:-}"
 MONO_BINARY="${MONO_BINARY:-$(command -v mono || true)}"
@@ -27,6 +28,9 @@ if [ -z "$WIXL_BINARY" ] && [ -x "$PORTABLE_MSITOOLS/bin/wixl" ]; then
 fi
 if [ -z "$MSIBUILD_BINARY" ] && [ -x "$PORTABLE_MSITOOLS/bin/msibuild" ]; then
   MSIBUILD_BINARY="$PORTABLE_MSITOOLS/bin/msibuild"
+fi
+if [ -z "$MSIINFO_BINARY" ] && [ -x "$PORTABLE_MSITOOLS/bin/msiinfo" ]; then
+  MSIINFO_BINARY="$PORTABLE_MSITOOLS/bin/msiinfo"
 fi
 if [ -z "$WIXL_WXIDIR" ] && [ -d "$PORTABLE_MSITOOLS/share/wixl-0.101/include" ]; then
   WIXL_WXIDIR="$PORTABLE_MSITOOLS/share/wixl-0.101/include"
@@ -114,10 +118,29 @@ else
     "$WIXL_BINARY" "${WIXL_ARGUMENTS[@]}" "$WIXL_SOURCE"
     "$MSIBUILD_BINARY" "$DIST_DIR/VulcanAgent-Windows-x64.msi" -q \
       "UPDATE Property SET Value = 'WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED;VULCAN_SERVER;ENROLLMENT_TOKEN;AGENT_PROFILE;SITE;ALLOW_INSECURE_PRIVATE_NETWORK' WHERE Property = 'SecureCustomProperties'
-       INSERT INTO Property (Property, Value) VALUES ('MsiHiddenProperties', 'VULCAN_SERVER;ENROLLMENT_TOKEN')
-       UPDATE CustomAction SET Type = 10291 WHERE Action = 'SetEnrollAgentData'
+       INSERT INTO Property (Property, Value) VALUES ('MsiHiddenProperties', 'VULCAN_SERVER;ENROLLMENT_TOKEN;EnrollAgent')
+       UPDATE CustomAction SET Type = 51 WHERE Action = 'SetEnrollAgentData'
        UPDATE CustomAction SET Type = 11282 WHERE Action = 'EnrollAgent'"
   )
+fi
+
+if [ -n "$MSIINFO_BINARY" ] && [ -x "$MSIINFO_BINARY" ]; then
+  CUSTOM_ACTION_TABLE="$STAGING_DIR/CustomAction.idt"
+  PROPERTY_TABLE="$STAGING_DIR/Property.idt"
+  "$MSIINFO_BINARY" export "$DIST_DIR/VulcanAgent-Windows-x64.msi" CustomAction > "$CUSTOM_ACTION_TABLE"
+  "$MSIINFO_BINARY" export "$DIST_DIR/VulcanAgent-Windows-x64.msi" Property > "$PROPERTY_TABLE"
+  grep -Fq $'SetEnrollAgentData\t51\tEnrollAgent\t' "$CUSTOM_ACTION_TABLE" || {
+    echo "MSI SetEnrollAgentData must be an immediate type 51 property action" >&2
+    exit 1
+  }
+  grep -Fq $'EnrollAgent\t11282\tVulcanAgentExe\t[CustomActionData]' "$CUSTOM_ACTION_TABLE" || {
+    echo "MSI EnrollAgent must remain deferred, elevated and hidden" >&2
+    exit 1
+  }
+  grep -Fq $'MsiHiddenProperties\tVULCAN_SERVER;ENROLLMENT_TOKEN;EnrollAgent' "$PROPERTY_TABLE" || {
+    echo "MSI enrollment properties must remain hidden" >&2
+    exit 1
+  }
 fi
 
 (

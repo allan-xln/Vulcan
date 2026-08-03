@@ -101,11 +101,13 @@ describe("AgentsManagement", () => {
     const powershellCommand = screen.getByText(/ENROLLMENT_TOKEN="vulcan_enroll_short_lived_test_value"/).textContent;
     expect(powershellCommand).toContain(`Invoke-WebRequest -UseBasicParsing -Uri '${window.location.origin}/agent-v2/VulcanAgent-Windows-x64.msi'`);
     expect(powershellCommand).toContain("Get-FileHash $Msi -Algorithm SHA256");
+    expect(powershellCommand?.startsWith("& {\n$ErrorActionPreference = 'Stop'")).toBe(true);
     expect(powershellCommand).toContain(`VULCAN_SERVER="${window.location.origin}/api"`);
     expect(powershellCommand).toContain('AGENT_PROFILE="server"');
     expect(powershellCommand).toContain("ALLOW_INSECURE_PRIVATE_NETWORK=true");
     expect(powershellCommand).toContain("Remove-Item $Msi");
     expect(powershellCommand).toContain("Get-Service VulcanAgent");
+    expect(powershellCommand?.endsWith("\n}")).toBe(true);
     expect(screen.queryByRole("link", { name: /MSI Windows/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /DEB Linux/i })).not.toBeInTheDocument();
   });
