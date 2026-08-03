@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- Nenhuma alteração pendente após a publicação da `0.5.1`.
+- A instalação de agentes agora gera um único comando por sistema e perfil. No Windows, o
+  PowerShell baixa o MSI para uma pasta temporária, valida SHA-256, instala silenciosamente,
+  remove o pacote e confirma serviço/status; não há download manual na tela.
+- A seleção de perfil foi transformada em opções explícitas de Estação, Servidor e Coletor.
+  Trocar o perfil descarta o comando/token anterior para impedir enrollment com perfil
+  divergente.
 
 ## 0.5.1 — 2026-08-02
 

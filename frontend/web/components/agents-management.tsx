@@ -25,6 +25,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathState } from "@/lib/url-state";
 
 type AgentProfile = "workstation" | "server" | "collector";
+type AgentPlatform = "windows" | "linux";
 type AgentSection =
   | "all"
   | "workstations"
@@ -518,6 +519,7 @@ function PoliciesView({ apiUrl, tenantId, token, policies, onCreated }: Props & 
 
 function InstallationView({ apiUrl, tenantId, token }: Props) {
   const [profile, setProfile] = useState<AgentProfile>("workstation");
+  const [platform, setPlatform] = useState<AgentPlatform>("windows");
   const [creating, setCreating] = useState(false);
   const [enrollment, setEnrollment] = useState<EnrollmentToken | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -543,30 +545,109 @@ function InstallationView({ apiUrl, tenantId, token }: Props) {
     }
   }
 
+  function selectProfile(nextProfile: AgentProfile) {
+    setProfile(nextProfile);
+    setEnrollment(null);
+    setError(null);
+  }
+
   const privateHttp = agentServerUrl.startsWith("http://");
+  const windowsInstallerUrl = agentServerUrl.startsWith("http")
+    ? new URL("/agent-v2/VulcanAgent-Windows-x64.msi", agentServerUrl).toString()
+    : "/agent-v2/VulcanAgent-Windows-x64.msi";
+  const linuxInstallerUrl = agentServerUrl.startsWith("http")
+    ? new URL("/agent-v2/vulcan-agent_amd64.deb", agentServerUrl).toString()
+    : "/agent-v2/vulcan-agent_amd64.deb";
   const powershell = enrollment
-    ? `msiexec.exe /i .\\VulcanAgent-Windows-x64.msi /qn /norestart VULCAN_SERVER="${agentServerUrl}" ENROLLMENT_TOKEN="${enrollment.token}" AGENT_PROFILE="${profile}"${privateHttp ? " ALLOW_INSECURE_PRIVATE_NETWORK=true" : ""} /l*v "$env:TEMP\\VulcanAgent-install.log"`
+    ? `$ErrorActionPreference = 'Stop'
+$Msi = Join-Path $env:TEMP 'VulcanAgent-Windows-x64.msi'
+$Log = Join-Path $env:TEMP 'VulcanAgent-install.log'
+$ExpectedHash = 'EA8F9000CDA22F900BA4553D34460A903DAE5C2DE1471F2B156196270D23F308'
+
+$IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $IsAdmin) { throw 'Abra o PowerShell como administrador e execute novamente.' }
+if (Get-Service VulcanAgent -ErrorAction SilentlyContinue) { throw 'O Vulcan Agent ja esta instalado nesta maquina.' }
+
+Invoke-WebRequest -UseBasicParsing -Uri '${windowsInstallerUrl}' -OutFile $Msi
+if ((Get-FileHash $Msi -Algorithm SHA256).Hash -ne $ExpectedHash) {
+  Remove-Item $Msi -Force -ErrorAction SilentlyContinue
+  throw 'O instalador baixado nao passou na validacao SHA-256.'
+}
+Unblock-File $Msi
+
+$Arguments = @(
+  '/i', ('"' + $Msi + '"'), '/qn', '/norestart',
+  'VULCAN_SERVER="${agentServerUrl}"',
+  'ENROLLMENT_TOKEN="${enrollment.token}"',
+  'AGENT_PROFILE="${profile}"',
+  'ALLOW_INSECURE_PRIVATE_NETWORK=${privateHttp ? "true" : "false"}',
+  '/l*v', ('"' + $Log + '"')
+)
+$Install = Start-Process -FilePath "$env:SystemRoot\\System32\\msiexec.exe" -ArgumentList $Arguments -Wait -PassThru
+Remove-Item $Msi -Force -ErrorAction SilentlyContinue
+if ($Install.ExitCode -notin @(0, 3010)) { throw "Falha na instalacao (codigo $($Install.ExitCode)). Log: $Log" }
+
+Start-Sleep -Seconds 3
+$Service = Get-Service VulcanAgent -ErrorAction Stop
+$Agent = Join-Path $env:ProgramFiles 'Vulcan\\Agent\\VulcanAgent.exe'
+& $Agent status
+Write-Host "Vulcan Agent instalado. Servico: $($Service.Status). Codigo: $($Install.ExitCode)." -ForegroundColor Green`
     : "";
   const linux = enrollment
-    ? profile === "workstation"
-      ? `env VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${agentServerUrl}' --profile workstation${privateHttp ? " --allow-insecure-private-network" : ""}\nsystemctl --user enable --now vulcan-agent-user`
-      : `sudo -u vulcan-agent env VULCAN_AGENT_CONFIG_DIR=/etc/vulcan-agent VULCAN_AGENT_DATA_DIR=/var/lib/vulcan-agent VULCAN_AGENT_LOG_DIR=/var/log/vulcan-agent VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${agentServerUrl}' --profile ${profile}${privateHttp ? " --allow-insecure-private-network" : ""}\nsudo systemctl enable --now vulcan-agent`
+    ? `set -euo pipefail
+pkg="$(mktemp --suffix=.deb)"
+trap 'rm -f "$pkg"' EXIT
+curl -fsSL '${linuxInstallerUrl}' -o "$pkg"
+echo '9d360970bd03d3a1f7f42d71be4da3bcbfc2e6f207dc7620e4810809baf20389  '"$pkg" | sha256sum -c -
+sudo apt-get install -y "$pkg"
+${profile === "workstation"
+  ? `VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${agentServerUrl}' --profile workstation${privateHttp ? " --allow-insecure-private-network" : ""}
+systemctl --user enable --now vulcan-agent-user
+systemctl --user status vulcan-agent-user --no-pager`
+  : `sudo -u vulcan-agent env VULCAN_AGENT_CONFIG_DIR=/etc/vulcan-agent VULCAN_AGENT_DATA_DIR=/var/lib/vulcan-agent VULCAN_AGENT_LOG_DIR=/var/log/vulcan-agent VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' /usr/bin/vulcan-agent enroll --server '${agentServerUrl}' --profile ${profile}${privateHttp ? " --allow-insecure-private-network" : ""}
+sudo systemctl enable --now vulcan-agent
+sudo systemctl status vulcan-agent --no-pager`}`
     : "";
+
+  const profiles: Array<{ value: AgentProfile; label: string; description: string; icon: typeof Laptop }> = [
+    { value: "workstation", label: "Estação", description: "Produtividade, atividade, saúde e inventário.", icon: Laptop },
+    { value: "server", label: "Servidor", description: "Serviços, recursos e disponibilidade. Sem produtividade.", icon: Server },
+    { value: "collector", label: "Coletor", description: "Descoberta e integrações de rede somente leitura.", icon: Network }
+  ];
 
   return (
     <div className="border border-zinc-800 bg-black/30 p-5">
       <div className="max-w-3xl">
         <p className="text-[10px] uppercase tracking-[0.24em] text-orange-300">Instalar Vulcan Agent</p>
-        <h2 className="mt-2 text-2xl font-semibold">Um instalador, três perfis</h2>
-        <ol className="mt-5 grid gap-2 text-sm text-zinc-400 sm:grid-cols-5">
-          {["Escolha o perfil", "Gere o token", "Baixe o pacote", "Execute", "Acompanhe aqui"].map((step, index) => <li key={step} className="border border-zinc-800 p-3"><span className="text-orange-300">{index + 1}.</span><br />{step}</li>)}
+        <h2 className="mt-2 text-2xl font-semibold">Escolha, copie e instale</h2>
+        <p className="mt-2 text-sm text-zinc-500">O comando baixa, valida, instala, remove o pacote temporário e confirma o serviço.</p>
+        <ol className="mt-5 grid gap-2 text-sm text-zinc-400 sm:grid-cols-3">
+          {["Escolha o sistema e o perfil", "Gere o comando de uso único", "Cole como administrador"].map((step, index) => <li key={step} className="border border-zinc-800 p-3"><span className="text-orange-300">{index + 1}.</span><br />{step}</li>)}
         </ol>
       </div>
-      <div className="mt-6 flex flex-wrap gap-3">
-        <select value={profile} onChange={(event) => setProfile(event.target.value as AgentProfile)} className="border border-zinc-800 bg-black px-3 py-2 text-sm"><option value="workstation">Workstation</option><option value="server">Server</option><option value="collector">Collector</option></select>
-        <button onClick={() => void createToken()} disabled={creating} className="flex items-center gap-2 bg-orange-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"><KeyRound className="h-4 w-4" />{creating ? "Gerando..." : "Gerar token de 1 hora"}</button>
-        <a href="/agent-v2/VulcanAgent-Windows-x64.msi" className="flex items-center gap-2 border border-zinc-700 px-4 py-2 text-sm text-zinc-300"><Download className="h-4 w-4" />MSI Windows</a>
-        <a href="/agent-v2/vulcan-agent_amd64.deb" className="flex items-center gap-2 border border-zinc-700 px-4 py-2 text-sm text-zinc-300"><Download className="h-4 w-4" />DEB Linux</a>
+      <div className="mt-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Sistema</p>
+        <div className="mt-2 inline-flex border border-zinc-800 bg-black p-1">
+          {(["windows", "linux"] as AgentPlatform[]).map((item) => (
+            <button key={item} type="button" aria-pressed={platform === item} onClick={() => setPlatform(item)} className={`px-4 py-2 text-sm font-medium transition ${platform === item ? "bg-orange-500 text-black" : "text-zinc-400 hover:text-white"}`}>
+              {item === "windows" ? "Windows" : "Linux"}
+            </button>
+          ))}
+        </div>
+        <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Perfil</p>
+        <div className="mt-2 grid gap-3 lg:grid-cols-3">
+          {profiles.map((item) => {
+            const Icon = item.icon;
+            const selected = profile === item.value;
+            return (
+              <button key={item.value} type="button" aria-pressed={selected} onClick={() => selectProfile(item.value)} className={`flex items-start gap-3 border p-4 text-left transition ${selected ? "border-orange-400 bg-orange-400/10" : "border-zinc-800 bg-black/30 hover:border-zinc-700"}`}>
+                <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${selected ? "text-orange-300" : "text-zinc-600"}`} />
+                <span><span className="block text-sm font-semibold text-zinc-200">{item.label}</span><span className="mt-1 block text-xs leading-5 text-zinc-500">{item.description}</span></span>
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={() => void createToken()} disabled={creating} className="mt-5 flex w-full items-center justify-center gap-2 bg-orange-500 px-4 py-3 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:opacity-50 sm:w-auto"><KeyRound className="h-4 w-4" />{creating ? "Gerando comando..." : `Gerar comando para ${profileLabel(profile)}`}</button>
       </div>
       <p className="mt-3 text-xs text-zinc-500">
         Endpoint entregue ao agente: <span className="text-zinc-300">{agentServerUrl}</span>
@@ -574,10 +655,9 @@ function InstallationView({ apiUrl, tenantId, token }: Props) {
       </p>
       {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
       {enrollment ? (
-        <div className="mt-6 grid gap-4 lg:grid-cols-2">
-          <CommandBlock title="PowerShell elevado" command={powershell} />
-          <CommandBlock title="Ubuntu / Debian / Zorin" command={linux} />
-          <div className="lg:col-span-2 flex items-start gap-3 border border-amber-400/25 bg-amber-400/5 p-4 text-xs text-amber-100/75"><ShieldCheck className="h-4 w-4 shrink-0" /><p>{enrollment.warning} Expira {new Date(enrollment.expiresAt).toLocaleString("pt-BR")} e aceita {enrollment.maxUses} uso.</p></div>
+        <div className="mt-6 space-y-4">
+          <CommandBlock title={platform === "windows" ? "Windows · PowerShell como administrador" : "Linux · terminal"} command={platform === "windows" ? powershell : linux} />
+          <div className="flex items-start gap-3 border border-amber-400/25 bg-amber-400/5 p-4 text-xs text-amber-100/75"><ShieldCheck className="h-4 w-4 shrink-0" /><p>{enrollment.warning} Expira {new Date(enrollment.expiresAt).toLocaleString("pt-BR")} e aceita {enrollment.maxUses} uso. Alterar o perfil descarta este comando para evitar cadastro incorreto.</p></div>
         </div>
       ) : null}
     </div>

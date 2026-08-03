@@ -91,16 +91,33 @@ describe("AgentsManagement", () => {
     await screen.findByText("ERS-DEV-01");
     fireEvent.click(screen.getByRole("button", { name: "Instalação" }));
     expect(window.location.pathname).toBe("/agents/installation");
-    fireEvent.click(screen.getByRole("button", { name: /Gerar token/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Servidor / }));
+    fireEvent.click(screen.getByRole("button", { name: /Gerar comando/ }));
 
     await waitFor(() => {
-      expect(screen.getByText("PowerShell elevado")).toBeInTheDocument();
+      expect(screen.getByText("Windows · PowerShell como administrador")).toBeInTheDocument();
     });
     expect(screen.getByText(/expira/i)).toBeInTheDocument();
     const powershellCommand = screen.getByText(/ENROLLMENT_TOKEN="vulcan_enroll_short_lived_test_value"/).textContent;
+    expect(powershellCommand).toContain(`Invoke-WebRequest -UseBasicParsing -Uri '${window.location.origin}/agent-v2/VulcanAgent-Windows-x64.msi'`);
+    expect(powershellCommand).toContain("Get-FileHash $Msi -Algorithm SHA256");
     expect(powershellCommand).toContain(`VULCAN_SERVER="${window.location.origin}/api"`);
+    expect(powershellCommand).toContain('AGENT_PROFILE="server"');
     expect(powershellCommand).toContain("ALLOW_INSECURE_PRIVATE_NETWORK=true");
-    expect(screen.getByText(/--allow-insecure-private-network/)).toBeInTheDocument();
-    expect(screen.getByText(/systemctl --user enable --now vulcan-agent-user/)).toBeInTheDocument();
+    expect(powershellCommand).toContain("Remove-Item $Msi");
+    expect(powershellCommand).toContain("Get-Service VulcanAgent");
+    expect(screen.queryByRole("link", { name: /MSI Windows/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /DEB Linux/i })).not.toBeInTheDocument();
+  });
+
+  it("discards a generated command when the profile changes", async () => {
+    installFetchMock();
+    render(<AgentsManagement apiUrl="/api" tenantId={agent.tenantId} token="test-token" />);
+    await screen.findByText("ERS-DEV-01");
+    fireEvent.click(screen.getByRole("button", { name: "Instalação" }));
+    fireEvent.click(screen.getByRole("button", { name: /Gerar comando/ }));
+    expect(await screen.findByText("Windows · PowerShell como administrador")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Servidor / }));
+    expect(screen.queryByText("Windows · PowerShell como administrador")).not.toBeInTheDocument();
   });
 });
