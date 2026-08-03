@@ -101,6 +101,7 @@ describe("AgentsManagement", () => {
     const powershellCommand = screen.getByText(/ENROLLMENT_TOKEN="vulcan_enroll_short_lived_test_value"/).textContent;
     expect(powershellCommand).toContain(`Invoke-WebRequest -UseBasicParsing -Uri '${window.location.origin}/agent-v2/VulcanAgent-Windows-x64.msi'`);
     expect(powershellCommand).toContain("Get-FileHash $Msi -Algorithm SHA256");
+    expect(powershellCommand).toContain("27B29853FB01900594280CDC5F85406B847CCA15617BA0B2CDE8E98B3228D1F7");
     expect(powershellCommand?.startsWith("& {\n$ErrorActionPreference = 'Stop'")).toBe(true);
     expect(powershellCommand).toContain(`VULCAN_SERVER="${window.location.origin}/api"`);
     expect(powershellCommand).toContain('AGENT_PROFILE="server"');

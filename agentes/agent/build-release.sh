@@ -151,18 +151,27 @@ fi
     --output "$DIST_DIR/vulcan-agent_${VERSION}_sbom.cdx.json"
 )
 
-sha256sum \
-  "$DIST_DIR/VulcanAgent.exe" \
-  "$DIST_DIR/VulcanAgent-Windows-x64.msi" \
-  "$DIST_DIR/vulcan-agent_${VERSION}_amd64.deb" \
-  "$DIST_DIR/vulcan-agent_${VERSION}_sbom.cdx.json" \
-  > "$DIST_DIR/SHA256SUMS"
+(
+  cd "$DIST_DIR"
+  sha256sum \
+    "VulcanAgent.exe" \
+    "VulcanAgent-Windows-x64.msi" \
+    "vulcan-agent_${VERSION}_amd64.deb" \
+    "vulcan-agent_${VERSION}_sbom.cdx.json"
+) > "$DIST_DIR/SHA256SUMS"
 
 mkdir -p "$REPOSITORY_ROOT/frontend/web/public/agent-v2"
 install -m 0644 "$DIST_DIR/VulcanAgent-Windows-x64.msi" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/VulcanAgent-Windows-x64.msi"
 install -m 0644 "$DIST_DIR/VulcanAgent.exe" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/VulcanAgent.exe"
 install -m 0644 "$DIST_DIR/vulcan-agent_${VERSION}_amd64.deb" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/vulcan-agent_amd64.deb"
 install -m 0644 "$DIST_DIR/vulcan-agent_${VERSION}_sbom.cdx.json" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/vulcan-agent_sbom.cdx.json"
-install -m 0644 "$DIST_DIR/SHA256SUMS" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/SHA256SUMS"
+(
+  cd "$REPOSITORY_ROOT/frontend/web/public/agent-v2"
+  sha256sum \
+    "VulcanAgent.exe" \
+    "VulcanAgent-Windows-x64.msi" \
+    "vulcan-agent_amd64.deb" \
+    "vulcan-agent_sbom.cdx.json"
+) > "$REPOSITORY_ROOT/frontend/web/public/agent-v2/SHA256SUMS"
 
 echo "Vulcan Agent release $VERSION built in $DIST_DIR"

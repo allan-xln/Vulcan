@@ -563,7 +563,7 @@ function InstallationView({ apiUrl, tenantId, token }: Props) {
 $ErrorActionPreference = 'Stop'
 $Msi = Join-Path $env:TEMP 'VulcanAgent-Windows-x64.msi'
 $Log = Join-Path $env:TEMP 'VulcanAgent-install.log'
-$ExpectedHash = 'EA8F9000CDA22F900BA4553D34460A903DAE5C2DE1471F2B156196270D23F308'
+$ExpectedHash = '27B29853FB01900594280CDC5F85406B847CCA15617BA0B2CDE8E98B3228D1F7'
 
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $IsAdmin) { throw 'Abra o PowerShell como administrador e execute novamente.' }
@@ -600,7 +600,7 @@ Write-Host "Vulcan Agent instalado. Servico: $($Service.Status). Codigo: $($Inst
 pkg="$(mktemp --suffix=.deb)"
 trap 'rm -f "$pkg"' EXIT
 curl -fsSL '${linuxInstallerUrl}' -o "$pkg"
-echo '9d360970bd03d3a1f7f42d71be4da3bcbfc2e6f207dc7620e4810809baf20389  '"$pkg" | sha256sum -c -
+echo '9ffc36fc732ea8bd3436b46ebe8e6f5bf588c6e476fb460e7841e507b8bb2174  '"$pkg" | sha256sum -c -
 sudo apt-get install -y "$pkg"
 ${profile === "workstation"
   ? `VULCAN_ENROLLMENT_TOKEN='${enrollment.token}' vulcan-agent enroll --server '${agentServerUrl}' --profile workstation${privateHttp ? " --allow-insecure-private-network" : ""}
