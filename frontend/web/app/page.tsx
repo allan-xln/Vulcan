@@ -1489,8 +1489,8 @@ const commands: { key: ViewKey; label: string; icon: typeof Gauge }[] = [
   { key: "metrics", label: "Métricas", icon: Activity },
   { key: "insights", label: "Insights", icon: Activity },
   { key: "agents", label: "Agentes", icon: RadioTower },
-  { key: "infrastructure", label: "Infrastructure", icon: DatabaseZap },
-  { key: "timeline", label: "Timeline", icon: CalendarClock },
+  { key: "infrastructure", label: "Infraestrutura", icon: DatabaseZap },
+  { key: "timeline", label: "Linha do tempo", icon: CalendarClock },
   { key: "notifications", label: "Notificações", icon: BellRing },
   { key: "settings", label: "Configurações", icon: Layers3 }
 ];
@@ -3130,13 +3130,13 @@ function LoginExperience({
 
   return (
     <motion.section
-      className="relative z-10 grid min-h-screen place-items-center px-6 py-10"
+      className="vulcan-login-shell relative z-10 grid min-h-screen place-items-center px-6 py-10"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
       <div className="grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
-        <div>
+        <div className="vulcan-login-copy">
           <div className="mb-8 flex items-center gap-4">
             <BrandMark size={76} />
             <div>
@@ -3154,7 +3154,7 @@ function LoginExperience({
 
         <motion.form
           onSubmit={onLogin}
-          className="relative overflow-hidden border border-orange-400/20 bg-zinc-950/85 p-8 shadow-[0_0_42px_rgba(249,115,22,0.10)] backdrop-blur-md"
+          className="vulcan-login-card relative overflow-hidden border border-orange-400/20 bg-zinc-950/85 p-8 shadow-[0_0_42px_rgba(249,115,22,0.10)] backdrop-blur-md"
           initial={{ x: 70, opacity: 0, scale: 0.96 }}
           animate={{ x: 0, opacity: 1, scale: 1 }}
           transition={{ duration: 0.75, delay: 0.15 }}
@@ -3331,20 +3331,59 @@ function DashboardShell({
   const [commandOpen, setCommandOpen] = useState(false);
 
   return (
-    <motion.section className="relative z-10 min-h-screen px-4 py-4 md:px-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <div className="mx-auto min-h-[calc(100vh-2rem)] w-full max-w-[1920px]">
+    <motion.section className="vulcan-app-shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <aside className="vulcan-sidebar" aria-label="Navegação principal">
+        <div className="vulcan-sidebar-brand">
+          <BrandMark size={38} />
+          <div>
+            <strong>Vulcan</strong>
+            <span>Operational Intelligence</span>
+          </div>
+        </div>
+        <nav className="vulcan-sidebar-nav">
+          {commands.map((command) => {
+            const Icon = command.icon;
+            const active = activeView === command.key;
+            return (
+              <motion.button
+                key={command.key}
+                type="button"
+                onClick={() => setView(command.key)}
+                className={active ? "is-active" : ""}
+                whileHover={{ x: 3 }}
+                whileTap={{ scale: 0.98 }}
+                aria-current={active ? "page" : undefined}
+                title={commandSummary[command.key]}
+              >
+                <Icon aria-hidden="true" />
+                <span>{command.label}</span>
+                {active ? <motion.i layoutId="active-navigation" /> : null}
+              </motion.button>
+            );
+          })}
+        </nav>
+        <div className="vulcan-sidebar-footer">
+          <div className="vulcan-user-avatar">{identity.trim().charAt(0).toUpperCase() || "V"}</div>
+          <div className="min-w-0">
+            <strong>{identity}</strong>
+            <span>{authMode === "supabase" ? "Sessão corporativa" : "Acesso seguro"}</span>
+          </div>
+          <button type="button" onClick={onLogout} aria-label="Sair" title="Sair"><LogOut /></button>
+        </div>
+      </aside>
+
+      <div className="vulcan-app-main">
         <Header
           activeView={activeView}
           highImpact={highImpact}
-          identity={identity}
-          authMode={authMode}
           onlineAgents={onlineAgents}
           liveStatusLabel={liveStatusLabel}
           supabaseStatus={supabaseStatus}
           onOpenCommand={() => setCommandOpen(true)}
           onLogout={onLogout}
         />
-        <AnimatePresence mode="wait">
+        <div className="vulcan-view-container">
+          <AnimatePresence mode="wait">
           {activeView === "dashboard" && (
             <DashboardView
               key="dashboard"
@@ -3358,12 +3397,6 @@ function DashboardShell({
               operationalIntelligence={operationalIntelligence}
               hierarchy={hierarchy}
               supabaseStatus={supabaseStatus}
-              whatsAppStatus={whatsAppStatus}
-              emailStatuses={emailStatuses}
-              aiStatus={aiStatus}
-              schedules={schedules}
-              onlineAgents={onlineAgents}
-              liveStatusLabel={liveStatusLabel}
               allowDemoFallback={allowDemoFallback}
               onOpenMetrics={onOpenMetrics}
             />
@@ -3485,7 +3518,8 @@ function DashboardShell({
               userRole={userRole}
             />
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        </div>
       </div>
       <CommandOverlay
         open={commandOpen}
@@ -3504,8 +3538,6 @@ function DashboardShell({
 function Header({
   activeView,
   highImpact,
-  identity,
-  authMode,
   onlineAgents,
   liveStatusLabel,
   supabaseStatus,
@@ -3514,8 +3546,6 @@ function Header({
 }: {
   activeView: ViewKey;
   highImpact: number;
-  identity: string;
-  authMode: "supabase" | "local";
   onlineAgents: number;
   liveStatusLabel: string;
   supabaseStatus: SupabaseStatus;
@@ -3523,6 +3553,7 @@ function Header({
   onLogout: () => void;
 }) {
   const currentCommand = commands.find((item) => item.key === activeView) ?? commands[0];
+  const CurrentIcon = currentCommand.icon;
   const supabaseLabel = !supabaseStatus.configured
     ? "Supabase pendente"
     : supabaseStatus.databaseReachable === false
@@ -3531,42 +3562,39 @@ function Header({
 
   return (
     <motion.header
-      className="relative mb-4 grid gap-4 overflow-hidden border border-zinc-800 bg-zinc-950 p-4 lg:grid-cols-[1fr_auto]"
+      className="vulcan-topbar"
       initial={{ y: -18, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
     >
-      <div className="flex min-w-0 gap-4">
-        <div className="hidden h-16 w-16 shrink-0 place-items-center border border-orange-400/25 bg-black/60 md:grid">
-          <BrandMark size={42} />
+      <div className="vulcan-topbar-title">
+        <div className="vulcan-topbar-icon">
+          <CurrentIcon aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <p className="text-xs uppercase tracking-[0.36em] text-orange-300">Central de Inteligência Operacional</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight md:text-5xl">Transformando operações em inteligência.</h2>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <LiveBadge label="Tempo real ativo" detail={`Última sincronização: ${liveStatusLabel}`} />
-            <LiveBadge label={`${onlineAgents} agente${onlineAgents === 1 ? "" : "s"} online`} detail="Atualizando métricas operacionais" />
-          </div>
+          <p>Central operacional</p>
+          <h1>{currentCommand.label}</h1>
+          <span>{commandSummary[currentCommand.key]}</span>
         </div>
       </div>
-      <div className="flex flex-wrap items-start justify-start gap-3 lg:justify-end">
+      <div className="vulcan-topbar-actions">
+        <LiveBadge label="Ao vivo" detail={`${onlineAgents} online · ${liveStatusLabel}`} />
+        {highImpact > 0 ? <StatusPill icon={Activity} label={`${highImpact} alto impacto`} /> : null}
+        <StatusPill icon={DatabaseZap} label={supabaseLabel} />
         <motion.button
           type="button"
           onClick={onOpenCommand}
-          className="flex h-12 items-center gap-3 border border-orange-400/35 bg-orange-500 px-4 font-semibold text-black shadow-[0_0_18px_rgba(249,115,22,0.14)] transition hover:bg-orange-400"
+          className="vulcan-command-trigger"
           whileHover={{ y: -2, scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
+          aria-label="Abrir navegação"
         >
           <Command className="h-4 w-4" />
-          {currentCommand.label}
+          <span>Navegar</span>
         </motion.button>
-        <StatusPill icon={ShieldCheck} label="empresa isolada" />
-        <StatusPill icon={Activity} label={`${highImpact} alto impacto`} />
-        <StatusPill icon={DatabaseZap} label={supabaseLabel} />
-        <StatusPill icon={UserRound} label={`${authMode}: ${identity}`} />
         <motion.button
           type="button"
           onClick={onLogout}
-          className="grid h-12 w-12 place-items-center border border-zinc-800 bg-black/50 text-zinc-400 transition hover:border-orange-400/60 hover:text-orange-200"
+          className="vulcan-mobile-logout"
           whileHover={{ y: -2, scale: 1.04 }}
           whileTap={{ scale: 0.96 }}
           aria-label="Sair"
@@ -4941,12 +4969,6 @@ function DashboardView({
   operationalIntelligence,
   hierarchy,
   supabaseStatus,
-  whatsAppStatus,
-  emailStatuses,
-  aiStatus,
-  schedules,
-  onlineAgents,
-  liveStatusLabel,
   allowDemoFallback,
   onOpenMetrics
 }: {
@@ -4960,12 +4982,6 @@ function DashboardView({
   operationalIntelligence: OperationalIntelligence;
   hierarchy: HierarchyNode[];
   supabaseStatus: SupabaseStatus;
-  whatsAppStatus: WhatsAppStatus;
-  emailStatuses: EmailProviderStatus[];
-  aiStatus: AIStatus;
-  schedules: NotificationSchedule[];
-  onlineAgents: number;
-  liveStatusLabel: string;
   allowDemoFallback: boolean;
   onOpenMetrics: (filters: Omit<MetricsIntent, "nonce">) => void;
 }) {
@@ -4984,9 +5000,7 @@ function DashboardView({
   const pendingNotifications = notifications.filter((item) => ["queued", "missing_credentials", "failed"].includes(item.status)).length;
   const automationHours = insights.reduce((total, insight) => total + insight.automationSavingsHours, 0);
   const financialSavings = automationHours * 95;
-  const emailReady = emailStatuses.some((item) => item.configured && item.canSend);
   const dataPlaneReady = supabaseStatus.configured && supabaseStatus.databaseReachable !== false && supabaseStatus.restReachable !== false;
-  const aiReady = aiStatus.openaiConfigured || aiStatus.llamaConfigured;
   const baseMetricsFilter = selectedTeam ? { teamId: selectedTeam.id } : {};
   const recommendedActions = useMemo(
     () => buildRecommendedActions(insights, operationalIntelligence, pendingNotifications, financialSavings),
@@ -5076,34 +5090,22 @@ function DashboardView({
       filters: baseMetricsFilter
     }
   ] as const;
-  const statusItems = [
-    { label: "Tempo real", value: "ativo", tone: "ok" as const },
-    { label: "Última atualização", value: liveStatusLabel, tone: "ok" as const },
-    { label: "Agentes", value: `${visibleOnlineAgents}/${visibleTotalAgents || 0}`, tone: visibleOnlineAgents ? "ok" as const : "warn" as const },
-    { label: "IA", value: aiReady ? "configurada" : "mock explícito", tone: aiReady ? "ok" as const : "warn" as const },
-    { label: "Notificações", value: whatsAppStatus.connected || emailReady || schedules.some((schedule) => schedule.enabled) ? "preparadas" : "pendentes", tone: pendingNotifications ? "warn" as const : "ok" as const }
-  ];
   const quickActivity = operationalIntelligence.currentActivity || "Aguardando sinal operacional";
 
   return (
     <ViewFrame>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <LiveBadge label="Tempo real ativo" detail={`${onlineAgents} agente${onlineAgents === 1 ? "" : "s"} sincronizando | ${operationalIntelligence.periodLabel}`} />
+      <div className="vulcan-dashboard-toolbar">
+        <div>
+          <span className="vulcan-section-kicker">Visão executiva</span>
+          <strong>O que exige sua atenção agora</strong>
+        </div>
         <TeamFilter teams={teams} selectedTeamId={selectedTeamId} onChange={setSelectedTeamId} />
-        <span className="border border-orange-400/25 bg-orange-950/15 px-3 py-2 text-xs uppercase tracking-[0.2em] text-orange-200">
+        <span className="vulcan-data-mode">
           {!dataPlaneReady ? "Modo degradado" : allowDemoFallback ? "Demo comercial" : "Dados reais"}
         </span>
       </div>
 
-      <Panel title="Status geral" icon={Command}>
-        <div className="grid gap-3 md:grid-cols-5">
-          {statusItems.map((item) => (
-            <ConnectionSummary key={item.label} label={item.label} value={item.value} tone={item.tone} />
-          ))}
-        </div>
-      </Panel>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
+      <div className="grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
         <Panel title="Saúde Operacional" icon={Gauge}>
           <OperationalHealthGauge
             onlineAgents={visibleOnlineAgents}
@@ -5218,7 +5220,7 @@ function CommandKpiCard({
     <motion.button
       type="button"
       onClick={onClick}
-      className="group min-h-36 rounded-lg border border-zinc-800 bg-zinc-950/78 p-4 text-left shadow-tremor-card transition hover:border-orange-400/45 hover:bg-orange-950/10"
+      className="vulcan-kpi-card group min-h-36 p-4 text-left"
       whileHover={{ y: -4 }}
       whileTap={{ scale: 0.985 }}
     >
@@ -7953,7 +7955,7 @@ function maskPhone(value: string | null | undefined) {
 
 function ConnectionSummary({ label, value, tone }: { label: string; value: string; tone: "ok" | "warn" }) {
   return (
-    <Tremor.Card className="rounded-lg border border-zinc-800 bg-zinc-950/55 p-4 shadow-none">
+    <Tremor.Card className="vulcan-connection-card p-4 shadow-none">
       <Tremor.Text className="text-xs uppercase tracking-[0.16em] text-zinc-500">{label}</Tremor.Text>
       <div className="mt-2 flex items-center justify-between gap-2">
         <p className="truncate text-sm font-medium text-zinc-100">{value}</p>
@@ -8211,10 +8213,9 @@ function Panel({ title, icon: Icon, children }: { title: string; icon: typeof Ga
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45 }}
-      whileHover={{ y: -2 }}
     >
-      <Tremor.Card className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/82 p-5 shadow-tremor-card backdrop-blur-md">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300/70 to-transparent" />
+      <Tremor.Card className="vulcan-panel relative overflow-hidden p-5 backdrop-blur-md">
+        <div className="vulcan-panel-highlight" />
         <div className="relative z-10 mb-5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-lg bg-orange-500 text-black shadow-[0_10px_30px_rgba(249,115,22,0.16)]">

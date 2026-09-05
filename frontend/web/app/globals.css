@@ -41,6 +41,11 @@
   color-scheme: dark;
 }
 
+html {
+  background: #060708;
+  scroll-behavior: smooth;
+}
+
 .vulcan-tv {
   background: var(--vulcan-bg);
   font-variant-numeric: tabular-nums;
@@ -53,6 +58,8 @@ body {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -71,6 +78,528 @@ input {
 ::selection {
   background: rgba(249, 115, 22, 0.45);
   color: #fff7ed;
+}
+
+/* Secure access ---------------------------------------------------------- */
+
+.vulcan-login-shell {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 16% 16%, rgba(249, 115, 22, 0.13), transparent 27rem),
+    radial-gradient(circle at 90% 88%, rgba(52, 211, 153, 0.055), transparent 30rem),
+    #08090b;
+}
+
+.vulcan-login-shell::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(circle at center, black, transparent 82%);
+}
+
+.vulcan-login-copy h1 {
+  max-width: 760px;
+  font-size: clamp(42px, 5.4vw, 76px);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+.vulcan-login-card {
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(17, 19, 23, 0.94), rgba(8, 9, 11, 0.88));
+  box-shadow: 0 38px 110px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.vulcan-login-card input,
+.vulcan-login-card button {
+  border-radius: 12px;
+}
+
+@media (max-width: 1023px) {
+  .vulcan-login-shell {
+    overflow: auto;
+  }
+
+  .vulcan-login-copy h1 {
+    font-size: clamp(38px, 9vw, 62px);
+  }
+}
+
+@media (max-width: 640px) {
+  .vulcan-login-shell {
+    padding: 28px 18px;
+  }
+
+  .vulcan-login-copy > div:first-child {
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+
+  .vulcan-login-copy h1 {
+    font-size: 38px;
+  }
+
+  .vulcan-login-copy > p {
+    font-size: 16px;
+    line-height: 1.7;
+  }
+
+  .vulcan-login-card {
+    border-radius: 18px;
+    padding: 24px;
+  }
+}
+
+/* Authenticated workspace ------------------------------------------------- */
+
+.vulcan-app-shell {
+  --app-sidebar: 248px;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--app-sidebar) minmax(0, 1fr);
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 88% -10%, rgba(249, 115, 22, 0.09), transparent 32rem),
+    radial-gradient(circle at 12% 110%, rgba(52, 211, 153, 0.045), transparent 30rem),
+    #08090b;
+  color: #f5f7fa;
+  isolation: isolate;
+}
+
+.vulcan-app-shell::before {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0.22;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 74%);
+}
+
+.vulcan-sidebar {
+  position: sticky;
+  z-index: 30;
+  top: 0;
+  display: flex;
+  height: 100dvh;
+  min-width: 0;
+  flex-direction: column;
+  padding: 22px 14px 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(8, 9, 11, 0.88);
+  box-shadow: 18px 0 60px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(24px) saturate(125%);
+}
+
+.vulcan-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 8px 10px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.vulcan-sidebar-brand > div:last-child,
+.vulcan-sidebar-footer > div:nth-child(2) {
+  overflow: hidden;
+}
+
+.vulcan-sidebar-brand strong {
+  display: block;
+  font-size: 17px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.vulcan-sidebar-brand span,
+.vulcan-sidebar-footer span {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #717782;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.vulcan-sidebar-nav {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+}
+
+.vulcan-sidebar-nav button {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  padding: 0 12px;
+  color: #8f959f;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 560;
+  text-align: left;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.vulcan-sidebar-nav button:hover {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.035);
+  color: #f5f7fa;
+}
+
+.vulcan-sidebar-nav button.is-active {
+  border-color: rgba(249, 115, 22, 0.18);
+  background: linear-gradient(100deg, rgba(249, 115, 22, 0.16), rgba(249, 115, 22, 0.035));
+  color: #fff7ed;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.vulcan-sidebar-nav button svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: currentColor;
+}
+
+.vulcan-sidebar-nav button.is-active svg {
+  color: #fb923c;
+  filter: drop-shadow(0 0 9px rgba(249, 115, 22, 0.3));
+}
+
+.vulcan-sidebar-nav button i {
+  position: absolute;
+  top: 10px;
+  right: -1px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 999px;
+  background: #fb923c;
+  box-shadow: 0 0 12px rgba(249, 115, 22, 0.65);
+}
+
+.vulcan-sidebar-footer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 14px 8px 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.vulcan-sidebar-footer strong {
+  display: block;
+  overflow: hidden;
+  color: #e7e9ed;
+  font-size: 12px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vulcan-user-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(249, 115, 22, 0.22), rgba(249, 115, 22, 0.06));
+  color: #fdba74;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.vulcan-sidebar-footer button,
+.vulcan-mobile-logout {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #777d87;
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.vulcan-sidebar-footer button:hover,
+.vulcan-mobile-logout:hover {
+  border-color: rgba(249, 115, 22, 0.32);
+  color: #fdba74;
+}
+
+.vulcan-sidebar-footer button svg,
+.vulcan-mobile-logout svg {
+  width: 15px;
+  height: 15px;
+}
+
+.vulcan-app-main {
+  min-width: 0;
+}
+
+.vulcan-topbar {
+  position: sticky;
+  z-index: 25;
+  top: 0;
+  display: flex;
+  min-height: 84px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 14px clamp(18px, 2.25vw, 36px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(8, 9, 11, 0.78);
+  backdrop-filter: blur(24px) saturate(130%);
+}
+
+.vulcan-topbar-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 13px;
+}
+
+.vulcan-topbar-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  border-radius: 13px;
+  background: linear-gradient(145deg, rgba(249, 115, 22, 0.18), rgba(249, 115, 22, 0.045));
+  color: #fb923c;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.22);
+}
+
+.vulcan-topbar-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.vulcan-topbar-title p,
+.vulcan-section-kicker {
+  margin: 0;
+  color: #fb923c;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.vulcan-topbar-title h1 {
+  margin: 2px 0 0;
+  font-size: clamp(18px, 1.45vw, 25px);
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.vulcan-topbar-title span {
+  display: block;
+  overflow: hidden;
+  max-width: min(46vw, 650px);
+  margin-top: 3px;
+  color: #757b85;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vulcan-topbar-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.vulcan-command-trigger {
+  display: none;
+  height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(249, 115, 22, 0.26);
+  border-radius: 11px;
+  background: rgba(249, 115, 22, 0.1);
+  padding: 0 12px;
+  color: #fdba74;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.vulcan-mobile-logout {
+  display: none;
+}
+
+.vulcan-view-container {
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: clamp(18px, 2.2vw, 34px);
+}
+
+.vulcan-dashboard-toolbar {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 9px 10px 9px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 16px;
+  background: rgba(14, 16, 20, 0.58);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.vulcan-dashboard-toolbar > div:first-child {
+  min-width: 220px;
+  margin-right: auto;
+}
+
+.vulcan-dashboard-toolbar strong {
+  display: block;
+  margin-top: 4px;
+  color: #e9ebef;
+  font-size: 14px;
+  font-weight: 580;
+}
+
+.vulcan-data-mode {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  border: 1px solid rgba(249, 115, 22, 0.18);
+  border-radius: 11px;
+  background: rgba(249, 115, 22, 0.07);
+  padding: 0 13px;
+  color: #fdba74;
+  font-size: 9px;
+  font-weight: 680;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.vulcan-panel,
+.vulcan-kpi-card,
+.vulcan-connection-card {
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  border-radius: 18px !important;
+  background: linear-gradient(145deg, rgba(18, 20, 24, 0.9), rgba(10, 11, 14, 0.88)) !important;
+  box-shadow: 0 18px 58px rgba(0, 0, 0, 0.2), inset 0 1px rgba(255, 255, 255, 0.035) !important;
+}
+
+.vulcan-panel {
+  transition: border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.vulcan-panel:hover {
+  border-color: rgba(249, 115, 22, 0.18) !important;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.25), inset 0 1px rgba(255, 255, 255, 0.045) !important;
+}
+
+.vulcan-panel-highlight {
+  position: absolute;
+  top: -1px;
+  left: 28px;
+  width: 76px;
+  height: 1px;
+  background: linear-gradient(90deg, #f97316, transparent);
+  box-shadow: 0 0 15px rgba(249, 115, 22, 0.35);
+}
+
+.vulcan-kpi-card {
+  cursor: pointer;
+  transition: transform 200ms ease, border-color 200ms ease, background 200ms ease !important;
+}
+
+.vulcan-kpi-card:hover {
+  border-color: rgba(249, 115, 22, 0.28) !important;
+  background: linear-gradient(145deg, rgba(249, 115, 22, 0.1), rgba(11, 12, 15, 0.94)) !important;
+}
+
+.vulcan-connection-card {
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025) !important;
+}
+
+.vulcan-app-shell input,
+.vulcan-app-shell select,
+.vulcan-app-shell textarea {
+  border-radius: 11px;
+}
+
+.vulcan-app-shell button:focus-visible,
+.vulcan-app-shell a:focus-visible,
+.vulcan-app-shell input:focus-visible,
+.vulcan-app-shell select:focus-visible,
+.vulcan-app-shell textarea:focus-visible {
+  outline: 2px solid rgba(251, 146, 60, 0.88);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .vulcan-app-shell { --app-sidebar: 82px; }
+  .vulcan-sidebar { padding-inline: 10px; }
+  .vulcan-sidebar-brand { justify-content: center; padding-inline: 0; }
+  .vulcan-sidebar-brand > div:last-child,
+  .vulcan-sidebar-nav button span,
+  .vulcan-sidebar-footer > div:nth-child(2) { display: none; }
+  .vulcan-sidebar-nav button { justify-content: center; padding-inline: 0; }
+  .vulcan-sidebar-footer { grid-template-columns: 1fr; justify-items: center; }
+  .vulcan-sidebar-footer button { display: none; }
+  .vulcan-topbar-actions > div:nth-child(n+2) { display: none; }
+}
+
+@media (max-width: 760px) {
+  .vulcan-app-shell { display: block; }
+  .vulcan-sidebar { display: none; }
+  .vulcan-topbar { min-height: 74px; padding: 11px 14px; }
+  .vulcan-topbar-title span { display: none; }
+  .vulcan-topbar-title p { letter-spacing: 0.12em; }
+  .vulcan-topbar-actions > div { display: none; }
+  .vulcan-command-trigger,
+  .vulcan-mobile-logout { display: flex; }
+  .vulcan-mobile-logout { display: grid; }
+  .vulcan-command-trigger span { display: none; }
+  .vulcan-view-container { padding: 14px; }
+  .vulcan-dashboard-toolbar { align-items: stretch; flex-direction: column; padding: 14px; }
+  .vulcan-dashboard-toolbar > div:first-child { min-width: 0; }
+  .vulcan-data-mode { justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .vulcan-app-shell *, .vulcan-app-shell *::before, .vulcan-app-shell *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 /* Vulcan Command System ---------------------------------------------------- */
