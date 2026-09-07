@@ -1,6 +1,7 @@
 import base64
 import hashlib
 from datetime import datetime, timezone
+from uuid import UUID
 
 import pytest
 from cryptography.exceptions import InvalidSignature
@@ -15,8 +16,10 @@ from app.agent_security import (
     validate_policy_document,
     verify_request_signature,
 )
-from app.agent_repository import _event_data_origin
+from app.agent_repository import AgentV2Repository, _event_data_origin
 from app.agent_schemas import CanonicalAgentEvent
+from app.repository import AccessScope
+from app.security import AuthContext
 
 
 def public_key_base64(private_key: Ed25519PrivateKey) -> str:
@@ -99,6 +102,29 @@ def test_safe_policy_defaults_disable_visual_capture_and_arbitrary_discovery() -
     assert collector["modules"]["discovery"]["portScan"] is False
     assert workstation["modules"]["visual"]["screenCapture"] is False
     assert workstation["privacy"]["collectTypedContent"] is False
+
+
+def test_ers_tenant_role_can_read_and_administer_agents() -> None:
+    tenant_id = "00000000-0000-0000-0000-000000000301"
+    access = AccessScope(
+        tenant_id=UUID(tenant_id),
+        user_id="ers-admin",
+        membership_id=None,
+        department_id=None,
+        scope="tenant",
+        is_root=False,
+        role_slug="ers",
+    )
+    context = AuthContext(
+        user_id="ers-admin",
+        email="ers@erstransportes.local",
+        tenant_id=UUID(tenant_id),
+        role="ers",
+        provider="database",
+    )
+
+    AgentV2Repository._assert_read(access, context)
+    AgentV2Repository._assert_admin(access, context)
 
 
 def test_policy_validator_rejects_invasive_or_profile_incompatible_modules() -> None:

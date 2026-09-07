@@ -74,6 +74,7 @@ class PlatformRepository:
         effective_role = access.role_slug if access is not None and access.role_slug else context.role
         if effective_role in {
             "admin",
+            "ers",
             "owner",
             "root",
             "tenant_owner",
@@ -91,6 +92,7 @@ class PlatformRepository:
         effective_role = access.role_slug if access is not None and access.role_slug else context.role
         if effective_role in {
             "admin",
+            "ers",
             "owner",
             "root",
             "tenant_owner",

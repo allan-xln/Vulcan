@@ -192,6 +192,28 @@ def test_tenant_scoped_auditor_is_not_treated_as_an_administrator() -> None:
         PlatformRepository._assert_admin(access, context)
 
 
+def test_ers_tenant_role_can_read_and_administer_platform() -> None:
+    access = AccessScope(
+        tenant_id=UUID(TENANT_ID),
+        user_id="ers-admin",
+        membership_id=None,
+        department_id=None,
+        scope="tenant",
+        is_root=False,
+        role_slug="ers",
+    )
+    context = AuthContext(
+        user_id="ers-admin",
+        email="ers@erstransportes.local",
+        tenant_id=UUID(TENANT_ID),
+        role="ers",
+        provider="database",
+    )
+
+    PlatformRepository._assert_infrastructure_read(access, context)
+    PlatformRepository._assert_admin(access, context)
+
+
 def test_unified_timeline_and_event_simulator_are_explicit() -> None:
     headers = admin_headers()
     timeline = client.get("/timeline?limit=10", headers=headers)

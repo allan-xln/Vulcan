@@ -80,6 +80,7 @@ class AgentV2Repository:
         role = access.role_slug or context.role
         if access.is_root or role in {
             "admin",
+            "ers",
             "owner",
             "root",
             "tenant_owner",
@@ -95,6 +96,7 @@ class AgentV2Repository:
         role = access.role_slug or context.role
         if access.is_root or role in {
             "admin",
+            "ers",
             "owner",
             "root",
             "tenant_owner",

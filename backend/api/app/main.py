@@ -215,7 +215,7 @@ def prepare_agent_deployment(
     http_request: Request,
     context: AuthContext = Authenticated,
 ) -> AgentDeploymentPrepareResponse:
-    if context.role not in {"owner", "root", "tenant_admin"}:
+    if context.role not in {"ers", "owner", "root", "tenant_admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
     if context.role not in {"owner", "root"} and request.tenant_id != context.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant mismatch")
