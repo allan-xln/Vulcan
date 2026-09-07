@@ -159,10 +159,8 @@ input {
 /* Authenticated workspace ------------------------------------------------- */
 
 .vulcan-app-shell {
-  --app-sidebar: 248px;
   position: relative;
-  display: grid;
-  grid-template-columns: var(--app-sidebar) minmax(0, 1fr);
+  display: block;
   min-height: 100dvh;
   background:
     radial-gradient(circle at 88% -10%, rgba(249, 115, 22, 0.09), transparent 32rem),
@@ -365,15 +363,44 @@ input {
   position: sticky;
   z-index: 25;
   top: 0;
-  display: flex;
-  min-height: 84px;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  min-height: 88px;
   align-items: center;
   justify-content: space-between;
   gap: 22px;
-  padding: 14px clamp(18px, 2.25vw, 36px);
+  padding: 13px clamp(18px, 2.25vw, 38px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
   background: rgba(8, 9, 11, 0.78);
   backdrop-filter: blur(24px) saturate(130%);
+}
+
+.vulcan-topbar-brand {
+  display: flex;
+  min-width: 196px;
+  align-items: center;
+  gap: 12px;
+  padding-right: 24px;
+}
+
+.vulcan-topbar-brand strong,
+.vulcan-topbar-brand span {
+  display: block;
+}
+
+.vulcan-topbar-brand strong {
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.vulcan-topbar-brand span {
+  margin-top: 5px;
+  color: #717782;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .vulcan-topbar-title {
@@ -381,6 +408,8 @@ input {
   min-width: 0;
   align-items: center;
   gap: 13px;
+  padding-left: 24px;
+  border-left: 1px solid rgba(255, 255, 255, 0.075);
 }
 
 .vulcan-topbar-icon {
@@ -438,29 +467,66 @@ input {
 }
 
 .vulcan-command-trigger {
-  display: none;
-  height: 38px;
+  display: inline-flex;
+  height: 42px;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(249, 115, 22, 0.26);
-  border-radius: 11px;
-  background: rgba(249, 115, 22, 0.1);
-  padding: 0 12px;
-  color: #fdba74;
+  border: 1px solid rgba(251, 146, 60, 0.58);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fb923c, #f97316);
+  padding: 0 15px;
+  color: #120a05;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 750;
+  box-shadow: 0 10px 30px rgba(249, 115, 22, 0.16), inset 0 1px rgba(255, 255, 255, 0.26);
 }
 
 .vulcan-mobile-logout {
-  display: none;
+  display: grid;
 }
 
 .vulcan-view-container {
   width: 100%;
-  max-width: 1680px;
+  max-width: 1920px;
   margin: 0 auto;
   padding: clamp(18px, 2.2vw, 34px);
+}
+
+.vulcan-command-overlay {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(249, 115, 22, 0.12), transparent 38rem),
+    rgba(3, 4, 6, 0.86) !important;
+}
+
+.vulcan-command-panel {
+  position: relative;
+  border-radius: 28px;
+  background: linear-gradient(145deg, rgba(18, 20, 24, 0.97), rgba(7, 8, 10, 0.97)) !important;
+  box-shadow: 0 48px 140px rgba(0, 0, 0, 0.58), inset 0 1px rgba(255, 255, 255, 0.05) !important;
+}
+
+.vulcan-command-panel::before {
+  position: absolute;
+  top: -1px;
+  right: 12%;
+  left: 12%;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(251, 146, 60, 0.9), transparent);
+  box-shadow: 0 0 24px rgba(249, 115, 22, 0.5);
+}
+
+.vulcan-command-grid {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  scrollbar-color: rgba(249, 115, 22, 0.4) transparent;
+  scrollbar-width: thin;
+}
+
+.vulcan-command-item {
+  border-radius: 18px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
 }
 
 .vulcan-dashboard-toolbar {
@@ -563,30 +629,41 @@ input {
 }
 
 @media (max-width: 1180px) {
-  .vulcan-app-shell { --app-sidebar: 82px; }
-  .vulcan-sidebar { padding-inline: 10px; }
-  .vulcan-sidebar-brand { justify-content: center; padding-inline: 0; }
-  .vulcan-sidebar-brand > div:last-child,
-  .vulcan-sidebar-nav button span,
-  .vulcan-sidebar-footer > div:nth-child(2) { display: none; }
-  .vulcan-sidebar-nav button { justify-content: center; padding-inline: 0; }
-  .vulcan-sidebar-footer { grid-template-columns: 1fr; justify-items: center; }
-  .vulcan-sidebar-footer button { display: none; }
+  .vulcan-topbar { grid-template-columns: auto minmax(180px, 1fr) auto; }
+  .vulcan-topbar-brand { min-width: 0; }
+  .vulcan-topbar-brand > div:last-child { display: none; }
   .vulcan-topbar-actions > div:nth-child(n+2) { display: none; }
 }
 
 @media (max-width: 760px) {
-  .vulcan-app-shell { display: block; }
-  .vulcan-sidebar { display: none; }
-  .vulcan-topbar { min-height: 74px; padding: 11px 14px; }
-  .vulcan-topbar-title span { display: none; }
-  .vulcan-topbar-title p { letter-spacing: 0.12em; }
+  .vulcan-topbar { grid-template-columns: auto minmax(0, 1fr); min-height: 70px; padding: 10px 14px; }
+  .vulcan-topbar-brand { padding-right: 12px; }
+  .vulcan-topbar-title { display: none; }
   .vulcan-topbar-actions > div { display: none; }
-  .vulcan-command-trigger,
-  .vulcan-mobile-logout { display: flex; }
-  .vulcan-mobile-logout { display: grid; }
-  .vulcan-command-trigger span { display: none; }
+  .vulcan-topbar-actions { justify-content: flex-end; }
+  .vulcan-command-trigger { display: inline-flex; }
   .vulcan-view-container { padding: 14px; }
+  .vulcan-command-panel { border-radius: 20px; }
+  .vulcan-command-grid {
+    grid-auto-rows: 78px;
+    padding-inline: 0;
+  }
+  .vulcan-command-item {
+    display: grid;
+    min-height: 78px;
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    border-radius: 15px;
+    padding: 12px 16px;
+  }
+  .vulcan-command-item > div:nth-of-type(2) {
+    width: 44px;
+    height: 44px;
+    margin-bottom: 0;
+  }
+  .vulcan-command-item > p:first-of-type { font-size: 17px; }
+  .vulcan-command-item > p:last-of-type { display: none; }
   .vulcan-dashboard-toolbar { align-items: stretch; flex-direction: column; padding: 14px; }
   .vulcan-dashboard-toolbar > div:first-child { min-width: 0; }
   .vulcan-data-mode { justify-content: center; }

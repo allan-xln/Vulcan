@@ -3332,50 +3332,12 @@ function DashboardShell({
 
   return (
     <motion.section className="vulcan-app-shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <aside className="vulcan-sidebar" aria-label="Navegação principal">
-        <div className="vulcan-sidebar-brand">
-          <BrandMark size={38} />
-          <div>
-            <strong>Vulcan</strong>
-            <span>Operational Intelligence</span>
-          </div>
-        </div>
-        <nav className="vulcan-sidebar-nav">
-          {commands.map((command) => {
-            const Icon = command.icon;
-            const active = activeView === command.key;
-            return (
-              <motion.button
-                key={command.key}
-                type="button"
-                onClick={() => setView(command.key)}
-                className={active ? "is-active" : ""}
-                whileHover={{ x: 3 }}
-                whileTap={{ scale: 0.98 }}
-                aria-current={active ? "page" : undefined}
-                title={commandSummary[command.key]}
-              >
-                <Icon aria-hidden="true" />
-                <span>{command.label}</span>
-                {active ? <motion.i layoutId="active-navigation" /> : null}
-              </motion.button>
-            );
-          })}
-        </nav>
-        <div className="vulcan-sidebar-footer">
-          <div className="vulcan-user-avatar">{identity.trim().charAt(0).toUpperCase() || "V"}</div>
-          <div className="min-w-0">
-            <strong>{identity}</strong>
-            <span>{authMode === "supabase" ? "Sessão corporativa" : "Acesso seguro"}</span>
-          </div>
-          <button type="button" onClick={onLogout} aria-label="Sair" title="Sair"><LogOut /></button>
-        </div>
-      </aside>
-
       <div className="vulcan-app-main">
         <Header
           activeView={activeView}
           highImpact={highImpact}
+          identity={identity}
+          authMode={authMode}
           onlineAgents={onlineAgents}
           liveStatusLabel={liveStatusLabel}
           supabaseStatus={supabaseStatus}
@@ -3538,6 +3500,8 @@ function DashboardShell({
 function Header({
   activeView,
   highImpact,
+  identity,
+  authMode,
   onlineAgents,
   liveStatusLabel,
   supabaseStatus,
@@ -3546,6 +3510,8 @@ function Header({
 }: {
   activeView: ViewKey;
   highImpact: number;
+  identity: string;
+  authMode: "supabase" | "local";
   onlineAgents: number;
   liveStatusLabel: string;
   supabaseStatus: SupabaseStatus;
@@ -3566,6 +3532,13 @@ function Header({
       initial={{ y: -18, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
     >
+      <div className="vulcan-topbar-brand">
+        <BrandMark size={40} />
+        <div>
+          <strong>Vulcan</strong>
+          <span>Operational Intelligence</span>
+        </div>
+      </div>
       <div className="vulcan-topbar-title">
         <div className="vulcan-topbar-icon">
           <CurrentIcon aria-hidden="true" />
@@ -3580,6 +3553,8 @@ function Header({
         <LiveBadge label="Ao vivo" detail={`${onlineAgents} online · ${liveStatusLabel}`} />
         {highImpact > 0 ? <StatusPill icon={Activity} label={`${highImpact} alto impacto`} /> : null}
         <StatusPill icon={DatabaseZap} label={supabaseLabel} />
+        <StatusPill icon={ShieldCheck} label="empresa isolada" />
+        <StatusPill icon={UserRound} label={`${authMode}: ${identity}`} />
         <motion.button
           type="button"
           onClick={onOpenCommand}
@@ -3589,7 +3564,7 @@ function Header({
           aria-label="Abrir navegação"
         >
           <Command className="h-4 w-4" />
-          <span>Navegar</span>
+          <span>{currentCommand.label}</span>
         </motion.button>
         <motion.button
           type="button"
@@ -3624,13 +3599,13 @@ function CommandOverlay({
     <AnimatePresence>
       {open ? (
         <motion.div
-          className="fixed inset-0 z-50 overflow-hidden bg-black/78 p-4 backdrop-blur-xl md:p-8"
+          className="vulcan-command-overlay fixed inset-0 z-50 overflow-hidden bg-black/78 p-4 backdrop-blur-xl md:p-8"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="mx-auto flex h-full max-w-[76rem] flex-col overflow-hidden border border-orange-400/20 bg-zinc-950/88 p-4 shadow-[0_0_48px_rgba(249,115,22,0.10)] md:p-6"
+            className="vulcan-command-panel mx-auto flex h-full max-w-[76rem] flex-col overflow-hidden border border-orange-400/20 bg-zinc-950/88 p-4 shadow-[0_0_48px_rgba(249,115,22,0.10)] md:p-6"
             initial={{ scale: 0.96, y: 20, filter: "blur(10px)" }}
             animate={{ scale: 1, y: 0, filter: "blur(0px)" }}
             exit={{ scale: 0.98, y: 18, filter: "blur(8px)" }}
@@ -3657,7 +3632,7 @@ function CommandOverlay({
               </motion.button>
             </div>
 
-            <div className="grid min-h-0 flex-1 auto-rows-fr gap-3 overflow-hidden p-2 md:grid-cols-2 xl:grid-cols-3">
+            <div className="vulcan-command-grid grid min-h-0 flex-1 auto-rows-fr gap-3 overflow-hidden p-2 md:grid-cols-2 xl:grid-cols-3">
               {commands.map((command, index) => {
                 const Icon = command.icon;
                 const active = activeView === command.key;
@@ -3666,7 +3641,7 @@ function CommandOverlay({
                     key={command.key}
                     type="button"
                     onClick={() => setView(command.key)}
-                    className={`group relative min-h-36 overflow-hidden border p-5 text-left transition will-change-transform md:min-h-40 ${
+                    className={`vulcan-command-item group relative min-h-36 overflow-hidden border p-5 text-left transition will-change-transform md:min-h-40 ${
                       active
                         ? "border-orange-300 bg-orange-500 text-black shadow-[0_0_24px_rgba(249,115,22,0.18)]"
                         : "border-zinc-800 bg-black/48 text-zinc-100 hover:border-orange-400/60 hover:bg-zinc-950"
