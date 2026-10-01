@@ -109,7 +109,7 @@ def _local_development_auth_enabled(settings: Settings) -> bool:
 
 
 def _portal_sso_context(
-    request: Request,
+    _request: Request,
     tenant_id: UUID,
     authenticated: str | None,
     user_id: str | None,
@@ -117,9 +117,8 @@ def _portal_sso_context(
     display_name: str | None,
     portal_role: str | None,
 ) -> AuthContext | None:
-    """Accept identity headers only when they came from the local Portal proxy."""
-    peer = str(request.client.host if request.client else "")
-    if peer not in {"127.0.0.1", "::1"} or authenticated != "1":
+    """Accept identity headers forwarded by the network-isolated Portal edge."""
+    if authenticated != "1":
         return None
 
     clean_user_id = " ".join((user_id or "").split())[:160]
