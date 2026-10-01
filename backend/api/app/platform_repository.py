@@ -1752,6 +1752,58 @@ class PlatformRepository:
                 """,
                 {"tenant_id": context.tenant_id, "site_id": site_id},
             ).fetchone()
+            workforce_time_kpis = conn.execute(
+                f"""
+                select
+                  coalesce(sum(coalesce(activity.duration_seconds, 0)) filter (
+                    where activity.event_type not in ('idle_started', 'idle_ended')
+                      and lower(coalesce(activity.category, '')) not in ('idle', 'ocioso')
+                  ), 0)::numeric / 3600 as active_hours,
+                  coalesce(sum(coalesce(activity.duration_seconds, 0)) filter (
+                    where activity.event_type in ('idle_started', 'idle_ended')
+                       or lower(coalesce(activity.category, '')) in ('idle', 'ocioso')
+                  ), 0)::numeric / 3600 as idle_hours
+                from public.activity_events activity
+                left join public.devices device
+                  on device.tenant_id = activity.tenant_id
+                 and device.id = activity.device_id
+                where activity.tenant_id = %(tenant_id)s
+                  and activity.occurred_at >= timezone('utc', now()) - interval '24 hours'
+                  and coalesce(activity.metadata ->> 'source', '') <> 'vulcan-simulator'
+                  {
+                    "and device.metadata ->> 'siteId' = %(site_id)s::text"
+                    if site_id
+                    else ""
+                  }
+                """,
+                {"tenant_id": context.tenant_id, "site_id": site_id},
+            ).fetchone()
+            ai_economy_kpis = conn.execute(
+                """
+                select
+                  count(*) as ai_insight_count,
+                  coalesce(avg(insight.confidence), 0)::numeric as ai_confidence,
+                  coalesce(sum(
+                    case
+                      when coalesce(insight.metadata ->> 'estimatedTimeLoss', '') ~ '^[0-9]+([.][0-9]+)?$'
+                        then (insight.metadata ->> 'estimatedTimeLoss')::numeric
+                      else coalesce(insight.automation_savings_hours, 0)
+                    end
+                  ), 0)::numeric as opportunity_hours,
+                  coalesce(sum(
+                    case
+                      when coalesce(insight.metadata ->> 'estimatedSavings', '') ~ '^[0-9]+([.][0-9]+)?$'
+                        then (insight.metadata ->> 'estimatedSavings')::numeric
+                      else coalesce(insight.automation_savings_hours, 0) * 95
+                    end
+                  ), 0)::numeric as estimated_savings
+                from public.ai_insights insight
+                where insight.tenant_id = %s
+                  and insight.created_at >= timezone('utc', now()) - interval '30 days'
+                  and coalesce(insight.metadata ->> 'source', '') <> 'vulcan-simulator'
+                """,
+                (context.tenant_id,),
+            ).fetchone()
             incident_kpis = conn.execute(
                 f"""
                 select
@@ -2045,6 +2097,8 @@ class PlatformRepository:
             **dict(kpis),
             **dict(agent_kpis),
             **dict(event_kpis),
+            **dict(workforce_time_kpis),
+            **dict(ai_economy_kpis),
             **dict(incident_kpis),
         }
         online = int(all_kpis["online_assets"])
@@ -2072,6 +2126,12 @@ class PlatformRepository:
                 "events24h": all_kpis["events_24h"],
                 "activePeople": all_kpis["active_people"],
                 "criticalIncidents": all_kpis["critical_incidents"],
+                "activeHours": all_kpis["active_hours"],
+                "idleHours": all_kpis["idle_hours"],
+                "opportunityHours": all_kpis["opportunity_hours"],
+                "estimatedSavings": all_kpis["estimated_savings"],
+                "aiInsightCount": all_kpis["ai_insight_count"],
+                "aiConfidence": all_kpis["ai_confidence"],
             }
         )
         return WallboardSnapshot(

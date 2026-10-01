@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import * as Tremor from "@tremor/react";
 import CountUp from "react-countup";
@@ -25,11 +26,13 @@ import {
   Mail,
   MessageCircle,
   Monitor,
+  MonitorPlay,
   Network,
   Save,
   RadioTower,
   ShieldCheck,
   SlidersHorizontal,
+  TimerReset,
   UserRound,
   X,
   Zap
@@ -2245,7 +2248,6 @@ export default function HomePage() {
   const notificationBaselineReadyRef = useRef(false);
 
   const liveTestMode = authMode === "local" && identity.toLowerCase() === "teste";
-  const highImpact = useMemo(() => insights.filter((item) => item.impact === "high").length, [insights]);
   const onlineAgents = useMemo(() => devices.filter((device) => ["online", "syncing"].includes(device.status)).length, [devices]);
   const lastSyncAt = useMemo(() => {
     const dates = [
@@ -2287,13 +2289,17 @@ export default function HomePage() {
           if (response.ok) {
             const restored = (await response.json()) as AuthSessionResponse;
             if (mounted && restored.authenticated) {
+              const restoredIdentity =
+                restored.user.name
+                ?? restored.user.email
+                ?? "usuário Vulcan";
               setToken(storedSession.accessToken);
-              setIdentity(
-                storedSession.user.name
-                  ?? restored.user.name
-                  ?? restored.user.email
-                  ?? "usuário Vulcan"
-              );
+              setIdentity(restoredIdentity);
+              persistLocalSession(storedSession.accessToken, {
+                ...storedSession.user,
+                ...restored.user,
+                name: restoredIdentity
+              });
               setCurrentRole(restored.user.role ?? storedSession.user.role ?? "user");
               setAuthMode("local");
               setAuthLoading(false);
@@ -3033,7 +3039,6 @@ export default function HomePage() {
             setView={setView}
             onLogout={handleLogout}
             identity={identity}
-            authMode={authMode ?? "local"}
             userRole={currentRole}
             metrics={metrics}
             insights={insights}
@@ -3057,7 +3062,6 @@ export default function HomePage() {
             onSettingsCenterChange={setSettingsCenter}
             schedules={schedules}
             reportTemplates={reportTemplates}
-            highImpact={highImpact}
             onlineAgents={onlineAgents}
             liveStatusLabel={liveStatusLabel}
             desktopNotifications={desktopNotifications}
@@ -3239,7 +3243,6 @@ function DashboardShell({
   setView,
   onLogout,
   identity,
-  authMode,
   userRole,
   metrics,
   insights,
@@ -3263,7 +3266,6 @@ function DashboardShell({
   onSettingsCenterChange,
   schedules,
   reportTemplates,
-  highImpact,
   onlineAgents,
   liveStatusLabel,
   desktopNotifications,
@@ -3286,7 +3288,6 @@ function DashboardShell({
   setView: (view: ViewKey) => void;
   onLogout: () => void;
   identity: string;
-  authMode: "supabase" | "local";
   userRole: string;
   metrics: Metric[];
   insights: Insight[];
@@ -3310,7 +3311,6 @@ function DashboardShell({
   onSettingsCenterChange: (next: SettingsResponseData) => void;
   schedules: NotificationSchedule[];
   reportTemplates: ReportTemplate[];
-  highImpact: number;
   onlineAgents: number;
   liveStatusLabel: string;
   desktopNotifications: DesktopNotificationRuntime;
@@ -3329,18 +3329,17 @@ function DashboardShell({
   onDepartmentCreate: (payload: DepartmentFormPayload) => Promise<void>;
 }) {
   const [commandOpen, setCommandOpen] = useState(false);
+  const [tvOpen, setTvOpen] = useState(false);
 
   return (
     <motion.section className="vulcan-app-shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="vulcan-app-main">
         <Header
           activeView={activeView}
-          highImpact={highImpact}
           identity={identity}
-          authMode={authMode}
           onlineAgents={onlineAgents}
           liveStatusLabel={liveStatusLabel}
-          supabaseStatus={supabaseStatus}
+          onOpenTv={() => setTvOpen(true)}
           onOpenCommand={() => setCommandOpen(true)}
           onLogout={onLogout}
         />
@@ -3349,7 +3348,6 @@ function DashboardShell({
           {activeView === "dashboard" && (
             <DashboardView
               key="dashboard"
-              metrics={metrics}
               insights={insights}
               notifications={notifications}
               devices={devices}
@@ -3357,9 +3355,6 @@ function DashboardShell({
               pendingDevices={pendingDevices}
               operationalMetrics={operationalMetrics}
               operationalIntelligence={operationalIntelligence}
-              hierarchy={hierarchy}
-              supabaseStatus={supabaseStatus}
-              allowDemoFallback={allowDemoFallback}
               onOpenMetrics={onOpenMetrics}
             />
           )}
@@ -3493,38 +3488,37 @@ function DashboardShell({
         onClose={() => setCommandOpen(false)}
         onLogout={onLogout}
       />
+      <TvDashboardOverlay
+        open={tvOpen}
+        token={token}
+        onClose={() => setTvOpen(false)}
+      />
     </motion.section>
   );
 }
 
 function Header({
   activeView,
-  highImpact,
   identity,
-  authMode,
   onlineAgents,
   liveStatusLabel,
-  supabaseStatus,
+  onOpenTv,
   onOpenCommand,
   onLogout
 }: {
   activeView: ViewKey;
-  highImpact: number;
   identity: string;
-  authMode: "supabase" | "local";
   onlineAgents: number;
   liveStatusLabel: string;
-  supabaseStatus: SupabaseStatus;
+  onOpenTv: () => void;
   onOpenCommand: () => void;
   onLogout: () => void;
 }) {
   const currentCommand = commands.find((item) => item.key === activeView) ?? commands[0];
   const CurrentIcon = currentCommand.icon;
-  const supabaseLabel = !supabaseStatus.configured
-    ? "Supabase pendente"
-    : supabaseStatus.databaseReachable === false
-      ? "Supabase degradado"
-      : "Supabase conectado";
+  const compactIdentity = identity.trim().includes("@")
+    ? identity.trim().split("@")[0]
+    : identity.trim();
 
   return (
     <motion.header
@@ -3550,11 +3544,22 @@ function Header({
         </div>
       </div>
       <div className="vulcan-topbar-actions">
-        <LiveBadge label="Ao vivo" detail={`${onlineAgents} online · ${liveStatusLabel}`} />
-        {highImpact > 0 ? <StatusPill icon={Activity} label={`${highImpact} alto impacto`} /> : null}
-        <StatusPill icon={DatabaseZap} label={supabaseLabel} />
-        <StatusPill icon={ShieldCheck} label="empresa isolada" />
-        <StatusPill icon={UserRound} label={`${authMode}: ${identity}`} />
+        <LiveBadge label="Tempo real" detail={`${onlineAgents} online · ${liveStatusLabel}`} />
+        <motion.button
+          type="button"
+          onClick={onOpenTv}
+          className="vulcan-tv-trigger"
+          whileHover={{ y: -2, scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          aria-label="Abrir dashboards para TV"
+        >
+          <MonitorPlay className="h-4 w-4" />
+          <span>TV</span>
+        </motion.button>
+        <div className="vulcan-identity-compact" title={identity || "Usuário Vulcan"}>
+          <UserRound aria-hidden="true" />
+          <span>{compactIdentity || "Operador"}</span>
+        </div>
         <motion.button
           type="button"
           onClick={onOpenCommand}
@@ -3579,6 +3584,125 @@ function Header({
         </motion.button>
       </div>
     </motion.header>
+  );
+}
+
+const tvDashboards = [
+  {
+    title: "Tempo e economia",
+    detail: "Oportunidades e evidências da IA",
+    href: "/wallboard/workforce?scene=economy",
+    icon: TimerReset,
+    accent: "orange"
+  },
+  {
+    title: "Operação ao vivo",
+    detail: "Ritmo, atividade e cobertura",
+    href: "/wallboard/workforce?scene=pulse",
+    icon: Activity,
+    accent: "orange"
+  },
+  {
+    title: "Equipes e unidades",
+    detail: "Visão agregada das filiais",
+    href: "/wallboard/workforce?scene=teams",
+    icon: Building2,
+    accent: "orange"
+  },
+  {
+    title: "Rede e conectividade",
+    detail: "Topologia e links monitorados",
+    href: "/wallboard/infra?scene=topology",
+    icon: Network,
+    accent: "blue"
+  },
+  {
+    title: "Servidores e Proxmox",
+    detail: "Hosts, VMs e capacidade",
+    href: "/wallboard/infra?scene=proxmox",
+    icon: DatabaseZap,
+    accent: "blue"
+  },
+  {
+    title: "Saúde do Vulcan",
+    detail: "Plataforma e integrações",
+    href: "/wallboard/infra?scene=platform",
+    icon: ShieldCheck,
+    accent: "blue"
+  }
+] as const;
+
+function TvDashboardOverlay({ open, token, onClose }: { open: boolean; token: string; onClose: () => void }) {
+  const openDashboard = (href: string) => {
+    const target = window.open("about:blank", "_blank");
+    if (!target) {
+      window.sessionStorage.setItem("vulcan-wallboard-access-token", token);
+      window.location.assign(href);
+      return;
+    }
+    target.sessionStorage.setItem("vulcan-wallboard-access-token", token);
+    target.location.replace(href);
+    onClose();
+  };
+
+  return (
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          className="vulcan-tv-overlay fixed inset-0 z-[60] grid place-items-center bg-black/80 p-4 backdrop-blur-xl"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tv-dashboard-title"
+        >
+          <motion.div
+            className="w-full max-w-5xl border border-orange-400/20 bg-zinc-950/95 p-5 shadow-[0_0_70px_rgba(249,115,22,0.12)] md:p-7"
+            initial={{ y: 24, scale: 0.97 }}
+            animate={{ y: 0, scale: 1 }}
+            exit={{ y: 16, scale: 0.98 }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">Dashboard para TV</p>
+                <h2 id="tv-dashboard-title" className="mt-2 text-2xl font-semibold text-white md:text-3xl">O que você quer acompanhar?</h2>
+              </div>
+              <button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center border border-zinc-800 text-zinc-400 transition hover:border-orange-400/60 hover:text-white" aria-label="Fechar">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {tvDashboards.map((dashboard, index) => {
+                const Icon = dashboard.icon;
+                return (
+                  <motion.button
+                    key={dashboard.href}
+                    type="button"
+                    onClick={() => openDashboard(dashboard.href)}
+                    className="vulcan-tv-option group min-h-40 border border-zinc-800 bg-black/45 p-5 text-left transition hover:border-orange-400/60"
+                    initial={{ y: 18, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: index * 0.04 }}
+                    whileHover={{ y: -4 }}
+                    whileTap={{ scale: 0.985 }}
+                  >
+                    <span className={`grid h-11 w-11 place-items-center ${dashboard.accent === "blue" ? "bg-sky-500/15 text-sky-300" : "bg-orange-500 text-black"}`}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <strong className="mt-5 block text-lg text-white">{dashboard.title}</strong>
+                    <span className="mt-2 block text-sm text-zinc-500">{dashboard.detail}</span>
+                  </motion.button>
+                );
+              })}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <Link href="/settings/wallboards" className="text-sm text-zinc-500 transition hover:text-orange-300">Configurar TVs →</Link>
+            </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
@@ -4772,36 +4896,16 @@ function DeviceHierarchyRow({
   );
 }
 
-function StatusPill({ icon: Icon, label }: { icon: typeof Gauge; label: string }) {
-  return (
-    <motion.div
-      className="relative flex h-12 items-center gap-2 overflow-hidden border border-orange-400/20 bg-black/50 px-4 text-sm text-zinc-300"
-        animate={{ borderColor: ["rgba(251,146,60,0.14)", "rgba(251,146,60,0.30)", "rgba(251,146,60,0.14)"] }}
-      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-    >
-      <motion.div
-        className="absolute inset-y-0 -left-1/2 w-1/2 bg-[linear-gradient(90deg,transparent,rgba(249,115,22,0.08),transparent)]"
-        animate={{ x: ["0%", "320%"] }}
-        transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div animate={{ rotate: [0, 12, -12, 0], scale: [1, 1.12, 1] }} transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}>
-        <Icon className="h-4 w-4 text-orange-300" />
-      </motion.div>
-      <span className="relative z-10">{label}</span>
-    </motion.div>
-  );
-}
-
 function LiveBadge({ label, detail }: { label: string; detail: string }) {
   return (
-    <div className="inline-flex items-center gap-3 border border-emerald-400/20 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-100">
+    <div className="vulcan-live-badge inline-flex items-center gap-3 border border-emerald-400/20 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-100">
       <motion.span
         className="h-2 w-2 rounded-full bg-emerald-400"
         animate={{ opacity: [0.45, 1, 0.45], scale: [0.9, 1.12, 0.9] }}
         transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
       />
       <span className="font-medium">{label}</span>
-      <span className="text-emerald-200/70">{detail}</span>
+      <span className="vulcan-live-detail text-emerald-200/70">{detail}</span>
     </div>
   );
 }
@@ -4839,6 +4943,7 @@ function OperationalHealthGauge({
   contextSwitchesPerHour: number;
   criticalSignals: number;
 }) {
+  const gaugeId = useId();
   const onlineScore = totalAgents ? (onlineAgents / totalAgents) * 100 : 0;
   const idleScore = Math.max(0, 100 - idleRate * 100);
   const switchScore = Math.max(0, 100 - contextSwitchesPerHour * 2.2);
@@ -4846,11 +4951,20 @@ function OperationalHealthGauge({
   const score = Math.max(0, Math.min(100, Math.round((onlineScore * 0.28) + (focusScore * 0.30) + (idleScore * 0.18) + (switchScore * 0.14) + (signalScore * 0.10))));
   const status = score >= 88 ? "Excelente" : score >= 74 ? "Saudável" : score >= 54 ? "Atenção" : "Crítico";
   const color = score >= 88 ? "#22c55e" : score >= 74 ? "#34d399" : score >= 54 ? "#fb923c" : "#fb7185";
-  const circumference = 283;
-  const dashOffset = circumference - (score / 100) * circumference;
-  const angle = (180 + score * 1.8) * (Math.PI / 180);
-  const pointerX = 120 + Math.cos(angle) * 72;
-  const pointerY = 118 + Math.sin(angle) * 72;
+  const pointerAngle = Math.PI + (score / 100) * Math.PI;
+  const pointerX = 150 + Math.cos(pointerAngle) * 82;
+  const pointerY = 160 + Math.sin(pointerAngle) * 82;
+  const point = (angle: number, radius: number) => ({
+    x: 150 + Math.cos(angle) * radius,
+    y: 160 + Math.sin(angle) * radius
+  });
+  const tickMarks = Array.from({ length: 21 }, (_, index) => {
+    const angle = Math.PI + (index / 20) * Math.PI;
+    const major = index % 5 === 0;
+    const inner = point(angle, major ? 91 : 96);
+    const outer = point(angle, 106);
+    return { ...inner, x2: outer.x, y2: outer.y, major, value: index * 5 };
+  });
   const composition = [
     { label: "Agentes online", value: Math.round(onlineScore), tone: onlineScore >= 75 ? "ok" : "warn" },
     { label: "Foco", value: Math.round(focusScore), tone: focusScore >= 60 ? "ok" : "warn" },
@@ -4859,50 +4973,85 @@ function OperationalHealthGauge({
   ];
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-      <div className="relative grid min-h-80 place-items-center overflow-hidden rounded-lg border border-orange-400/10 bg-[radial-gradient(circle_at_50%_58%,rgba(249,115,22,0.18),rgba(9,9,11,0)_62%)] px-4 pb-2 pt-7">
+    <div className="grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
+      <div className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[radial-gradient(circle_at_50%_58%,rgba(249,115,22,0.18),rgba(9,9,11,0)_64%)] px-5 pb-5 pt-6 shadow-[inset_0_1px_rgba(255,255,255,0.04)]">
         <motion.div
-          className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent"
-          animate={{ x: ["-100%", "100%"], opacity: [0, 0.95, 0] }}
-          transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute right-6 top-5 h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.8)]"
+          animate={{ opacity: [0.35, 1, 0.35], scale: [0.85, 1.15, 0.85] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
         />
-        <svg viewBox="0 0 240 158" className="h-56 w-full max-w-sm overflow-visible" role="img" aria-label={`Saúde operacional ${score} de 100, status ${status}`}>
-          <path d="M30 118 A90 90 0 0 1 210 118" fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="18" strokeLinecap="round" />
+        <div className="mb-2 flex items-start justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">Índice composto</p>
+            <p className="mt-1 text-sm text-zinc-300">Leitura operacional em tempo real</p>
+          </div>
+          <span className="rounded-full border border-white/10 bg-black/25 px-2 py-1 text-[10px] font-semibold text-zinc-500">0 — 100</span>
+        </div>
+        <svg viewBox="0 0 300 225" className="h-auto w-full overflow-visible" role="img" aria-label={`Saúde operacional ${score} de 100, status ${status}`}>
+          <defs>
+            <linearGradient id={`vulcan-health-arc-${gaugeId}`} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#fb7185" />
+              <stop offset="54%" stopColor="#fb923c" />
+              <stop offset="100%" stopColor="#34d399" />
+            </linearGradient>
+            <filter id={`vulcan-health-glow-${gaugeId}`} x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="5" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+          </defs>
+          <path d="M45 160 A105 105 0 0 1 255 160" fill="none" stroke="rgba(255,255,255,0.045)" strokeWidth="31" strokeLinecap="round" />
+          <path d="M45 160 A105 105 0 0 1 255 160" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="1 7" />
+          <path d="M45 160 A105 105 0 0 1 255 160" fill="none" stroke={`url(#vulcan-health-arc-${gaugeId})`} strokeWidth="5" strokeLinecap="round" opacity="0.24" />
           <motion.path
-            d="M30 118 A90 90 0 0 1 210 118"
+            d="M45 160 A105 105 0 0 1 255 160"
             fill="none"
             stroke={color}
-            strokeWidth="18"
+            strokeWidth="25"
             strokeLinecap="round"
-            strokeDasharray={circumference}
-            initial={{ strokeDashoffset: circumference }}
-            animate={{ strokeDashoffset: dashOffset }}
+            pathLength={100}
+            strokeDasharray="100"
+            initial={{ strokeDashoffset: 100 }}
+            animate={{ strokeDashoffset: 100 - score }}
+            filter={`url(#vulcan-health-glow-${gaugeId})`}
             transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
           />
-          <path d="M30 118 A90 90 0 0 1 210 118" fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="1" strokeDasharray="2 13" />
+          {tickMarks.map((tick, index) => (
+            <line key={index} x1={tick.x} y1={tick.y} x2={tick.x2} y2={tick.y2} stroke={tick.major ? "rgba(255,255,255,0.64)" : "rgba(255,255,255,0.24)"} strokeWidth={tick.major ? 2 : 1} strokeLinecap="round" />
+          ))}
+          {[0, 25, 50, 75, 100].map((value) => {
+            const labelPoint = point(Math.PI + (value / 100) * Math.PI, 121);
+            return <text key={value} x={labelPoint.x} y={labelPoint.y + 4} textAnchor="middle" className="fill-zinc-600 text-[9px] font-medium">{value}</text>;
+          })}
+          <motion.circle cx={pointerX} cy={pointerY} r="3" fill={color} opacity="0.7" animate={{ opacity: [0.35, 0.95, 0.35] }} transition={{ duration: 1.8, repeat: Infinity }} />
           <motion.line
-            x1="120"
-            y1="118"
-            initial={{ x2: 48, y2: 118 }}
+            x1="150"
+            y1="160"
+            initial={{ x2: 68, y2: 160 }}
             animate={{ x2: pointerX, y2: pointerY }}
             transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
-            stroke="#fafafa"
-            strokeWidth="3"
+            stroke="#f8fafc"
+            strokeWidth="3.5"
             strokeLinecap="round"
           />
-          <circle cx="120" cy="118" r="8" fill="#09090b" stroke={color} strokeWidth="3" />
-          <text x="120" y="86" textAnchor="middle" className="fill-zinc-50 text-[34px] font-semibold">{score}</text>
-          <text x="120" y="106" textAnchor="middle" className="fill-orange-200 text-[8px] uppercase tracking-[0.22em]">/100</text>
-          <text x="30" y="148" textAnchor="middle" className="fill-zinc-600 text-[9px]">0</text>
-          <text x="210" y="148" textAnchor="middle" className="fill-zinc-600 text-[9px]">100</text>
+          <circle cx="150" cy="160" r="13" fill="#09090b" stroke="rgba(255,255,255,0.16)" strokeWidth="2" />
+          <circle cx="150" cy="160" r="8" fill="#09090b" stroke={color} strokeWidth="3" />
+          <circle cx="150" cy="160" r="3" fill="#f8fafc" />
+          <text x="150" y="123" textAnchor="middle" className="fill-zinc-50 text-[44px] font-semibold tracking-[-0.06em]">{score}</text>
+          <text x="150" y="143" textAnchor="middle" className="fill-zinc-500 text-[9px] uppercase tracking-[0.24em]">pontos / 100</text>
         </svg>
-        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 text-center">
-          <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Saúde Operacional</p>
-          <p className="mt-1 text-2xl font-semibold" style={{ color }}>{status}</p>
+        <div className="mt-[-4px] flex items-center justify-center gap-2">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 12px ${color}` }} />
+          <p className="text-lg font-semibold" style={{ color }}>{status}</p>
         </div>
       </div>
       <div className="grid content-center gap-3">
-        <p className="text-3xl font-semibold text-zinc-50">{status === "Crítico" ? "Ação imediata" : status === "Atenção" ? "Atenção controlada" : "Operação sob controle"}</p>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-3xl font-semibold text-zinc-50">{status === "Crítico" ? "Ação imediata" : status === "Atenção" ? "Atenção controlada" : "Operação sob controle"}</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-zinc-600">Fatores que formam o índice</p>
+          </div>
+          <span className="hidden rounded-full border border-white/10 px-2 py-1 text-[10px] text-zinc-500 sm:inline">Atualização contínua</span>
+        </div>
         <p className="max-w-xl text-sm leading-6 text-zinc-400">
           Leitura composta por agentes online, estabilidade de sincronização, foco, baixa ociosidade, baixa troca de contexto e qualidade dos dados.
         </p>
@@ -4934,7 +5083,6 @@ function OperationalHealthGauge({
 }
 
 function DashboardView({
-  metrics,
   insights,
   notifications,
   devices,
@@ -4942,12 +5090,8 @@ function DashboardView({
   pendingDevices,
   operationalMetrics,
   operationalIntelligence,
-  hierarchy,
-  supabaseStatus,
-  allowDemoFallback,
   onOpenMetrics
 }: {
-  metrics: Metric[];
   insights: Insight[];
   notifications: NotificationItem[];
   devices: Device[];
@@ -4955,14 +5099,10 @@ function DashboardView({
   pendingDevices: Device[];
   operationalMetrics: OperationalMetric[];
   operationalIntelligence: OperationalIntelligence;
-  hierarchy: HierarchyNode[];
-  supabaseStatus: SupabaseStatus;
-  allowDemoFallback: boolean;
   onOpenMetrics: (filters: Omit<MetricsIntent, "nonce">) => void;
 }) {
   const activeSeconds = operationalIntelligence.totalActiveSeconds || sumMetric(operationalMetrics, "active_seconds");
   const idleSeconds = operationalIntelligence.totalIdleSeconds || sumMetric(operationalMetrics, "idle_seconds");
-  const contextSwitches = operationalIntelligence.contextSwitches || sumMetric(operationalMetrics, "context_switch_count");
   const trackedSeconds = operationalIntelligence.trackedSeconds || activeSeconds + idleSeconds;
   const [selectedTeamId, setSelectedTeamId] = useState("all");
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
@@ -4973,25 +5113,12 @@ function DashboardView({
   const pendingQueue = visibleDevices.reduce((total, device) => total + Number(device.queueDepth ?? 0), 0);
   const qualityIssues = visibleDevices.filter((device) => ["low", "blocked_by_os"].includes(device.collectionQuality ?? "")).length;
   const pendingNotifications = notifications.filter((item) => ["queued", "missing_credentials", "failed"].includes(item.status)).length;
-  const automationHours = insights.reduce((total, insight) => total + insight.automationSavingsHours, 0);
-  const financialSavings = automationHours * 95;
-  const dataPlaneReady = supabaseStatus.configured && supabaseStatus.databaseReachable !== false && supabaseStatus.restReachable !== false;
   const baseMetricsFilter = selectedTeam ? { teamId: selectedTeam.id } : {};
   const recommendedActions = useMemo(
-    () => buildRecommendedActions(insights, operationalIntelligence, pendingNotifications, financialSavings),
-    [insights, operationalIntelligence, pendingNotifications, financialSavings]
-  );
-  const lossBreakdown = useMemo(
-    () => buildLossBreakdown({ idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours }),
-    [idleSeconds, contextSwitches, pendingQueue, offlineDevices, qualityIssues, automationHours]
-  );
-  const topLoss = lossBreakdown.reduce<(typeof lossBreakdown)[number] | null>(
-    (current, item) => (!current || item.money > current.money ? item : current),
-    null
+    () => buildRecommendedActions(insights, operationalIntelligence, pendingNotifications, 0),
+    [insights, operationalIntelligence, pendingNotifications]
   );
   const primaryAction = recommendedActions[0] ?? null;
-  const activeUsersValue = selectedTeam ? String(selectedTeam.membersCount || 0) : metrics.find((metric) => metric.id === "active-users")?.value ?? String(hierarchy.length || 0);
-  const criticalInsights = insights.filter((item) => item.impact === "high").length;
   const essentialAlerts = [
     ...notifications
       .filter((item) => ["failed", "missing_credentials", "queued"].includes(item.status))
@@ -4999,7 +5126,7 @@ function DashboardView({
       .map((item) => ({
         id: `notification-${item.id}`,
         title: item.title,
-        detail: `${channelPt(item.channel)} | ${statusPt(item.status)}${item.recipient ? ` | ${item.recipient}` : ""}`,
+        detail: statusPt(item.status),
         severity: item.status === "failed" ? "crítico" : "atenção",
         filters: baseMetricsFilter
       })),
@@ -5008,76 +5135,31 @@ function DashboardView({
       .slice(0, 2)
       .map((device) => ({
         id: `device-${device.id}`,
-        title: device.status === "offline" ? `Agente offline: ${device.hostname}` : `Agente exige atenção: ${device.hostname}`,
-        detail: `${device.owner} | fila ${device.queueDepth ?? 0} | coleta ${qualityPt(device.collectionQuality)}`,
+        title: device.status === "offline" ? `${device.hostname} offline` : `${device.hostname} exige atenção`,
+        detail: device.status === "offline" ? "sem sinal" : qualityPt(device.collectionQuality),
         severity: device.status === "offline" ? "crítico" : "atenção",
         filters: { ...baseMetricsFilter, deviceId: device.id, agentStatus: device.status }
-      })),
-    ...insights.slice(0, 2).map((insight) => ({
-      id: `insight-${insight.id}`,
-      title: insight.title,
-      detail: `${impactPt(insight.impact)} | ${insight.automationSavingsHours}h potenciais`,
-      severity: insight.impact === "high" ? "crítico" : "atenção",
-      filters: baseMetricsFilter
-    }))
+      }))
   ].slice(0, 5);
-  const commandKpis = [
-    {
-      label: "Agentes online",
-      value: `${visibleOnlineAgents}/${visibleTotalAgents || 0}`,
-      detail: offlineDevices ? `${offlineDevices} offline` : "sincronização estável",
-      tone: offlineDevices ? "warn" : "ok",
-      filters: { ...baseMetricsFilter, agentStatus: offlineDevices ? "offline" : "online" }
-    },
-    {
-      label: "Usuários ativos",
-      value: activeUsersValue,
-      detail: selectedTeam?.name ?? "escopo visível",
-      tone: "ok",
-      filters: baseMetricsFilter
-    },
-    {
-      label: "Gargalos críticos",
-      value: `${criticalInsights}`,
-      detail: criticalInsights ? "requer decisão" : "sem crítico agora",
-      tone: criticalInsights ? "warn" : "ok",
-      filters: { ...baseMetricsFilter, metricType: "context_switch" }
-    },
-    {
-      label: "Foco operacional",
-      value: `${operationalIntelligence.focusScore}/100`,
-      detail: `maior bloco ${formatDuration(operationalIntelligence.longestFocusSeconds)}`,
-      tone: operationalIntelligence.focusScore >= 60 ? "ok" : "warn",
-      filters: { ...baseMetricsFilter, metricType: "productive" }
-    },
-    {
-      label: "Economia estimada",
-      value: formatMoneyBRL(financialSavings),
-      detail: `${automationHours}h potenciais`,
-      tone: financialSavings ? "ok" : "warn",
-      filters: baseMetricsFilter
-    },
-    {
-      label: "Alertas abertos",
-      value: `${pendingNotifications}`,
-      detail: pendingNotifications ? "fora do painel" : "sem pendências",
-      tone: pendingNotifications ? "warn" : "ok",
-      filters: baseMetricsFilter
-    }
-  ] as const;
-  const quickActivity = operationalIntelligence.currentActivity || "Aguardando sinal operacional";
+  const timelineData = operationalIntelligence.timeline.slice(-12).map((point) => ({
+    label: point.label,
+    ativo: Math.round(point.activeSeconds / 60),
+    ocioso: Math.round(point.idleSeconds / 60)
+  }));
+  const statusData = [
+    { name: "Online", value: visibleOnlineAgents, color: "#34d399" },
+    { name: "Offline", value: offlineDevices, color: "#fb7185" },
+    { name: "Fila", value: visibleDevices.filter((device) => Number(device.queueDepth ?? 0) > 0).length, color: "#fb923c" }
+  ].filter((item) => item.value > 0);
 
   return (
     <ViewFrame>
       <div className="vulcan-dashboard-toolbar">
         <div>
-          <span className="vulcan-section-kicker">Visão executiva</span>
-          <strong>O que exige sua atenção agora</strong>
+          <span className="vulcan-section-kicker">Visão geral</span>
+          <strong>Pulso operacional</strong>
         </div>
         <TeamFilter teams={teams} selectedTeamId={selectedTeamId} onChange={setSelectedTeamId} />
-        <span className="vulcan-data-mode">
-          {!dataPlaneReady ? "Modo degradado" : allowDemoFallback ? "Demo comercial" : "Dados reais"}
-        </span>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
@@ -5089,48 +5171,63 @@ function DashboardView({
             idleRate={operationalIntelligence.idleRate}
             contextSwitchesPerHour={operationalIntelligence.contextSwitchesPerHour}
             criticalSignals={offlineDevices + qualityIssues + pendingDevices.length}
-          />
-        </Panel>
-
-        <div className="grid gap-5">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {commandKpis.map((item) => (
-              <CommandKpiCard
-                key={item.label}
-                label={item.label}
-                value={item.value}
-                detail={item.detail}
-                tone={item.tone}
-                onClick={() => onOpenMetrics(item.filters)}
-              />
-            ))}
-          </div>
-
-          <Panel title="Ação recomendada agora" icon={Activity}>
-            <div className="grid gap-4 xl:grid-cols-[1fr_auto]">
-              <div>
-                <p className="text-xs uppercase tracking-[0.22em] text-orange-300">Prioridade</p>
-                <p className="mt-3 text-2xl font-semibold leading-tight text-zinc-50">
-                  {primaryAction?.title ?? operationalIntelligence.aiRecommendations[0] ?? "Mantenha os agentes ativos para consolidar o próximo diagnóstico."}
-                </p>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">
-                  Agora: {quickActivity}. Tempo ativo {formatDuration(activeSeconds)}, ocioso {formatDuration(idleSeconds)} e {Math.round(contextSwitches)} trocas no recorte.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => onOpenMetrics({ ...baseMetricsFilter, metricType: primaryAction?.urgency === "Alta" ? "context_switch" : undefined })}
-                className="h-12 self-end bg-orange-500 px-5 text-sm font-semibold text-black transition hover:bg-orange-400"
-              >
-                Abrir análise
-              </button>
-            </div>
+            />
           </Panel>
-        </div>
+        <Panel title="Ritmo" icon={Activity}>
+          {timelineData.length ? (
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={timelineData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="vulcanActive" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#fb923c" stopOpacity={0.45} />
+                      <stop offset="95%" stopColor="#fb923c" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#27272a" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
+                  <Tooltip contentStyle={{ background: "#09090b", border: "1px solid #3f3f46", color: "#fafafa" }} />
+                  <Area type="monotone" dataKey="ativo" name="Ativo" stroke="#fb923c" fill="url(#vulcanActive)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="ocioso" name="Ocioso" stroke="#71717a" fill="transparent" strokeWidth={1.5} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyState title="Aguardando dados" description="O ritmo aparece quando os primeiros eventos reais forem coletados." />
+          )}
+        </Panel>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <Panel title="Alertas essenciais" icon={BellRing}>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+        <Panel title="Equipamentos" icon={Monitor}>
+          {statusData.length ? (
+            <div className="grid gap-4 md:grid-cols-[170px_1fr] md:items-center">
+              <div className="h-40">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={68} paddingAngle={3}>
+                      {statusData.map((item) => <Cell key={item.name} fill={item.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ background: "#09090b", border: "1px solid #3f3f46", color: "#fafafa" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="grid gap-2">
+                {statusData.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between border-b border-zinc-800/80 py-2 text-sm">
+                    <span className="flex items-center gap-2 text-zinc-400"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />{item.name}</span>
+                    <span className="font-semibold text-zinc-100">{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="Sem equipamentos" description="Os agentes aparecerão aqui assim que forem vinculados ao tenant." />
+          )}
+        </Panel>
+
+        <Panel title="Atenção" icon={BellRing}>
           <div className="grid gap-3">
             {essentialAlerts.length ? (
               essentialAlerts.map((alert) => (
@@ -5147,66 +5244,32 @@ function DashboardView({
                     </div>
                     <span className={alert.severity === "crítico" ? "text-rose-300" : "text-orange-300"}>{alert.severity}</span>
                   </div>
-                  <p className="mt-3 text-xs uppercase tracking-[0.16em] text-zinc-600 transition group-hover:text-orange-200">abrir Métricas filtrada</p>
                 </button>
               ))
             ) : (
-              <EmptyState title="Sem alerta urgente" description="A central fica limpa quando não há agente offline, fila alta, credencial crítica ou insight de alto impacto." />
+              <EmptyState title="Tudo em ordem" description="Nenhuma ocorrência exige ação agora." />
             )}
           </div>
         </Panel>
 
-        <Panel title="Leitura de 5 segundos" icon={ShieldCheck}>
-          <div className="grid gap-4">
-            <div className="border border-orange-400/20 bg-[linear-gradient(135deg,rgba(249,115,22,0.12),rgba(9,9,11,0.72))] p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-orange-300">Maior perda provável</p>
-              <p className="mt-3 text-3xl font-semibold text-zinc-50">{formatMoneyBRL(topLoss?.money ?? financialSavings)}</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {topLoss ? `${topLoss.label}: ${topLoss.action}` : "Nenhuma perda relevante detectada no recorte atual."}
-              </p>
+        <Panel title="Próximo passo" icon={Zap}>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-lg font-semibold text-zinc-100">{primaryAction?.title ?? "Coleta em andamento"}</p>
+              <p className="mt-1 text-sm text-zinc-500">{selectedTeam?.name ?? "Toda empresa"} · {formatDuration(trackedSeconds)} analisados</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <ConnectionSummary label="Tempo analisado" value={formatDuration(trackedSeconds)} tone="ok" />
-              <ConnectionSummary label="Fila offline" value={`${pendingQueue} evento${pendingQueue === 1 ? "" : "s"}`} tone={pendingQueue ? "warn" : "ok"} />
-              <ConnectionSummary label="Coleta limitada" value={`${qualityIssues}`} tone={qualityIssues ? "warn" : "ok"} />
-              <ConnectionSummary label="Escopo" value={selectedTeam?.name ?? "Toda empresa"} tone="ok" />
-            </div>
+            <button type="button" onClick={() => onOpenMetrics({ ...baseMetricsFilter, metricType: primaryAction?.urgency === "Alta" ? "context_switch" : undefined })} className="h-10 bg-orange-500 px-4 text-sm font-semibold text-black transition hover:bg-orange-400">
+              Ver métricas
+            </button>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <ConnectionSummary label="Online" value={`${visibleOnlineAgents}`} tone={offlineDevices ? "warn" : "ok"} />
+            <ConnectionSummary label="Fila" value={`${pendingQueue}`} tone={pendingQueue ? "warn" : "ok"} />
+            <ConnectionSummary label="Coleta" value={`${qualityIssues}`} tone={qualityIssues ? "warn" : "ok"} />
           </div>
         </Panel>
       </div>
     </ViewFrame>
-  );
-}
-
-function CommandKpiCard({
-  label,
-  value,
-  detail,
-  tone,
-  onClick
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  tone: "ok" | "warn";
-  onClick: () => void;
-}) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      className="vulcan-kpi-card group min-h-36 p-4 text-left"
-      whileHover={{ y: -4 }}
-      whileTap={{ scale: 0.985 }}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-        <span className={`h-2.5 w-2.5 rounded-full ${tone === "ok" ? "bg-emerald-400" : "bg-orange-400"}`} />
-      </div>
-      <p className="mt-5 text-3xl font-semibold text-zinc-50">{value}</p>
-      <p className="mt-3 text-sm leading-5 text-zinc-500">{detail}</p>
-      <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-zinc-700 transition group-hover:text-orange-200">investigar</p>
-    </motion.button>
   );
 }
 

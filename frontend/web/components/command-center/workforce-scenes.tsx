@@ -1,7 +1,7 @@
 "use client";
 
 import type { EChartsOption } from "echarts";
-import { Activity, Building2, CircleGauge, RadioTower, UsersRound } from "lucide-react";
+import { Activity, BrainCircuit, Building2, CircleGauge, Clock3, RadioTower, Sparkles, WalletCards } from "lucide-react";
 import { useMemo } from "react";
 import { VulcanChart } from "./vulcan-chart";
 import {
@@ -24,12 +24,75 @@ export function WorkforceScene({
   scene: string;
   snapshot: WallboardSnapshot;
 }) {
+  if (scene === "economy") return <WorkforceEconomy snapshot={snapshot} />;
   if (scene === "pulse") return <WorkforcePulse snapshot={snapshot} />;
   if (scene === "teams") return <WorkforceTeams snapshot={snapshot} />;
   if (scene === "applications") return <WorkforceApplications snapshot={snapshot} />;
   if (scene === "branches") return <WorkforceBranches snapshot={snapshot} />;
   if (scene === "collection") return <WorkforceCollection snapshot={snapshot} />;
   return <WorkforceCommand snapshot={snapshot} />;
+}
+
+function WorkforceEconomy({ snapshot }: { snapshot: WallboardSnapshot }) {
+  const activeHours = numeric(kpi(snapshot.kpis, "activeHours", "active_hours"));
+  const idleHours = numeric(kpi(snapshot.kpis, "idleHours", "idle_hours"));
+  const opportunityHours = numeric(kpi(snapshot.kpis, "opportunityHours", "opportunity_hours"));
+  const estimatedSavings = numeric(kpi(snapshot.kpis, "estimatedSavings", "estimated_savings"));
+  const insightCount = numeric(kpi(snapshot.kpis, "aiInsightCount", "ai_insight_count"));
+  const confidence = numeric(kpi(snapshot.kpis, "aiConfidence", "ai_confidence"));
+  const total = Math.max(activeHours + idleHours, 0);
+  const activityShare = total ? Math.round((activeHours / total) * 100) : 0;
+  const timeData = [
+    { value: activeHours, name: "Tempo ativo", itemStyle: { color: "#39d98a" } },
+    { value: idleHours, name: "Tempo em oportunidade", itemStyle: { color: "#ff7a1a" } }
+  ].filter((item) => item.value > 0);
+  const timeOption: EChartsOption = {
+    tooltip: { trigger: "item", valueFormatter: (value) => `${Number(value).toFixed(1)}h` },
+    series: [{
+      type: "pie",
+      radius: ["63%", "84%"],
+      center: ["50%", "50%"],
+      avoidLabelOverlap: true,
+      itemStyle: { borderColor: "#09090b", borderWidth: 5, borderRadius: 8 },
+      label: { show: false },
+      data: timeData
+    }]
+  };
+
+  return (
+    <div className="command-scene-grid">
+      <CommandFrame eyebrow="Eficiência operacional" title="Tempo e economia" detail="últimas 24 horas · dados reais" className="command-span-7">
+        {timeData.length ? (
+          <div className="command-economy-time">
+            <div className="command-economy-chart">
+              <VulcanChart option={timeOption} ariaLabel="Distribuição real entre tempo ativo e oportunidade" />
+              <div><strong>{activityShare}%</strong><span>ativo</span></div>
+            </div>
+            <div className="command-economy-kpis">
+              <article><Clock3 /><span>Ativo</span><strong>{activeHours.toFixed(1)}h</strong></article>
+              <article><Activity /><span>Oportunidade</span><strong>{opportunityHours.toFixed(1)}h</strong></article>
+            </div>
+          </div>
+        ) : (
+          <HonestEmpty title="Aguardando base real" detail="A distribuição surgirá após a coleta dos primeiros períodos completos." />
+        )}
+      </CommandFrame>
+      <CommandFrame eyebrow="Potencial validado" title="Economia explicável" detail="estimativa derivada dos insights" className="command-span-5">
+        {insightCount ? (
+          <div className="command-economy-ai">
+            <div className="command-economy-value"><WalletCards /><strong>{estimatedSavings.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}</strong><span>potencial identificado</span></div>
+            <div className="command-economy-proof">
+              <BrainCircuit /><p><strong>{insightCount}</strong><span>análises com evidência</span></p>
+              <Sparkles /><p><strong>{Math.round(confidence * 100)}%</strong><span>confiança média</span></p>
+            </div>
+            <small>A IA explica fatos estruturados; os valores são estimativas operacionais, não lançamentos financeiros.</small>
+          </div>
+        ) : (
+          <HonestEmpty title="Sem estimativa ainda" detail="O Vulcan só exibirá economia quando houver insight real com evidência e confiança." />
+        )}
+      </CommandFrame>
+    </div>
+  );
 }
 
 function WorkforceCommand({ snapshot }: { snapshot: WallboardSnapshot }) {

@@ -99,12 +99,45 @@ class AuthContext:
     tenant_id: UUID
     role: str
     provider: str
+    display_name: str | None = None
 
 
 def _local_development_auth_enabled(settings: Settings) -> bool:
     if settings.environment == "production":
         return False
     return settings.auth_provider == "local" or settings.mock_auth or settings.local_test_auth_enabled
+
+
+def _portal_sso_context(
+    request: Request,
+    tenant_id: UUID,
+    authenticated: str | None,
+    user_id: str | None,
+    username: str | None,
+    display_name: str | None,
+    portal_role: str | None,
+) -> AuthContext | None:
+    """Accept identity headers only when they came from the local Portal proxy."""
+    peer = str(request.client.host if request.client else "")
+    if peer not in {"127.0.0.1", "::1"} or authenticated != "1":
+        return None
+
+    clean_user_id = " ".join((user_id or "").split())[:160]
+    clean_username = " ".join((username or "").split())[:160]
+    if not clean_user_id or not clean_username:
+        return None
+
+    clean_display_name = " ".join((display_name or "").split())[:160] or clean_username
+    normalized_role = (portal_role or "").strip().upper()
+    role = "owner" if normalized_role in {"ADMIN", "OWNER", "SUPORTE", "SUPPORT"} else "user"
+    return AuthContext(
+        user_id=clean_user_id,
+        email=clean_username,
+        tenant_id=tenant_id,
+        role=role,
+        provider="portal",
+        display_name=clean_display_name,
+    )
 
 
 def login_with_local_admin(request: LoginRequest, settings: Settings | None = None) -> LoginResponse:
@@ -427,8 +460,25 @@ def require_auth(
     request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+    x_portal_authenticated: str | None = Header(default=None, alias="X-Portal-Authenticated"),
+    x_portal_user_id: str | None = Header(default=None, alias="X-Portal-User-Id"),
+    x_portal_username: str | None = Header(default=None, alias="X-Portal-Username"),
+    x_portal_display_name: str | None = Header(default=None, alias="X-Portal-Display-Name"),
+    x_portal_role: str | None = Header(default=None, alias="X-Portal-Role"),
 ) -> AuthContext:
     tenant_id = UUID(x_tenant_id) if x_tenant_id else LOCAL_TENANT_ID
+
+    portal_context = _portal_sso_context(
+        request,
+        tenant_id,
+        x_portal_authenticated,
+        x_portal_user_id,
+        x_portal_username,
+        x_portal_display_name,
+        x_portal_role,
+    )
+    if portal_context:
+        return portal_context
 
     settings = get_settings()
 

@@ -228,6 +228,12 @@ See `docs/AI.md`, `docs/SUPABASE.md`, and `docs/LOCAL_SETUP.md` for details.
 
 Supabase is the official platform layer for Auth, PostgreSQL, RLS, Storage, and optional Realtime.
 
+Para apontar o ambiente local a um projeto Supabase real, copie `.env.vulcan-ers.example` para
+`.env.vulcan-ers` e preencha as chaves no arquivo privado. Os scripts `run-api.sh` e `dev.sh`
+carregam esse override depois do `.env` padrão. A service key fica somente no backend; nunca a
+publique no navegador ou no repositório. O Vulcan inicia sem dados fictícios quando
+`NEXT_PUBLIC_ALLOW_DEMO_FALLBACK=false` e `MOCK_DATA=false`.
+
 ```bash
 corepack pnpm supabase:validate
 corepack pnpm supabase:migrate

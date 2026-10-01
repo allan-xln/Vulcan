@@ -170,7 +170,7 @@ def auth_session(context: AuthContext = Authenticated) -> AuthSessionResponse:
     return AuthSessionResponse(
         user={
             "id": context.user_id,
-            "name": context.email or "Usuário Vulcan",
+            "name": context.display_name or context.email or "Usuário Vulcan",
             "email": context.email,
             "role": context.role,
             "tenantId": str(context.tenant_id),

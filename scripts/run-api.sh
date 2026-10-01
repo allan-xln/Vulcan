@@ -14,6 +14,11 @@ if [ -f "$ROOT_DIR/.env" ]; then
   source "$ROOT_DIR/.env"
   set +a
 fi
+if [ -f "$ROOT_DIR/.env.vulcan-ers" ]; then
+  set -a
+  source "$ROOT_DIR/.env.vulcan-ers"
+  set +a
+fi
 
 if [ -f "$ROOT_DIR/infra/evolution/.env" ]; then
   set -a
