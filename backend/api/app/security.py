@@ -465,7 +465,17 @@ def require_auth(
     x_portal_display_name: str | None = Header(default=None, alias="X-Portal-Display-Name"),
     x_portal_role: str | None = Header(default=None, alias="X-Portal-Role"),
 ) -> AuthContext:
-    tenant_id = UUID(x_tenant_id) if x_tenant_id else LOCAL_TENANT_ID
+    settings = get_settings()
+    if x_portal_authenticated == "1" and settings.portal_tenant_id:
+        try:
+            tenant_id = UUID(settings.portal_tenant_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="portal tenant configuration is invalid",
+            ) from exc
+    else:
+        tenant_id = UUID(x_tenant_id) if x_tenant_id else LOCAL_TENANT_ID
 
     portal_context = _portal_sso_context(
         request,
@@ -478,8 +488,6 @@ def require_auth(
     )
     if portal_context:
         return portal_context
-
-    settings = get_settings()
 
     demo_tokens = {
         f"Bearer {account['token']}": account

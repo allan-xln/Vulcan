@@ -48,6 +48,33 @@ def test_local_admin_login_and_protected_metrics() -> None:
     assert len(metrics_response.json()) >= 1
 
 
+def test_portal_sso_uses_the_configured_tenant(monkeypatch) -> None:
+    tenant_id = "8d16123a-647d-4093-b58f-bf608d32b73c"
+    monkeypatch.setenv("VULCAN_PORTAL_TENANT_ID", tenant_id)
+
+    response = client.get(
+        "/auth/session",
+        headers={
+            "X-Tenant-Id": "00000000-0000-0000-0000-000000000999",
+            "X-Portal-Authenticated": "1",
+            "X-Portal-User-Id": "11111111-1111-1111-1111-111111111111",
+            "X-Portal-Username": "allan@erstransportes.com.br",
+            "X-Portal-Display-Name": "Allan Pereira",
+            "X-Portal-Role": "ADMIN",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"] == {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "name": "Allan Pereira",
+        "email": "allan@erstransportes.com.br",
+        "role": "owner",
+        "tenantId": tenant_id,
+        "provider": "portal",
+    }
+
+
 def test_local_test_user_login_and_protected_metrics() -> None:
     login_response = client.post("/auth/login", json={"username": "teste", "password": "teste"})
     assert login_response.status_code == 200

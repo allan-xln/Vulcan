@@ -32,6 +32,7 @@ class Settings:
     auth_token_ttl_minutes: int
     auth_issuer: str
     auth_audience: str
+    portal_tenant_id: str | None
     supabase_url: str | None
     supabase_rest_url: str | None
     supabase_project_ref: str | None
@@ -241,6 +242,7 @@ def get_settings() -> Settings:
         auth_token_ttl_minutes=max(5, int(getenv("VULCAN_AUTH_TOKEN_TTL_MINUTES", "480"))),
         auth_issuer=getenv("VULCAN_AUTH_ISSUER", "vulcan-api"),
         auth_audience=getenv("VULCAN_AUTH_AUDIENCE", "vulcan-web"),
+        portal_tenant_id=getenv("VULCAN_PORTAL_TENANT_ID") or None,
         supabase_url=getenv("SUPABASE_URL", getenv("NEXT_PUBLIC_SUPABASE_URL", "")) or None,
         supabase_rest_url=getenv("SUPABASE_REST_URL") or None,
         supabase_project_ref=getenv("SUPABASE_PROJECT_REF") or None,
