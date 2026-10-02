@@ -1,4 +1,5 @@
 import os
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
@@ -73,6 +74,28 @@ def test_portal_sso_uses_the_configured_tenant(monkeypatch) -> None:
         "tenantId": tenant_id,
         "provider": "portal",
     }
+
+
+def test_portal_sso_normalizes_opaque_user_ids(monkeypatch) -> None:
+    tenant_id = "8d16123a-647d-4093-b58f-bf608d32b73c"
+    monkeypatch.setenv("VULCAN_PORTAL_TENANT_ID", tenant_id)
+
+    response = client.get(
+        "/auth/session",
+        headers={
+            "X-Portal-Authenticated": "1",
+            "X-Portal-User-Id": "usr-denise",
+            "X-Portal-Username": "denise@erstransportes.com.br",
+            "X-Portal-Display-Name": "Denise",
+            "X-Portal-Role": "ADMIN",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["user"]
+    assert UUID(payload["id"])
+    assert payload["tenantId"] == tenant_id
+    assert payload["role"] == "owner"
 
 
 def test_local_test_user_login_and_protected_metrics() -> None:

@@ -319,6 +319,17 @@ class VulcanRepository:
         return psycopg.connect(self.settings.database_url, row_factory=dict_row, prepare_threshold=None)
 
     def _access(self, conn: psycopg.Connection, context: AuthContext) -> AccessScope:
+        if context.provider == "portal" and context.role in {"owner", "tenant_admin", "root"}:
+            return AccessScope(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                membership_id=None,
+                department_id=None,
+                scope="tenant",
+                is_root=False,
+                role_slug=context.role,
+            )
+
         if context.provider == "local":
             membership = conn.execute(
                 """

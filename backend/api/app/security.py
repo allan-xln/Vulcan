@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 import psycopg
@@ -126,11 +126,18 @@ def _portal_sso_context(
     if not clean_user_id or not clean_username:
         return None
 
+    try:
+        normalized_user_id = str(UUID(clean_user_id))
+    except ValueError:
+        normalized_user_id = str(
+            uuid5(NAMESPACE_URL, f"https://portal.erstransportes.com.br/users/{clean_user_id}")
+        )
+
     clean_display_name = " ".join((display_name or "").split())[:160] or clean_username
     normalized_role = (portal_role or "").strip().upper()
     role = "owner" if normalized_role in {"ADMIN", "OWNER", "SUPORTE", "SUPPORT"} else "user"
     return AuthContext(
-        user_id=clean_user_id,
+        user_id=normalized_user_id,
         email=clean_username,
         tenant_id=tenant_id,
         role=role,
