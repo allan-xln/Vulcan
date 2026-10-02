@@ -92,13 +92,12 @@ test.beforeEach(async ({ page }) => {
     };
   });
 
-  await page.route("**/auth/login", (route) =>
+  await page.route("**/auth/session", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        accessToken: "visual-read-only-token",
-        tokenType: "bearer",
+        authenticated: true,
         user: { id: "visual", name: "TV Visual", role: "read_only", tenantId }
       })
     })
@@ -298,9 +297,6 @@ test("keeps the last valid snapshot identified as stale and recovers", async ({
 async function authenticate(page: Page, path: string) {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(path, { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Usuário").fill("visual");
-  await page.getByLabel("Senha").fill("visual");
-  await page.getByRole("button", { name: "Acessar painel" }).click();
   await page.locator("[data-command-center]").waitFor();
   await page.waitForTimeout(100);
 }

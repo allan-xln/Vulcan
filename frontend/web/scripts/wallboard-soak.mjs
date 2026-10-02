@@ -37,6 +37,19 @@ const browser = await chromium.launch({
   ]
 });
 const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+const login = await context.request.post(`${baseUrl}/api/auth/login`, {
+  data: { username, password }
+});
+if (!login.ok()) {
+  throw new Error(`Falha ao validar a conta de teste do Wallboard: ${login.status()}.`);
+}
+const loginPayload = await login.json();
+await context.addInitScript(({ accessToken, user }) => {
+  window.sessionStorage.setItem(
+    "vulcan.auth.local-session.v1",
+    JSON.stringify({ accessToken, user })
+  );
+}, loginPayload);
 const page = await context.newPage();
 const client = await context.newCDPSession(page);
 await client.send("Performance.enable");
@@ -164,9 +177,6 @@ try {
     waitUntil: "domcontentloaded",
     timeout: 60_000
   });
-  await page.getByLabel("Usuário").fill(username);
-  await page.getByLabel("Senha").fill(password);
-  await page.getByRole("button", { name: "Acessar painel" }).click();
   await page.locator("[data-command-center='workforce']").waitFor({ timeout: 60_000 });
   await page.waitForTimeout(3_000);
   await page.screenshot({ path: path.join(outputDirectory, "initial.png") });

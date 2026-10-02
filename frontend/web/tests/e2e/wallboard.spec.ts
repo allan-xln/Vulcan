@@ -7,11 +7,20 @@ const apiBaseUrl = process.env.VULCAN_E2E_API_URL ?? "/api";
 test("authenticates the read-only account and renders both real Wallboards", async ({ page }) => {
   test.skip(!username || !password, "Wallboard production credentials were not provided.");
 
+  const login = await page.request.post(`${apiBaseUrl}/auth/login`, {
+    data: { username, password }
+  });
+  expect(login.ok()).toBeTruthy();
+  const loginPayload = (await login.json()) as { accessToken: string; user: unknown };
+  await page.addInitScript(({ accessToken, user }) => {
+    window.sessionStorage.setItem(
+      "vulcan.auth.local-session.v1",
+      JSON.stringify({ accessToken, user })
+    );
+  }, loginPayload);
+
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto("/wallboard/workforce?scene=command");
-  await page.getByLabel("Usuário").fill(username!);
-  await page.getByLabel("Senha").fill(password!);
-  await page.getByRole("button", { name: "Acessar painel" }).click();
   await page.locator("[data-command-center='workforce']").waitFor();
   await page.evaluate(() =>
     window.sessionStorage.setItem("vulcan-wallboard-rotation-paused", "true")

@@ -3551,10 +3551,10 @@ function Header({
           className="vulcan-tv-trigger"
           whileHover={{ y: -2, scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          aria-label="Abrir dashboards para TV"
+          aria-label="Abrir dashboards"
         >
           <MonitorPlay className="h-4 w-4" />
-          <span>TV</span>
+          <span>Dash</span>
         </motion.button>
         <div className="vulcan-identity-compact" title={identity || "Usuário Vulcan"}>
           <UserRound aria-hidden="true" />

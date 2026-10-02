@@ -1,10 +1,8 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 import {
-  FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -27,7 +25,24 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const SESSION_KEY = "vulcan-wallboard-access-token";
+const PORTAL_SESSION_KEY = "vulcan.auth.local-session.v1";
 const PAUSED_KEY = "vulcan-wallboard-rotation-paused";
+
+function storedPortalToken() {
+  const wallboardToken = window.sessionStorage.getItem(SESSION_KEY);
+  if (wallboardToken) return wallboardToken;
+
+  try {
+    const raw = window.sessionStorage.getItem(PORTAL_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { accessToken?: unknown };
+    return typeof parsed.accessToken === "string" && parsed.accessToken
+      ? parsed.accessToken
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 async function protectedJson<T>(path: string, token: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
@@ -92,10 +107,7 @@ function WallboardRuntime({ type }: { type: WallboardType }) {
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [itemIndex, setItemIndex] = useState(0);
   const [sceneIndex, setSceneIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -117,21 +129,44 @@ function WallboardRuntime({ type }: { type: WallboardType }) {
   const qualitySamples = useRef({ low: 0, high: 0 });
 
   useEffect(() => {
-    const storedToken = window.sessionStorage.getItem(SESSION_KEY);
-    setToken(storedToken);
     setPaused(window.sessionStorage.getItem(PAUSED_KEY) === "true");
     setBrowserOnline(navigator.onLine);
     setVisible(!document.hidden);
-    setInitialized(true);
+
+    let active = true;
+    const restorePortalSession = async () => {
+      const candidate = storedPortalToken() ?? "portal-sso";
+      try {
+        const response = await fetch(`${API_URL}/auth/session`, {
+          headers: { Authorization: `Bearer ${candidate}` },
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error("Sessão do Portal ERS indisponível.");
+        if (!active) return;
+        window.sessionStorage.setItem(SESSION_KEY, candidate);
+        setToken(candidate);
+        setSessionError(null);
+      } catch {
+        if (active) setSessionError("Abra o Vulcan pela Central ERS para validar seu acesso.");
+      } finally {
+        if (active) setInitialized(true);
+      }
+    };
+
+    void restorePortalSession();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const logout = useCallback(() => {
-    window.sessionStorage.removeItem(SESSION_KEY);
-    setToken(null);
-    setSseConnected(false);
-    setPassword("");
-    queryClient.clear();
-  }, [queryClient]);
+  const leaveWallboard = useCallback(() => {
+    const marker = "/wallboard/";
+    const markerIndex = window.location.pathname.indexOf(marker);
+    const basePath = markerIndex >= 0
+      ? window.location.pathname.slice(0, markerIndex)
+      : "";
+    window.location.assign(`${basePath}/`);
+  }, []);
 
   const profilesQuery = useQuery({
     queryKey: ["wallboard-profiles", type, token],
@@ -243,8 +278,10 @@ function WallboardRuntime({ type }: { type: WallboardType }) {
 
   useEffect(() => {
     const error = profilesQuery.error ?? snapshotQuery.error;
-    if (error && String(error).includes("sessão")) logout();
-  }, [logout, profilesQuery.error, snapshotQuery.error]);
+    if (error && String(error).includes("sessão")) {
+      setSessionError("Sua sessão do Portal ERS não permite abrir este dashboard.");
+    }
+  }, [profilesQuery.error, snapshotQuery.error]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(new Date()), 1_000);
@@ -458,72 +495,15 @@ function WallboardRuntime({ type }: { type: WallboardType }) {
     });
   }, []);
 
-  const handleLogin = async (event: FormEvent) => {
-    event.preventDefault();
-    setLoginLoading(true);
-    setLoginError(null);
-    try {
-      const response = await fetch(`${API_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
-      if (!response.ok) throw new Error("Usuário ou senha inválidos.");
-      const payload = (await response.json()) as {
-        accessToken: string;
-        user: { role?: string };
-      };
-      if (!["read_only", "root", "tenant_admin"].includes(payload.user.role ?? "")) {
-        throw new Error("Este usuário não possui um perfil permitido para o Wallboard.");
-      }
-      window.sessionStorage.setItem(SESSION_KEY, payload.accessToken);
-      setToken(payload.accessToken);
-      setPassword("");
-    } catch (error) {
-      setLoginError(error instanceof Error ? error.message : "Falha no login.");
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
-  if (!initialized) return <div className="command-loading-screen" />;
-
-  if (!token) {
+  if (!initialized || !token) {
     return (
-      <main className="command-login">
-        <div className="command-login-grid" aria-hidden="true" />
-        <form onSubmit={handleLogin}>
-          <span className="command-login-kicker">VULCAN COMMAND SYSTEM</span>
-          <Image src="/vulcan-logo.svg" alt="Vulcan" width={210} height={56} priority />
-          <h1>{type === "workforce" ? "Workforce Command Center" : "Infrastructure Command Center"}</h1>
-          <p>Canal exclusivo de TV · leitura somente · dados operacionais reais</p>
-          <label>
-            Usuário
-            <input
-              autoComplete="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            Senha
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {loginError ? (
-            <div role="alert"><AlertTriangle />{loginError}</div>
-          ) : null}
-          <button type="submit" disabled={loginLoading}>
-            <ShieldCheck />
-            {loginLoading ? "Validando canal…" : "Acessar painel"}
-          </button>
-        </form>
+      <main className="command-loading-screen" aria-label="Validando sessão do Portal ERS">
+        <Image src="/vulcan-symbol.svg" alt="" width={86} height={86} priority />
+        <span />
+        <p>{sessionError ?? "Validando sessão do Portal ERS…"}</p>
+        {sessionError ? (
+          <button type="button" onClick={leaveWallboard}>Voltar ao Vulcan</button>
+        ) : null}
       </main>
     );
   }
@@ -539,7 +519,7 @@ function WallboardRuntime({ type }: { type: WallboardType }) {
             : "Sincronizando telemetria real…"}
         </p>
         {profilesQuery.error || snapshotQuery.error ? (
-          <button type="button" onClick={logout}>Voltar ao acesso</button>
+          <button type="button" onClick={leaveWallboard}>Voltar ao Vulcan</button>
         ) : null}
       </main>
     );
@@ -598,7 +578,7 @@ function WallboardRuntime({ type }: { type: WallboardType }) {
       onNext={() => selectItem(1)}
       onTogglePause={togglePaused}
       onFullscreen={() => void document.documentElement.requestFullscreen?.()}
-      onLogout={logout}
+      onLogout={leaveWallboard}
       onDismissCritical={(id) =>
         setDismissedCritical((current) => new Set([...current, id]))
       }
