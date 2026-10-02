@@ -26,7 +26,7 @@ import {
   useState
 } from "react";
 import { SCENE_LABELS } from "./config";
-import { DataOriginBadge, StatusMark, formatMoment, text } from "./primitives";
+import { StatusMark, formatMoment, text } from "./primitives";
 import {
   CommandCenterConfig,
   ConnectionState,
@@ -106,6 +106,7 @@ export function CommandCenterShell({
   const rootRef = useRef<HTMLElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
   const introRef = useRef<HTMLDivElement>(null);
+  const introClaimedRef = useRef(false);
   const hideTimer = useRef<number | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [introVisible, setIntroVisible] = useState(false);
@@ -187,6 +188,7 @@ export function CommandCenterShell({
   }, [config.motionIntensity, config.transitionStyle, metrics.reducedMotion, scene]);
 
   useLayoutEffect(() => {
+    if (introClaimedRef.current) return;
     const key = `${INTRO_SESSION_PREFIX}${type}`;
     const alreadyShown = window.sessionStorage.getItem(key) === "shown";
     if (
@@ -198,6 +200,7 @@ export function CommandCenterShell({
       setIntroVisible(false);
       return;
     }
+    introClaimedRef.current = true;
     setIntroVisible(true);
     window.sessionStorage.setItem(key, "shown");
   }, [config.openingEnabled, critical, metrics.reducedMotion, type]);
@@ -266,13 +269,13 @@ export function CommandCenterShell({
             ) : null}
             <span className="command-brand-divider" />
             <div>
-              <p>VULCAN COMMAND SYSTEM</p>
-              <strong>{type === "workforce" ? "WORKFORCE" : "INFRASTRUCTURE"}</strong>
+              <p>PAINEL AO VIVO</p>
+              <strong>{type === "workforce" ? "OPERAÇÃO" : "INFRAESTRUTURA"}</strong>
             </div>
           </div>
           <div className="command-title">
-            <span>{SCENE_LABELS[scene] ?? activeItem?.title ?? "Command Center"}</span>
-            <h1>{panelHeading}</h1>
+            <span>{panelHeading}</span>
+            <h1>{SCENE_LABELS[scene] ?? activeItem?.title ?? "Painel ao vivo"}</h1>
             {config.showSite ? <p>{activeItem?.siteName ?? "Todas as filiais"} · ERS Transportes</p> : null}
           </div>
           <div className="command-header-status">
@@ -280,7 +283,6 @@ export function CommandCenterShell({
               status={connectionState}
               label={CONNECTION_LABELS[connectionState]}
             />
-            <DataOriginBadge />
             {profile.showClock ? (
               <time dateTime={clock.toISOString()}>
                 <strong>{clock.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo" })}</strong>
@@ -311,9 +313,7 @@ export function CommandCenterShell({
                 : "Atualização automática"}
             </span>
             <i />
-            <span>{metrics.fps === null ? "FPS calibrando" : `${metrics.fps} FPS`}</span>
-            <i />
-            <span>{metrics.effectiveQuality.toUpperCase()}</span>
+            <span>Atualiza automaticamente</span>
           </div>
           <div className="command-playlist-progress" aria-label="Progresso da playlist">
             <span>
@@ -323,7 +323,7 @@ export function CommandCenterShell({
               <b style={{ width: `${Math.min(100, Math.max(0, itemProgress))}%` }} />
             </div>
             <span>
-              CENA {String(sceneIndex + 1).padStart(2, "0")} / {String(Math.max(1, sceneCount)).padStart(2, "0")}
+              {SCENE_LABELS[scene] ?? `Tela ${sceneIndex + 1} de ${sceneCount}`}
             </span>
           </div>
         </footer>

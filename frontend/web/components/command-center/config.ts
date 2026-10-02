@@ -30,20 +30,20 @@ export const INFRASTRUCTURE_SCENES = [
 ] as const;
 
 export const SCENE_LABELS: Record<string, string> = {
-  command: "Comando geral",
+  command: "Resumo agora",
   economy: "Tempo e economia",
-  pulse: "Pulso operacional",
-  teams: "Equipes e filiais",
-  applications: "Aplicações",
-  branches: "Unidades operacionais",
-  collection: "Saúde da coleta",
-  topology: "Topologia Vulcan",
-  connectivity: "Links e conectividade",
-  proxmox: "Cluster Proxmox",
+  pulse: "Movimento das últimas 24h",
+  teams: "Situação por filial",
+  applications: "Sistemas mais usados",
+  branches: "Resumo das unidades",
+  collection: "Computadores monitorados",
+  topology: "Mapa da infraestrutura",
+  connectivity: "Conexão entre filiais",
+  proxmox: "Servidores virtuais",
   servers: "Servidores",
-  unifi: "Rede e UniFi",
-  printing: "Frota de impressão",
-  platform: "Saúde do Vulcan"
+  unifi: "Rede Wi-Fi e switches",
+  printing: "Impressoras",
+  platform: "Funcionamento do Vulcan"
 };
 
 export const QUALITY_CAPABILITIES = {

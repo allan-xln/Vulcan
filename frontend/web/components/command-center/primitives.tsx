@@ -53,6 +53,33 @@ export function statusClass(status: string) {
   return "is-unknown";
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  online: "Online",
+  ok: "Normal",
+  ready: "Pronto",
+  connected: "Conectado",
+  active: "Ativo",
+  live: "Ao vivo",
+  degraded: "Atenção",
+  warning: "Atenção",
+  investigating: "Em análise",
+  monitoring: "Monitorando",
+  delayed: "Atrasado",
+  stale: "Desatualizado",
+  offline: "Offline",
+  critical: "Crítico",
+  error: "Erro",
+  unavailable: "Indisponível",
+  failed: "Falhou",
+  pending: "Pendente",
+  unknown: "Sem dados",
+  disabled: "Desativado"
+};
+
+export function statusLabel(status: string) {
+  return STATUS_LABELS[status.toLowerCase()] ?? status.replaceAll("_", " ");
+}
+
 export function TelemetryLabel({
   label,
   value,
@@ -107,8 +134,28 @@ export function StatusMark({ status, label }: { status: string; label?: string }
   return (
     <span className={`command-status ${className}`}>
       <span className="command-status-dot" />
-      {label ?? status}
+      {label ?? statusLabel(status)}
     </span>
+  );
+}
+
+export function AtGlanceKpi({
+  label,
+  value,
+  hint,
+  tone = "identity"
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: string;
+  tone?: "identity" | "healthy" | "warning" | "critical" | "cold";
+}) {
+  return (
+    <article className={`command-glance-kpi command-tone-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {hint ? <small>{hint}</small> : null}
+    </article>
   );
 }
 

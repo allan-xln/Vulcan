@@ -6,9 +6,9 @@ import { useMemo } from "react";
 import { VulcanChart } from "./vulcan-chart";
 import {
   CommandFrame,
+  AtGlanceKpi,
   HonestEmpty,
   StatusMark,
-  TelemetryLabel,
   formatMoment,
   formatNumber,
   kpi,
@@ -61,23 +61,23 @@ function WorkforceEconomy({ snapshot }: { snapshot: WallboardSnapshot }) {
 
   return (
     <div className="command-scene-grid">
-      <CommandFrame eyebrow="Eficiência operacional" title="Tempo e economia" detail="últimas 24 horas · dados reais" className="command-span-7">
+      <CommandFrame eyebrow="Últimas 24 horas" title="Como o tempo foi usado" detail="leitura consolidada" className="command-span-7">
         {timeData.length ? (
           <div className="command-economy-time">
             <div className="command-economy-chart">
               <VulcanChart option={timeOption} ariaLabel="Distribuição real entre tempo ativo e oportunidade" />
-              <div><strong>{activityShare}%</strong><span>ativo</span></div>
+              <div><strong>{activityShare}%</strong><span>tempo ativo</span></div>
             </div>
             <div className="command-economy-kpis">
-              <article><Clock3 /><span>Ativo</span><strong>{activeHours.toFixed(1)}h</strong></article>
-              <article><Activity /><span>Oportunidade</span><strong>{opportunityHours.toFixed(1)}h</strong></article>
+              <article><Clock3 /><span>Trabalho ativo</span><strong>{activeHours.toFixed(1)}h</strong></article>
+              <article><Activity /><span>Tempo que pode melhorar</span><strong>{opportunityHours.toFixed(1)}h</strong></article>
             </div>
           </div>
         ) : (
           <HonestEmpty title="Aguardando base real" detail="A distribuição surgirá após a coleta dos primeiros períodos completos." />
         )}
       </CommandFrame>
-      <CommandFrame eyebrow="Potencial validado" title="Economia explicável" detail="estimativa derivada dos insights" className="command-span-5">
+      <CommandFrame eyebrow="Oportunidade encontrada" title="Potencial de economia" detail="estimativa com evidências" className="command-span-5">
         {insightCount ? (
           <div className="command-economy-ai">
             <div className="command-economy-value"><WalletCards /><strong>{estimatedSavings.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })}</strong><span>potencial identificado</span></div>
@@ -85,7 +85,7 @@ function WorkforceEconomy({ snapshot }: { snapshot: WallboardSnapshot }) {
               <BrainCircuit /><p><strong>{insightCount}</strong><span>análises com evidência</span></p>
               <Sparkles /><p><strong>{Math.round(confidence * 100)}%</strong><span>confiança média</span></p>
             </div>
-            <small>A IA explica fatos estruturados; os valores são estimativas operacionais, não lançamentos financeiros.</small>
+            <small>Estimativa operacional baseada nos padrões medidos no período.</small>
           </div>
         ) : (
           <HonestEmpty title="Sem estimativa ainda" detail="O Vulcan só exibirá economia quando houver insight real com evidência e confiança." />
@@ -103,68 +103,24 @@ function WorkforceCommand({ snapshot }: { snapshot: WallboardSnapshot }) {
   const offline = numeric(kpi(snapshot.kpis, "offlineAgents", "offline_agents"));
   const events = kpi(snapshot.kpis, "events24h", "events_24h");
   const coverage = agents ? Math.round((online / agents) * 100) : null;
+  const needsAttention = delayed + offline;
 
   return (
-    <div className="command-scene-grid workforce-command-scene">
-      <div className="command-side-telemetry command-side-left">
-        <TelemetryLabel
-          label="Pessoas ativas"
-          value={formatNumber(activePeople)}
-          detail="sinais confirmados nos últimos 15 min"
-        />
-        <TelemetryLabel
-          label="Eventos 24h"
-          value={formatNumber(events)}
-          detail="telemetria operacional real"
-          tone="cold"
-        />
+    <div className="command-scene-grid workforce-command-scene command-at-glance-scene">
+      <div className="command-glance-grid command-span-12">
+        <AtGlanceKpi label="Pessoas ativas agora" value={formatNumber(activePeople)} hint="atividade nos últimos 15 min" />
+        <AtGlanceKpi label="Computadores conectados" value={`${online}/${agents}`} hint={coverage === null ? "aguardando coleta" : `${coverage}% comunicando`} tone="healthy" />
+        <AtGlanceKpi label="Precisam de atenção" value={needsAttention} hint={`${delayed} atrasados · ${offline} offline`} tone={needsAttention ? "critical" : "healthy"} />
+        <AtGlanceKpi label="Atividades em 24h" value={formatNumber(events)} hint="eventos operacionais" tone="cold" />
       </div>
 
-      <section className="command-core" aria-label="Pulso central da operação">
-        <div className="command-core-rings" aria-hidden="true">
-          <span />
-          <span />
-          <span />
+      <section className={`command-decision-card command-span-12 ${needsAttention ? "is-warning" : "is-healthy"}`}>
+        <div>
+          <span>SITUAÇÃO AGORA</span>
+          <strong>{needsAttention ? `${needsAttention} computador(es) precisam ser verificados` : "Operação monitorada normalmente"}</strong>
         </div>
-        <div
-          className="command-core-meter"
-          style={{ "--command-progress": `${coverage ?? 0}%` } as React.CSSProperties}
-        >
-          <div className="command-core-center">
-            <span>COBERTURA</span>
-            <strong>{coverage === null ? "—" : `${coverage}%`}</strong>
-            <small>{coverage === null ? "Aguardando agentes" : "coleta ativa"}</small>
-          </div>
-        </div>
-        <div className="command-core-caption">
-          <Activity aria-hidden="true" />
-          <span>Ritmo operacional</span>
-          <strong>{online ? "EM CURSO" : "SEM SINAL RECENTE"}</strong>
-        </div>
+        <p>{needsAttention ? "Veja a tela Computadores monitorados para identificar os pontos." : "Todos os computadores cadastrados estão enviando informações."}</p>
       </section>
-
-      <div className="command-side-telemetry command-side-right">
-        <TelemetryLabel
-          label="Agentes online"
-          value={formatNumber(online)}
-          detail={`${formatNumber(agents)} identidade(s) real(is)`}
-          tone="healthy"
-        />
-        <div className="command-dual-signal">
-          <TelemetryLabel
-            label="Atrasados"
-            value={formatNumber(delayed)}
-            detail="5–30 min"
-            tone={delayed ? "warning" : "healthy"}
-          />
-          <TelemetryLabel
-            label="Offline"
-            value={formatNumber(offline)}
-            detail="mais de 30 min"
-            tone={offline ? "critical" : "healthy"}
-          />
-        </div>
-      </div>
 
       <div className="command-bottom-rail">
         {snapshot.sites.map((site) => (
@@ -213,8 +169,8 @@ function WorkforcePulse({ snapshot }: { snapshot: WallboardSnapshot }) {
   return (
     <div className="command-scene-grid pulse-scene">
       <CommandFrame
-        eyebrow="Fluxo temporal"
-        title="Pulso operacional"
+        eyebrow="Últimas 24 horas"
+        title="Volume de atividade ao longo do dia"
         detail={`${formatNumber(kpi(snapshot.kpis, "events24h", "events_24h"))} eventos · 24h`}
         className="command-span-8"
       >
@@ -228,13 +184,13 @@ function WorkforcePulse({ snapshot }: { snapshot: WallboardSnapshot }) {
         )}
       </CommandFrame>
       <CommandFrame
-        eyebrow="Últimas leituras"
-        title="Sinais da operação"
+        eyebrow="Mais recente primeiro"
+        title="Atividades registradas"
         className="command-span-4"
       >
         <div className="command-event-stream">
           {snapshot.activity
-            .slice(-8)
+            .slice(-5)
             .reverse()
             .map((row, index) => (
               <div key={`${String(row.bucket)}-${String(row.category)}-${index}`}>
@@ -256,9 +212,9 @@ function WorkforceTeams({ snapshot }: { snapshot: WallboardSnapshot }) {
   return (
     <div className="command-scene-grid">
       <CommandFrame
-        eyebrow="Sem ranking individual"
-        title="Equipes por unidade operacional"
-        detail="atividade agregada"
+        eyebrow="Visão por local"
+        title="Como está cada filial"
+        detail="sem comparação individual"
         className="command-span-12"
       >
         <div className="command-branch-field">
@@ -274,8 +230,8 @@ function WorkforceTeams({ snapshot }: { snapshot: WallboardSnapshot }) {
                   <h3>{text(site.name)}</h3>
                 </div>
                 <div className="command-branch-stats">
-                  <strong>{active}</strong><span>pessoas ativas</span>
-                  <strong>{events}</strong><span>eventos 24h</span>
+                  <strong>{active}</strong><span>ativas agora</span>
+                  <strong>{events}</strong><span>atividades em 24h</span>
                 </div>
                 <StatusMark status={text(site.status, "unknown")} />
               </article>
@@ -331,9 +287,9 @@ function WorkforceApplications({ snapshot }: { snapshot: WallboardSnapshot }) {
   return (
     <div className="command-scene-grid">
       <CommandFrame
-        eyebrow="Contexto operacional"
-        title="Aplicações em uso"
-        detail="janela de 24 horas"
+        eyebrow="Últimas 24 horas"
+        title="Sistemas com mais tempo de uso"
+        detail="tempo ativo registrado"
         className="command-span-8"
       >
         {snapshot.applications.length ? (
@@ -346,8 +302,8 @@ function WorkforceApplications({ snapshot }: { snapshot: WallboardSnapshot }) {
         )}
       </CommandFrame>
       <CommandFrame
-        eyebrow="Distribuição"
-        title="Categorias observadas"
+        eyebrow="Resumo"
+        title="Uso por categoria"
         className="command-span-4"
       >
         <div className="command-category-list">
@@ -379,11 +335,10 @@ function WorkforceBranches({ snapshot }: { snapshot: WallboardSnapshot }) {
           <span className="command-station-code">{text(site.code, "—")}</span>
           <div className="command-station-orbit"><Building2 /></div>
           <h2>{text(site.name)}</h2>
-          <p>Unidade operacional 0{index + 1}</p>
+          <p>Filial {String(index + 1).padStart(2, "0")}</p>
           <dl>
-            <div><dt>Pessoas</dt><dd>{formatNumber(site.active_people)}</dd></div>
-            <div><dt>Eventos 24h</dt><dd>{formatNumber(site.events_24h)}</dd></div>
-            <div><dt>Agentes</dt><dd>Sem vínculo de filial</dd></div>
+            <div><dt>Ativas agora</dt><dd>{formatNumber(site.active_people)}</dd></div>
+            <div><dt>Atividades em 24h</dt><dd>{formatNumber(site.events_24h)}</dd></div>
           </dl>
           <StatusMark status={text(site.status, "unknown")} />
         </article>
@@ -393,12 +348,15 @@ function WorkforceBranches({ snapshot }: { snapshot: WallboardSnapshot }) {
 }
 
 function WorkforceCollection({ snapshot }: { snapshot: WallboardSnapshot }) {
+  const online = snapshot.agents.filter((agent) => agent.effectiveStatus === "online").length;
+  const delayed = snapshot.agents.filter((agent) => agent.effectiveStatus === "delayed").length;
+  const offline = snapshot.agents.filter((agent) => agent.effectiveStatus === "offline").length;
   return (
     <div className="command-scene-grid">
       <CommandFrame
-        eyebrow="Telemetria de endpoint"
-        title="Saúde da coleta"
-        detail={`${snapshot.agents.length} agente(s) real(is)`}
+        eyebrow="Computadores cadastrados"
+        title="Quem está enviando informações"
+        detail={`${snapshot.agents.length} no total`}
         className="command-span-8"
       >
         <div className="command-agent-list">
@@ -407,14 +365,9 @@ function WorkforceCollection({ snapshot }: { snapshot: WallboardSnapshot }) {
               <div className="command-agent-icon"><RadioTower /></div>
               <div>
                 <h3>{agent.hostname}</h3>
-                <p>{agent.profile} · {agent.operatingSystem}</p>
+                <p>{agent.operatingSystem}</p>
               </div>
-              <dl>
-                <div><dt>Versão</dt><dd>{agent.agentVersion ?? "não informada"}</dd></div>
-                <div><dt>Fila</dt><dd>{agent.queueDepth}</dd></div>
-                <div><dt>Política</dt><dd>{agent.policyStatus}</dd></div>
-                <div><dt>Último contato</dt><dd>{formatMoment(agent.lastSeenAt)}</dd></div>
-              </dl>
+              <p className="command-agent-last-seen">Último contato <strong>{formatMoment(agent.lastSeenAt)}</strong></p>
               <StatusMark status={agent.effectiveStatus} />
             </article>
           ))}
@@ -423,7 +376,7 @@ function WorkforceCollection({ snapshot }: { snapshot: WallboardSnapshot }) {
           <HonestEmpty title="Aguardando agente" detail="Nenhuma identidade real está ativa." />
         ) : null}
       </CommandFrame>
-      <CommandFrame eyebrow="Cobertura" title="Qualidade da sessão" className="command-span-4">
+      <CommandFrame eyebrow="Resumo agora" title="Situação dos computadores" className="command-span-4">
         <div className="command-coverage-core">
           <CircleGauge aria-hidden="true" />
           <strong>
@@ -435,12 +388,12 @@ function WorkforceCollection({ snapshot }: { snapshot: WallboardSnapshot }) {
                 )}%`
               : "—"}
           </strong>
-          <span>agentes comunicando</span>
+          <span>computadores conectados</span>
         </div>
-        <div className="command-signal-legend">
-          <span><i className="is-healthy" />online</span>
-          <span><i className="is-warning" />atrasado</span>
-          <span><i className="is-critical" />offline</span>
+        <div className="command-collection-counts">
+          <AtGlanceKpi label="Online" value={online} tone="healthy" />
+          <AtGlanceKpi label="Atrasados" value={delayed} tone={delayed ? "warning" : "healthy"} />
+          <AtGlanceKpi label="Offline" value={offline} tone={offline ? "critical" : "healthy"} />
         </div>
       </CommandFrame>
     </div>

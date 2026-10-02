@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { EChartsOption } from "echarts";
 import {
   Boxes,
   CloudCog,
@@ -13,13 +12,12 @@ import {
   Shield,
   Wifi
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { VulcanChart } from "./vulcan-chart";
+import { useState } from "react";
 import {
+  AtGlanceKpi,
   CommandFrame,
   HonestEmpty,
   StatusMark,
-  TelemetryLabel,
   formatMoment,
   formatNumber,
   kpi,
@@ -89,9 +87,10 @@ function InfrastructureCommand({ snapshot }: { snapshot: WallboardSnapshot }) {
     ? Math.max(0, assets - unknown)
     : numeric(monitoredValue);
   const availability = kpi(snapshot.kpis, "availability", "availability");
+  const attention = degraded + offline;
 
   return (
-    <div className="command-scene-grid infra-command-scene">
+    <div className="command-scene-grid infra-command-scene command-at-glance-scene">
       <section className="infra-command-core">
         <div className="infra-core-grid" aria-hidden="true" />
         <div className="infra-core-mark">
@@ -99,22 +98,18 @@ function InfrastructureCommand({ snapshot }: { snapshot: WallboardSnapshot }) {
           <span>ERS / VULCAN</span>
         </div>
         <div className="infra-core-value">
-          <small>DISPONIBILIDADE OBSERVADA</small>
+          <small>INFRAESTRUTURA DISPONÍVEL AGORA</small>
           <strong>{formatNumber(availability, "%")}</strong>
-          <span>{formatNumber(measured)} de {formatNumber(assets)} ativos com estado confirmado</span>
-          <small className="infra-core-formula">
-            Fórmula: ({formatNumber(online)} online + 0,5 × {formatNumber(degraded)} degradados)
-            {" ÷ "}{formatNumber(measured)} ativos com estado confirmado
-          </small>
+          <span>{attention ? `${attention} equipamento(s) precisam de atenção` : "Nenhum equipamento com falha detectada"}</span>
         </div>
         <div className="infra-orbit infra-orbit-a" />
         <div className="infra-orbit infra-orbit-b" />
       </section>
       <div className="infra-command-signals">
-        <TelemetryLabel label="Online" value={online} detail="última observação" tone="healthy" />
-        <TelemetryLabel label="Degradados" value={degraded} detail="atenção operacional" tone={degraded ? "warning" : "healthy"} />
-        <TelemetryLabel label="Offline" value={offline} detail="sem resposta observada" tone={offline ? "critical" : "healthy"} />
-        <TelemetryLabel label="Sem coleta" value={unknown} detail="estado não confirmado" tone="cold" />
+        <AtGlanceKpi label="Funcionando" value={online} hint={`de ${measured} monitorados`} tone="healthy" />
+        <AtGlanceKpi label="Com alerta" value={degraded} hint="funcionando com restrição" tone={degraded ? "warning" : "healthy"} />
+        <AtGlanceKpi label="Fora do ar" value={offline} hint="sem resposta" tone={offline ? "critical" : "healthy"} />
+        <AtGlanceKpi label="Sem informação" value={unknown} hint={`${assets} equipamentos cadastrados`} tone="cold" />
       </div>
       <div className="infra-type-rail">
         <InfraType icon={Server} label="Servidores" value={kpi(snapshot.kpis, "servers", "servers")} />
@@ -143,9 +138,9 @@ function InfrastructureTopology({
   return (
     <div className="command-scene-grid topology-scene">
       <CommandFrame
-        eyebrow={useFallback ? "Fallback operacional 2D" : "Malha operacional 3D"}
-        title="Topologia Vulcan"
-        detail={`${snapshot.topologyNodes.length} nós · ${snapshot.topologyLinks.length} relações`}
+        eyebrow={useFallback ? "Mapa simplificado" : "Mapa interativo"}
+        title="Como os equipamentos estão conectados"
+        detail={`${snapshot.topologyNodes.length} equipamentos · ${snapshot.topologyLinks.length} conexões`}
         className="command-span-9 command-topology-frame"
       >
         <div className="command-topology-stage">
@@ -172,12 +167,12 @@ function InfrastructureTopology({
           </div>
         </div>
       </CommandFrame>
-      <CommandFrame eyebrow="Leitura técnica" title={selected?.name ?? "Malha ERS"} className="command-span-3">
+      <CommandFrame eyebrow="Detalhes" title={selected?.name ?? "Resumo do mapa"} className="command-span-3">
         {selected ? (
           <div className="command-node-inspector">
             <StatusMark status={selected.status} />
             <dl>
-              <div><dt>Tipo</dt><dd>{selected.assetType.replaceAll("_", " ")}</dd></div>
+              <div><dt>Tipo</dt><dd>{assetTypeLabel(selected.assetType)}</dd></div>
               <div><dt>Filial</dt><dd>{selected.siteName ?? "não vinculada"}</dd></div>
               <div><dt>Origem</dt><dd>{selected.source}</dd></div>
               <div><dt>IP</dt><dd>{selected.ipAddress ?? "não informado"}</dd></div>
@@ -188,8 +183,8 @@ function InfrastructureTopology({
           <div className="command-topology-summary">
             <Network />
             <strong>{snapshot.sites.length}</strong>
-            <span>filiais representadas</span>
-            <p>Selecione um nó no fallback 2D para inspecionar detalhes. No modo 3D, os textos permanecem no DOM.</p>
+            <span>filiais no mapa</span>
+            <p>Selecione um equipamento para ver o estado, a filial e o último contato.</p>
           </div>
         )}
       </CommandFrame>
@@ -204,9 +199,9 @@ function ConnectivityScene({ snapshot }: { snapshot: WallboardSnapshot }) {
   return (
     <div className="command-scene-grid connectivity-scene">
       <CommandFrame
-        eyebrow="WAN / ADVPN"
-        title="Conectividade entre unidades"
-        detail={`${links.length} componentes observados`}
+        eyebrow="Conexões da empresa"
+        title="As filiais estão conectadas?"
+        detail={`${links.length} links monitorados`}
         className="command-span-12"
       >
         <div className="command-link-map">
@@ -217,18 +212,16 @@ function ConnectivityScene({ snapshot }: { snapshot: WallboardSnapshot }) {
               <strong>{text(site.code, "—")}</strong>
               <small>{text(site.name)}</small>
               <StatusMark status={text(site.status, "unknown")} />
-              <p>{numeric(site.online)}/{numeric(site.assets)} ativos online</p>
+              <p><strong>{numeric(site.online)}/{numeric(site.assets)}</strong> equipamentos funcionando</p>
               {index < snapshot.sites.length - 1 ? <i aria-hidden="true" /> : null}
             </div>
           ))}
         </div>
         <div className="command-link-list">
-          {links.map((node) => (
+          {links.slice(0, 9).map((node) => (
             <article key={node.id}>
               <Network />
-              <div><strong>{node.name}</strong><span>{node.assetType.replaceAll("_", " ")} · {node.siteName ?? "sem filial"}</span></div>
-              <p>Latência: <b>Métrica indisponível</b></p>
-              <p>Perda: <b>Métrica indisponível</b></p>
+              <div><strong>{node.name}</strong><span>{assetTypeLabel(node.assetType)} · {node.siteName ?? "sem filial"}</span></div>
               <StatusMark status={node.status} />
             </article>
           ))}
@@ -248,9 +241,9 @@ function ProxmoxScene({ snapshot }: { snapshot: WallboardSnapshot }) {
   return (
     <div className="command-scene-grid">
       <CommandFrame
-        eyebrow="Virtualização"
-        title="Cluster Proxmox ERS"
-        detail={`${hosts.length} nós · ${virtualMachines.length} VMs`}
+        eyebrow="Ambiente virtual"
+        title="Capacidade dos servidores"
+        detail={`${hosts.length} servidores físicos · ${virtualMachines.length} máquinas virtuais`}
         className="command-span-8"
       >
         <div className="command-rack-grid">
@@ -266,19 +259,23 @@ function ProxmoxScene({ snapshot }: { snapshot: WallboardSnapshot }) {
         </div>
         {!hosts.length ? <HonestEmpty title="Sem coleta Proxmox" detail="Nenhum nó foi reconciliado." /> : null}
       </CommandFrame>
-      <CommandFrame eyebrow="Máquinas e backup" title="Carga observada" className="command-span-4">
+      <CommandFrame eyebrow="Verificar agora" title="Itens que precisam de atenção" className="command-span-4">
         <div className="command-compact-fleet">
           {assets
             .filter((asset) => asset.assetType !== "virtualization_host")
-            .slice(0, 12)
+            .filter((asset) => !["online", "ok", "active"].includes(asset.status))
+            .slice(0, 10)
             .map((asset) => (
               <div key={asset.id}>
                 <span>{asset.assetType === "backup_job" ? <Database /> : <Boxes />}</span>
-                <p><strong>{asset.name}</strong><small>{asset.details.node ? `host ${String(asset.details.node)}` : asset.assetType.replaceAll("_", " ")}</small></p>
+                <p><strong>{asset.name}</strong><small>{asset.details.node ? `servidor ${String(asset.details.node)}` : assetTypeLabel(asset.assetType)}</small></p>
                 <StatusMark status={asset.status} />
               </div>
             ))}
         </div>
+        {!assets.some((asset) => asset.assetType !== "virtualization_host" && !["online", "ok", "active"].includes(asset.status)) ? (
+          <HonestEmpty title="Tudo normal" detail="Nenhuma máquina virtual ou rotina de backup exige atenção." state="healthy" />
+        ) : null}
       </CommandFrame>
     </div>
   );
@@ -294,58 +291,48 @@ function AssetFleetScene({
   const config = {
     servers: {
       types: ["server"],
-      eyebrow: "Serviços essenciais",
-      title: "Servidores ERS",
+      eyebrow: "Serviços da empresa",
+      title: "Situação dos servidores",
       icon: Server
     },
     unifi: {
       types: ["switch", "access_point", "controller"],
-      eyebrow: "Integração somente leitura",
-      title: "Rede e UniFi",
+      eyebrow: "Rede interna",
+      title: "Situação do Wi-Fi e switches",
       icon: Wifi
     },
     printing: {
       types: ["printer"],
-      eyebrow: "Frota de impressão",
-      title: "Impressoras ERS",
+      eyebrow: "Impressão",
+      title: "Situação das impressoras",
       icon: Printer
     }
   }[kind];
   const assets = snapshot.topologyNodes.filter((node) => config.types.includes(node.assetType));
-  const statusOption = useMemo<EChartsOption>(() => {
-    const groups = ["online", "degraded", "offline", "unknown"].map((status) => ({
-      name: status === "unknown" ? "sem coleta" : status,
-      value: assets.filter((asset) => asset.status === status).length
-    }));
-    return {
-      tooltip: { trigger: "item" },
-      series: [{
-        type: "pie",
-        radius: ["64%", "88%"],
-        center: ["50%", "48%"],
-        label: { show: false },
-        data: groups.filter((group) => group.value)
-      }]
-    };
-  }, [assets]);
+  const online = assets.filter((asset) => asset.status === "online").length;
+  const degraded = assets.filter((asset) => asset.status === "degraded").length;
+  const offline = assets.filter((asset) => asset.status === "offline").length;
+  const unknown = assets.filter((asset) => asset.status === "unknown").length;
+  const availability = assets.length ? Math.round((online / assets.length) * 100) : 0;
+  const orderedAssets = [...assets].sort((left, right) => statusPriority(left.status) - statusPriority(right.status));
 
   return (
     <div className="command-scene-grid">
       <CommandFrame
         eyebrow={config.eyebrow}
         title={config.title}
-        detail={`${assets.length} ativo(s) real(is)`}
+        detail={`${assets.length} equipamentos cadastrados`}
         className="command-span-9"
       >
         <div className="command-fleet-grid">
-          {assets.slice(0, 24).map((asset) => (
+          {orderedAssets.slice(0, 15).map((asset) => (
             <article key={asset.id}>
               <config.icon />
               <div>
                 <h3>{asset.name}</h3>
                 <p>{asset.siteName ?? "sem filial"} · {asset.ipAddress ?? "IP não informado"}</p>
                 {kind === "unifi" ? (
-                  <small>{formatDetail(asset.details.clients, "clientes")} · {formatDetail(asset.details.uplinkSpeedMbps, "Mb/s uplink")}</small>
+                  <small>{formatDetail(asset.details.clients, "clientes conectados")} · {formatDetail(asset.details.uplinkSpeedMbps, "Mb/s")}</small>
                 ) : kind === "printing" ? (
                   <small>Toner: {formatDetail(asset.details.toner, "")}</small>
                 ) : (
@@ -358,12 +345,16 @@ function AssetFleetScene({
         </div>
         {!assets.length ? <HonestEmpty title="Sem coleta" detail={`Nenhum ativo de ${config.title.toLowerCase()} foi encontrado.`} /> : null}
       </CommandFrame>
-      <CommandFrame eyebrow="Estado observado" title="Distribuição" className="command-span-3">
-        {assets.length ? <VulcanChart option={statusOption} ariaLabel={`Estados reais de ${config.title}`} /> : null}
+      <CommandFrame eyebrow="Resumo agora" title="Disponibilidade" className="command-span-3">
+        <div className="command-fleet-availability">
+          <strong>{assets.length ? `${availability}%` : "—"}</strong>
+          <span>funcionando</span>
+        </div>
         <div className="command-fleet-summary">
-          <strong>{assets.filter((asset) => asset.status === "online").length}</strong><span>online</span>
-          <strong>{assets.filter((asset) => asset.status === "offline").length}</strong><span>offline</span>
-          <strong>{assets.filter((asset) => asset.status === "unknown").length}</strong><span>sem coleta</span>
+          <strong className="is-healthy">{online}</strong><span>funcionando</span>
+          <strong className="is-warning">{degraded}</strong><span>com alerta</span>
+          <strong className="is-critical">{offline}</strong><span>fora do ar</span>
+          <strong>{unknown}</strong><span>sem informação</span>
         </div>
       </CommandFrame>
     </div>
@@ -381,12 +372,12 @@ function PlatformScene({
 }) {
   return (
     <div className="command-scene-grid">
-      <CommandFrame eyebrow="Autobservabilidade" title="Saúde do Vulcan" className="command-span-7">
+      <CommandFrame eyebrow="Serviços do sistema" title="O Vulcan está funcionando?" className="command-span-7">
         <div className="command-health-grid">
           {health?.checks.map((check) => (
             <article key={check.name}>
               <CloudCog />
-              <div><strong>{check.name.replaceAll("_", " ")}</strong><span>{check.detail}</span></div>
+              <div><strong>{healthCheckLabel(check.name)}</strong><span>{check.detail}</span></div>
               <p>{check.latencyMs === null ? "—" : `${check.latencyMs.toFixed(1)} ms`}</p>
               <StatusMark status={check.status} />
             </article>
@@ -394,7 +385,7 @@ function PlatformScene({
         </div>
         {!health ? <HonestEmpty title="Health indisponível" detail="Aguardando resposta do próprio Vulcan." state="warning" /> : null}
       </CommandFrame>
-      <CommandFrame eyebrow="Coletores" title="Integrações" className="command-span-5">
+      <CommandFrame eyebrow="Fontes de informação" title="Conexões do Vulcan" className="command-span-5">
         <div className="command-integration-grid">
           {snapshot.integrations.map((integration, index) => (
             <article key={`${String(integration.adapter_type)}-${index}`}>
@@ -451,4 +442,37 @@ function formatDetail(value: unknown, suffix: string) {
   return value === null || value === undefined || value === ""
     ? "sem coleta"
     : `${String(value)}${suffix ? ` ${suffix}` : ""}`;
+}
+
+function statusPriority(status: string) {
+  return ({ offline: 0, critical: 0, degraded: 1, warning: 1, unknown: 2, online: 3 } as Record<string, number>)[status] ?? 2;
+}
+
+function assetTypeLabel(type: string) {
+  return ({
+    wan_link: "Link de internet",
+    vpn_tunnel: "Túnel entre filiais",
+    firewall: "Firewall",
+    gateway: "Saída da rede",
+    nat_service: "Serviço publicado",
+    server: "Servidor",
+    virtualization_host: "Servidor físico",
+    virtual_machine: "Máquina virtual",
+    backup_job: "Rotina de backup",
+    backup_server: "Servidor de backup",
+    switch: "Switch",
+    access_point: "Ponto de Wi-Fi",
+    controller: "Controlador de rede",
+    printer: "Impressora"
+  } as Record<string, string>)[type] ?? type.replaceAll("_", " ");
+}
+
+function healthCheckLabel(name: string) {
+  return ({
+    database: "Banco de dados",
+    schema: "Estrutura do banco",
+    supabase: "Banco Supabase",
+    evolution: "WhatsApp",
+    ingestion: "Entrada de dados"
+  } as Record<string, string>)[name] ?? name.replaceAll("_", " ");
 }
