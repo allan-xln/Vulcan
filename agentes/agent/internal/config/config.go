@@ -38,6 +38,13 @@ type Paths struct {
 
 func DefaultPaths() Paths {
 	if runtime.GOOS == "windows" {
+		if root := os.Getenv("VULCAN_AGENT_ROOT"); root != "" {
+			return Paths{
+				ConfigDir: root,
+				DataDir:   filepath.Join(root, "data"),
+				LogDir:    filepath.Join(root, "logs"),
+			}
+		}
 		programData := os.Getenv("ProgramData")
 		if programData == "" {
 			programData = `C:\ProgramData`

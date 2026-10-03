@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added TV-first infrastructure scenes for per-site operations, servers and UniFi/network,
+  driven only by persisted ERS telemetry and explicit empty states.
+- Added privacy-safe per-user Windows deployment for Active Directory: short-lived
+  enrollment, per-user/device identity, signed v2 communication and automatic membership
+  matching for domain logins.
+- Added a guarded GPO deployment command that reads the AD credential from a protected
+  file, verifies the agent checksum in SYSVOL and schedules removal of the enrollment
+  token.
+- Agent telemetry now creates/updates its infrastructure asset and infers the site from
+  the workstation IP and registered network ranges.
+
 - A instalação de agentes agora gera um único comando por sistema e perfil. No Windows, o
   PowerShell baixa o MSI para uma pasta temporária, valida SHA-256, instala silenciosamente,
   remove o pacote e confirma serviço/status; não há download manual na tela.

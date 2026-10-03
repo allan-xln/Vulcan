@@ -1,10 +1,24 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/lanfuture/vulcan/agentes/agent/internal/contracts"
 )
+
+func TestWindowsUserRootOverride(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path override is platform-specific")
+	}
+	t.Setenv("VULCAN_AGENT_ROOT", filepath.Join(os.TempDir(), "Vulcan", "Agent"))
+	paths := DefaultPaths()
+	if paths.ConfigDir != os.Getenv("VULCAN_AGENT_ROOT") {
+		t.Fatalf("unexpected config root: %s", paths.ConfigDir)
+	}
+}
 
 func TestPrivateHTTPConfigurationRequiresExplicitConsent(t *testing.T) {
 	base := Config{

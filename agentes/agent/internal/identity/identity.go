@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 type Identity struct {
@@ -176,5 +177,18 @@ func DeviceFingerprint() (string, error) {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(runtime.GOOS + "\x00" + hostname + "\x00" + stableID))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func ScopedDeviceFingerprint(scope string) (string, error) {
+	fingerprint, err := DeviceFingerprint()
+	if err != nil {
+		return "", err
+	}
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	if scope == "" {
+		return fingerprint, nil
+	}
+	sum := sha256.Sum256([]byte(fingerprint + "\x00" + scope))
 	return hex.EncodeToString(sum[:]), nil
 }

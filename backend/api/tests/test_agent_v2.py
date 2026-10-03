@@ -16,7 +16,7 @@ from app.agent_security import (
     validate_policy_document,
     verify_request_signature,
 )
-from app.agent_repository import AgentV2Repository, _event_data_origin
+from app.agent_repository import AgentV2Repository, _agent_user_candidates, _event_data_origin
 from app.agent_schemas import CanonicalAgentEvent
 from app.repository import AccessScope
 from app.security import AuthContext
@@ -160,3 +160,11 @@ def test_simulated_agent_events_are_explicitly_classified() -> None:
 
     assert _event_data_origin(simulated) == "simulated"
     assert _event_data_origin(real) == "real"
+
+
+def test_agent_user_candidates_accept_domain_and_email_logins() -> None:
+    assert _agent_user_candidates(r"ERS\allan") == [r"ERS\allan", "allan"]
+    assert _agent_user_candidates("allan@erstransportes.com.br") == [
+        "allan@erstransportes.com.br",
+        "allan",
+    ]

@@ -35,3 +35,24 @@ func TestIdentityIsPersistentAndPrivateKeyIsNotStoredInPlaintext(t *testing.T) {
 		t.Fatalf("storage key permissions are too broad: %o", keyInfo.Mode().Perm())
 	}
 }
+
+func TestScopedDeviceFingerprintSeparatesInteractiveUsers(t *testing.T) {
+	first, err := ScopedDeviceFingerprint(`ERS\allan`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ScopedDeviceFingerprint(`ERS\denise`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := ScopedDeviceFingerprint(`  ers\ALLAN `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("different user scopes produced the same device fingerprint")
+	}
+	if first != normalized {
+		t.Fatal("equivalent user scopes produced different device fingerprints")
+	}
+}

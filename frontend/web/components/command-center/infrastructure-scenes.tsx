@@ -2,9 +2,13 @@
 
 import dynamic from "next/dynamic";
 import {
+  AlertTriangle,
+  CheckCircle2,
   Boxes,
   CloudCog,
   Database,
+  Gauge,
+  HardDrive,
   Network,
   Printer,
   Router,
@@ -12,7 +16,7 @@ import {
   Shield,
   Wifi
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import {
   AtGlanceKpi,
   CommandFrame,
@@ -65,15 +69,179 @@ export function InfrastructureScene({
       />
     );
   }
+  if (scene === "site") return <SiteOperationsScene snapshot={snapshot} />;
   if (scene === "connectivity") return <ConnectivityScene snapshot={snapshot} />;
   if (scene === "proxmox") return <ProxmoxScene snapshot={snapshot} />;
-  if (scene === "servers") return <AssetFleetScene snapshot={snapshot} kind="servers" />;
-  if (scene === "unifi") return <AssetFleetScene snapshot={snapshot} kind="unifi" />;
+  if (scene === "servers") return <ServerOperationsScene snapshot={snapshot} />;
+  if (scene === "unifi") return <NetworkOperationsScene snapshot={snapshot} />;
   if (scene === "printing") return <AssetFleetScene snapshot={snapshot} kind="printing" />;
   if (scene === "platform") {
     return <PlatformScene snapshot={snapshot} health={health} version={version} />;
   }
   return <InfrastructureCommand snapshot={snapshot} />;
+}
+
+function SiteOperationsScene({ snapshot }: { snapshot: WallboardSnapshot }) {
+  const assets = snapshot.topologyNodes;
+  const measured = assets.filter((asset) => asset.status !== "unknown");
+  const healthy = measured.filter((asset) => healthyStatus(asset.status)).length;
+  const attention = measured.filter((asset) => !healthyStatus(asset.status)).length;
+  const availability = measured.length ? Math.round((healthy / measured.length) * 100) : null;
+  const links = assets.filter((asset) => ["wan_link", "vpn_tunnel", "firewall", "gateway"].includes(asset.assetType));
+  const wireless = assets.filter((asset) => ["access_point", "switch", "controller"].includes(asset.assetType));
+  const servers = assets.filter((asset) => ["server", "virtualization_host", "virtual_machine"].includes(asset.assetType));
+  const devices = assets.filter((asset) => ["printer", "workstation"].includes(asset.assetType));
+  const siteLabel = snapshot.siteName ?? (snapshot.sites.length === 1 ? text(snapshot.sites[0]?.name) : "Todas as unidades");
+
+  return (
+    <div className="command-ops-board command-site-board">
+      <section className="command-ops-hero">
+        <div><small>PAINEL DA UNIDADE</small><h2>{siteLabel}</h2><p>Infraestrutura e rede em tempo real</p></div>
+        <div className={`command-ops-health ${attention ? "is-warning" : "is-healthy"}`}>
+          {attention ? <AlertTriangle /> : <CheckCircle2 />}
+          <strong>{measured.length ? `${availability}%` : "—"}</strong>
+          <span>{attention ? `${attention} item(ns) para verificar` : measured.length ? "Operação normal" : "Aguardando coleta"}</span>
+        </div>
+      </section>
+
+      <OpsPanel title="Links e firewall" icon={Shield} className="command-ops-span-4">
+        <AssetRows assets={links} limit={5} detail={(asset) => linkDetail(asset)} />
+      </OpsPanel>
+      <OpsPanel title="Rede e Wi-Fi" icon={Wifi} className="command-ops-span-4">
+        <AssetRows assets={wireless} limit={5} detail={(asset) => networkDetail(asset)} />
+      </OpsPanel>
+      <OpsPanel title="Alertas prioritários" icon={AlertTriangle} className="command-ops-span-4">
+        <AlertRows snapshot={snapshot} fallbackAssets={assets} />
+      </OpsPanel>
+
+      <OpsPanel title="Servidores" icon={Server} className="command-ops-span-4">
+        <AssetRows assets={servers} limit={5} detail={(asset) => resourceDetail(asset)} />
+      </OpsPanel>
+      <OpsPanel title="Impressão e dispositivos" icon={Printer} className="command-ops-span-4">
+        <AssetRows assets={devices} limit={5} detail={(asset) => deviceDetail(asset)} />
+      </OpsPanel>
+      <OpsPanel title="Resumo da unidade" icon={Gauge} className="command-ops-span-4">
+        <div className="command-ops-kpis">
+          <OpsKpi label="Equipamentos" value={assets.length} />
+          <OpsKpi label="Funcionando" value={healthy} tone="healthy" />
+          <OpsKpi label="Agentes online" value={snapshot.agents.filter((agent) => agent.effectiveStatus === "online").length} />
+          <OpsKpi label="Clientes Wi-Fi" value={sumDetails(wireless, "clients")} />
+        </div>
+      </OpsPanel>
+    </div>
+  );
+}
+
+function ServerOperationsScene({ snapshot }: { snapshot: WallboardSnapshot }) {
+  const servers = snapshot.topologyNodes.filter((asset) =>
+    ["server", "virtualization_host", "virtual_machine", "backup_server"].includes(asset.assetType)
+  );
+  const backups = snapshot.topologyNodes.filter((asset) => asset.assetType === "backup_job");
+  const online = servers.filter((asset) => healthyStatus(asset.status)).length;
+  const warning = servers.filter((asset) => ["degraded", "warning", "maintenance"].includes(asset.status)).length;
+  const offline = servers.filter((asset) => ["offline", "critical"].includes(asset.status)).length;
+
+  return (
+    <div className="command-ops-board command-server-board">
+      <OpsPanel title="Status geral dos servidores" icon={Server} className="command-ops-span-5">
+        <div className="command-ops-kpis command-ops-kpis-wide">
+          <OpsKpi label="Monitorados" value={servers.length} />
+          <OpsKpi label="Online" value={online} tone="healthy" />
+          <OpsKpi label="Atenção" value={warning} tone="warning" />
+          <OpsKpi label="Críticos" value={offline} tone="critical" />
+        </div>
+      </OpsPanel>
+      <OpsPanel title="Uso médio dos recursos" icon={Gauge} className="command-ops-span-4">
+        <div className="command-resource-overview">
+          <ResourceDial label="CPU" value={averageDetail(servers, "cpuUsage")} />
+          <ResourceDial label="Memória" value={averageRatio(servers, "memoryBytes", "memoryMaxBytes")} />
+          <ResourceDial label="Disco" value={averageRatio(servers, "diskBytes", "diskMaxBytes")} />
+        </div>
+      </OpsPanel>
+      <OpsPanel title="Alertas prioritários" icon={AlertTriangle} className="command-ops-span-3">
+        <AlertRows snapshot={snapshot} fallbackAssets={servers} />
+      </OpsPanel>
+
+      <OpsPanel title="Lista de servidores" icon={Server} className="command-ops-span-12 command-ops-table-panel">
+        <div className="command-ops-table">
+          <div className="command-ops-table-head"><span>Servidor</span><span>Status</span><span>CPU</span><span>Memória</span><span>Disco</span><span>Última coleta</span></div>
+          {servers.slice(0, 12).map((server) => (
+            <div key={server.id} className="command-ops-table-row">
+              <span><strong>{server.name}</strong><small>{server.ipAddress ?? server.siteName ?? "sem IP"}</small></span>
+              <StatusMark status={server.status} />
+              <MiniMetric value={fraction(server.details.cpuUsage)} />
+              <MiniMetric value={ratio(server.details.memoryBytes, server.details.memoryMaxBytes)} />
+              <MiniMetric value={ratio(server.details.diskBytes, server.details.diskMaxBytes)} />
+              <span className="command-ops-moment">{formatMoment(server.lastSeenAt)}</span>
+            </div>
+          ))}
+        </div>
+        {!servers.length ? <HonestEmpty title="Sem servidores monitorados" detail="Os servidores aparecerão após a primeira coleta real." /> : null}
+      </OpsPanel>
+
+      <OpsPanel title="Backup e armazenamento" icon={HardDrive} className="command-ops-span-6">
+        <AssetRows assets={backups} limit={6} detail={(asset) => resourceDetail(asset)} />
+      </OpsPanel>
+      <OpsPanel title="Agentes de servidor" icon={CloudCog} className="command-ops-span-6">
+        <div className="command-ops-kpis command-ops-kpis-wide">
+          <OpsKpi label="Online" value={snapshot.agents.filter((agent) => agent.profile === "server" && agent.effectiveStatus === "online").length} tone="healthy" />
+          <OpsKpi label="Atrasados" value={snapshot.agents.filter((agent) => agent.profile === "server" && agent.effectiveStatus === "delayed").length} tone="warning" />
+          <OpsKpi label="Offline" value={snapshot.agents.filter((agent) => agent.profile === "server" && agent.effectiveStatus === "offline").length} tone="critical" />
+        </div>
+      </OpsPanel>
+    </div>
+  );
+}
+
+function NetworkOperationsScene({ snapshot }: { snapshot: WallboardSnapshot }) {
+  const switches = snapshot.topologyNodes.filter((asset) => asset.assetType === "switch");
+  const accessPoints = snapshot.topologyNodes.filter((asset) => asset.assetType === "access_point");
+  const controllers = snapshot.topologyNodes.filter((asset) => asset.assetType === "controller");
+  const networkAssets = [...controllers, ...switches, ...accessPoints];
+  const online = networkAssets.filter((asset) => healthyStatus(asset.status)).length;
+  const warning = networkAssets.filter((asset) => ["degraded", "warning", "maintenance"].includes(asset.status)).length;
+  const offline = networkAssets.filter((asset) => ["offline", "critical"].includes(asset.status)).length;
+
+  return (
+    <div className="command-ops-board command-network-board">
+      <OpsPanel title="Status geral da rede" icon={Network} className="command-ops-span-4">
+        <div className="command-network-score"><strong>{networkAssets.length}</strong><span>equipamentos de rede</span></div>
+        <div className="command-ops-kpis">
+          <OpsKpi label="Online" value={online} tone="healthy" />
+          <OpsKpi label="Atenção" value={warning} tone="warning" />
+          <OpsKpi label="Offline" value={offline} tone="critical" />
+          <OpsKpi label="Clientes" value={sumDetails(accessPoints, "clients")} />
+        </div>
+      </OpsPanel>
+      <OpsPanel title="Resumo da rede sem fio" icon={Wifi} className="command-ops-span-5">
+        <div className="command-wireless-summary">
+          <OpsKpi label="Access points" value={accessPoints.length} />
+          <OpsKpi label="APs online" value={accessPoints.filter((asset) => healthyStatus(asset.status)).length} tone="healthy" />
+          <OpsKpi label="Clientes conectados" value={sumDetails(accessPoints, "clients")} />
+        </div>
+        <AssetRows assets={accessPoints} limit={4} detail={(asset) => networkDetail(asset)} />
+      </OpsPanel>
+      <OpsPanel title="Alertas prioritários" icon={AlertTriangle} className="command-ops-span-3">
+        <AlertRows snapshot={snapshot} fallbackAssets={networkAssets} />
+      </OpsPanel>
+
+      <OpsPanel title="Switches" icon={Router} className="command-ops-span-6 command-ops-table-panel">
+        <NetworkTable assets={switches} />
+      </OpsPanel>
+      <OpsPanel title="Access points" icon={Wifi} className="command-ops-span-6 command-ops-table-panel">
+        <NetworkTable assets={accessPoints} />
+      </OpsPanel>
+
+      <OpsPanel title="Resumo de switching" icon={Network} className="command-ops-span-12">
+        <div className="command-ops-kpis command-ops-kpis-wide">
+          <OpsKpi label="Switches" value={switches.length} />
+          <OpsKpi label="APs" value={accessPoints.length} />
+          <OpsKpi label="Uplinks com erro" value={networkAssets.filter((asset) => numeric(asset.details.uplinkRxErrors) > 0).length} tone="warning" />
+          <OpsKpi label="Disponibilidade" value={networkAssets.length ? `${Math.round((online / networkAssets.length) * 100)}%` : "—"} tone="healthy" />
+        </div>
+      </OpsPanel>
+    </div>
+  );
 }
 
 function InfrastructureCommand({ snapshot }: { snapshot: WallboardSnapshot }) {
@@ -279,6 +447,170 @@ function ProxmoxScene({ snapshot }: { snapshot: WallboardSnapshot }) {
       </CommandFrame>
     </div>
   );
+}
+
+function OpsPanel({
+  title,
+  icon: Icon,
+  className,
+  children
+}: {
+  title: string;
+  icon: typeof Server;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`command-ops-panel ${className}`}>
+      <header><Icon /><h2>{title}</h2></header>
+      <div className="command-ops-panel-body">{children}</div>
+    </section>
+  );
+}
+
+function OpsKpi({
+  label,
+  value,
+  tone = "neutral"
+}: {
+  label: string;
+  value: string | number;
+  tone?: "neutral" | "healthy" | "warning" | "critical";
+}) {
+  return <div className={`command-ops-kpi is-${tone}`}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function AssetRows({
+  assets,
+  limit,
+  detail
+}: {
+  assets: TopologyNode[];
+  limit: number;
+  detail: (asset: TopologyNode) => string;
+}) {
+  const ordered = [...assets].sort((left, right) => statusPriority(left.status) - statusPriority(right.status));
+  if (!ordered.length) return <HonestEmpty title="Aguardando coleta" detail="Nenhum equipamento real encontrado nesta categoria." />;
+  return (
+    <div className="command-ops-rows">
+      {ordered.slice(0, limit).map((asset) => (
+        <article key={asset.id}>
+          <StatusMark status={asset.status} />
+          <div><strong>{asset.name}</strong><small>{detail(asset)}</small></div>
+          <span>{asset.ipAddress ?? "—"}</span>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AlertRows({ snapshot, fallbackAssets }: { snapshot: WallboardSnapshot; fallbackAssets: TopologyNode[] }) {
+  const alerts = snapshot.alerts.slice(0, 5);
+  const unhealthy = fallbackAssets
+    .filter((asset) => !healthyStatus(asset.status) && asset.status !== "unknown")
+    .slice(0, 5);
+  if (!alerts.length && !unhealthy.length) {
+    return <HonestEmpty title="Sem alertas ativos" detail="Nenhum equipamento exige ação agora." state="healthy" />;
+  }
+  return (
+    <div className="command-alert-rows">
+      {alerts.map((alert, index) => (
+        <article key={`${text(alert.id, "alert")}-${index}`}>
+          <StatusMark status={text(alert.severity, "warning")} />
+          <div><strong>{text(alert.title, text(alert.description, "Alerta operacional"))}</strong><small>{formatMoment(text(alert.last_occurred_at, text(alert.created_at, "")) || null)}</small></div>
+        </article>
+      ))}
+      {!alerts.length ? unhealthy.map((asset) => (
+        <article key={asset.id}>
+          <StatusMark status={asset.status} />
+          <div><strong>{asset.name}</strong><small>{asset.siteName ?? assetTypeLabel(asset.assetType)}</small></div>
+        </article>
+      )) : null}
+    </div>
+  );
+}
+
+function NetworkTable({ assets }: { assets: TopologyNode[] }) {
+  if (!assets.length) return <HonestEmpty title="Aguardando integração" detail="Nenhum equipamento foi reconciliado." />;
+  return (
+    <div className="command-network-table">
+      {assets.slice(0, 8).map((asset) => (
+        <article key={asset.id}>
+          <div><strong>{asset.name}</strong><small>{asset.ipAddress ?? asset.siteName ?? "sem IP"}</small></div>
+          <span>{formatDetail(asset.details.clients, "clientes")}</span>
+          <span>{formatDetail(asset.details.uplinkSpeedMbps, "Mb/s")}</span>
+          <StatusMark status={asset.status} />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function MiniMetric({ value }: { value: number | null }) {
+  return (
+    <span className="command-mini-metric">
+      <i><b style={{ width: `${value ?? 0}%` }} /></i>
+      <strong>{value === null ? "—" : `${Math.round(value)}%`}</strong>
+    </span>
+  );
+}
+
+function ResourceDial({ label, value }: { label: string; value: number | null }) {
+  return (
+    <div className="command-resource-dial" style={{ "--resource-value": `${value ?? 0}%` } as CSSProperties}>
+      <div><strong>{value === null ? "—" : `${Math.round(value)}%`}</strong></div>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function healthyStatus(status: string) {
+  return ["online", "ok", "active", "success", "healthy"].includes(status);
+}
+
+function sumDetails(assets: TopologyNode[], key: string) {
+  return assets.reduce((total, asset) => total + numeric(asset.details[key]), 0);
+}
+
+function averageDetail(assets: TopologyNode[], key: string) {
+  const values = assets.map((asset) => fraction(asset.details[key])).filter((value): value is number => value !== null);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function averageRatio(assets: TopologyNode[], valueKey: string, maximumKey: string) {
+  const values = assets
+    .map((asset) => ratio(asset.details[valueKey], asset.details[maximumKey]))
+    .filter((value): value is number => value !== null);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function linkDetail(asset: TopologyNode) {
+  const latency = asset.details.latencyMs;
+  const loss = asset.details.packetLossPercent;
+  return [assetTypeLabel(asset.assetType), latency !== undefined ? `${latency} ms` : null, loss !== undefined ? `${loss}% perda` : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function networkDetail(asset: TopologyNode) {
+  return [asset.siteName, asset.details.clients !== undefined ? `${asset.details.clients} clientes` : null, asset.details.uplinkSpeedMbps !== undefined ? `${asset.details.uplinkSpeedMbps} Mb/s` : null]
+    .filter(Boolean)
+    .join(" · ") || assetTypeLabel(asset.assetType);
+}
+
+function resourceDetail(asset: TopologyNode) {
+  const cpu = fraction(asset.details.cpuUsage);
+  const memory = ratio(asset.details.memoryBytes, asset.details.memoryMaxBytes);
+  return [asset.siteName, cpu === null ? null : `CPU ${Math.round(cpu)}%`, memory === null ? null : `RAM ${Math.round(memory)}%`]
+    .filter(Boolean)
+    .join(" · ") || `Última coleta ${formatMoment(asset.lastSeenAt)}`;
+}
+
+function deviceDetail(asset: TopologyNode) {
+  if (asset.assetType === "printer") {
+    return [asset.siteName, asset.details.toner ? `toner ${asset.details.toner}` : null].filter(Boolean).join(" · ");
+  }
+  return asset.siteName ?? assetTypeLabel(asset.assetType);
 }
 
 function AssetFleetScene({

@@ -2054,6 +2054,113 @@ input {
 .command-footer-status { font-size: clamp(10px, .62vw, 13px); }
 .command-playlist-progress > span:last-child { overflow: hidden; max-width: 240px; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Infra/rede: painéis densos o suficiente para a TV, com leitura imediata a distância. */
+.command-ops-board {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: clamp(8px, .7vw, 14px);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-content: stretch;
+}
+
+.command-ops-panel,
+.command-ops-hero {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 122, 26, .38);
+  background: linear-gradient(145deg, rgba(14, 16, 19, .96), rgba(7, 9, 12, .98));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.025), 0 12px 34px rgba(0,0,0,.22);
+}
+
+.command-ops-panel { display: flex; flex-direction: column; min-height: 0; }
+.command-ops-panel > header { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,.09); }
+.command-ops-panel > header svg { width: 19px; color: var(--command-orange-bright); }
+.command-ops-panel > header h2 { margin: 0; font-size: clamp(12px, .9vw, 18px); font-weight: 750; letter-spacing: .01em; }
+.command-ops-panel-body { min-height: 0; flex: 1; padding: 9px 11px; }
+.command-ops-span-3 { grid-column: span 3; }
+.command-ops-span-4 { grid-column: span 4; }
+.command-ops-span-5 { grid-column: span 5; }
+.command-ops-span-6 { grid-column: span 6; }
+.command-ops-span-12 { grid-column: span 12; }
+
+.command-ops-hero { grid-column: span 12; display: flex; align-items: center; justify-content: space-between; padding: clamp(12px, 1.2vw, 22px); }
+.command-ops-hero small { color: var(--command-orange-bright); font-size: 9px; font-weight: 800; letter-spacing: .22em; }
+.command-ops-hero h2 { margin: 3px 0 0; font-size: clamp(24px, 2.1vw, 42px); line-height: 1; letter-spacing: -.04em; }
+.command-ops-hero p { margin: 6px 0 0; color: var(--command-text-muted); font-size: 11px; }
+.command-ops-health { display: grid; grid-template-columns: auto auto; align-items: center; gap: 0 10px; min-width: 220px; padding-left: 20px; border-left: 1px solid rgba(255,255,255,.1); }
+.command-ops-health svg { grid-row: span 2; width: 34px; height: 34px; }
+.command-ops-health strong { font-size: clamp(24px, 2vw, 38px); line-height: .9; }
+.command-ops-health span { color: var(--command-text-secondary); font-size: 10px; }
+.command-ops-health.is-healthy svg, .command-ops-health.is-healthy strong { color: var(--command-green); }
+.command-ops-health.is-warning svg, .command-ops-health.is-warning strong { color: var(--command-yellow); }
+
+.command-ops-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.command-ops-kpis-wide { grid-template-columns: repeat(4, minmax(0, 1fr)); height: 100%; }
+.command-ops-kpi { display: flex; min-width: 0; flex-direction: column; justify-content: center; padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.025); }
+.command-ops-kpi span { color: var(--command-text-muted); font-size: 9px; text-transform: uppercase; letter-spacing: .11em; }
+.command-ops-kpi strong { margin-top: 3px; font-size: clamp(18px, 1.45vw, 30px); line-height: 1; }
+.command-ops-kpi.is-healthy strong { color: var(--command-green); }
+.command-ops-kpi.is-warning strong { color: var(--command-yellow); }
+.command-ops-kpi.is-critical strong { color: var(--command-red); }
+
+.command-ops-rows,
+.command-alert-rows,
+.command-network-table { display: grid; align-content: start; gap: 4px; height: 100%; }
+.command-ops-rows article,
+.command-alert-rows article,
+.command-network-table article { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 5px 7px; border-bottom: 1px solid rgba(255,255,255,.065); }
+.command-ops-rows article > div,
+.command-alert-rows article > div,
+.command-network-table article > div { min-width: 0; flex: 1; }
+.command-ops-rows strong,
+.command-alert-rows strong,
+.command-network-table strong { display: block; overflow: hidden; color: #f7f7f8; font-size: clamp(10px, .66vw, 13px); text-overflow: ellipsis; white-space: nowrap; }
+.command-ops-rows small,
+.command-alert-rows small,
+.command-network-table small { display: block; overflow: hidden; margin-top: 2px; color: var(--command-text-muted); font-size: clamp(8px, .52vw, 10px); text-overflow: ellipsis; white-space: nowrap; }
+.command-ops-rows article > span:last-child { color: var(--command-text-secondary); font-size: 9px; white-space: nowrap; }
+
+.command-resource-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; height: 100%; align-items: center; }
+.command-resource-dial { display: grid; justify-items: center; gap: 6px; }
+.command-resource-dial > div { display: grid; width: clamp(58px, 5.2vw, 98px); aspect-ratio: 1; place-items: center; border-radius: 50%; background: conic-gradient(var(--command-green) var(--resource-value), rgba(255,255,255,.08) 0); box-shadow: 0 0 20px rgba(70, 220, 170, .08); }
+.command-resource-dial > div::before { content: ""; grid-area: 1 / 1; width: 78%; aspect-ratio: 1; border-radius: inherit; background: #0b0d10; }
+.command-resource-dial strong { z-index: 1; grid-area: 1 / 1; font-size: clamp(14px, 1.1vw, 22px); }
+.command-resource-dial > span { color: var(--command-text-secondary); font-size: 9px; text-transform: uppercase; letter-spacing: .12em; }
+
+.command-ops-table-panel .command-ops-panel-body { padding-top: 4px; }
+.command-ops-table { display: grid; height: 100%; align-content: start; }
+.command-ops-table-head,
+.command-ops-table-row { display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(100px, .8fr) repeat(3, minmax(120px, 1fr)) minmax(110px, .8fr); align-items: center; gap: 10px; min-height: 31px; padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,.065); }
+.command-ops-table-head { color: var(--command-text-muted); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .13em; }
+.command-ops-table-row > span:first-child strong { display: block; font-size: 10px; }
+.command-ops-table-row > span:first-child small { display: block; color: var(--command-text-muted); font-size: 8px; }
+.command-ops-moment { color: var(--command-text-secondary); font-size: 9px; }
+.command-mini-metric { display: grid; grid-template-columns: 1fr 34px; align-items: center; gap: 6px; }
+.command-mini-metric i { height: 6px; overflow: hidden; background: rgba(255,255,255,.08); }
+.command-mini-metric b { display: block; height: 100%; background: linear-gradient(90deg, var(--command-green), var(--command-yellow)); }
+.command-mini-metric strong { color: var(--command-text-secondary); font-size: 9px; text-align: right; }
+
+.command-network-score { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.command-network-score strong { color: var(--command-green); font-size: clamp(34px, 3vw, 58px); line-height: 1; }
+.command-network-score span { color: var(--command-text-secondary); font-size: 11px; }
+.command-wireless-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; }
+.command-network-table article { display: grid; grid-template-columns: minmax(130px, 1fr) 90px 80px 100px; }
+.command-network-table article > span:not(.command-status) { color: var(--command-text-secondary); font-size: 9px; text-align: right; }
+
+.command-site-board { grid-template-rows: auto repeat(2, minmax(0, 1fr)); }
+.command-server-board { grid-template-rows: minmax(120px, .75fr) minmax(260px, 1.7fr) minmax(100px, .7fr); }
+.command-network-board { grid-template-rows: minmax(150px, 1fr) minmax(240px, 1.6fr) minmax(95px, .65fr); }
+
+@media (max-width: 1050px) {
+  .command-ops-board { overflow-y: auto; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .command-ops-span-3, .command-ops-span-4, .command-ops-span-5, .command-ops-span-6 { grid-column: span 3; }
+  .command-ops-span-12, .command-ops-hero { grid-column: span 6; }
+  .command-ops-table { min-width: 920px; }
+  .command-ops-table-panel .command-ops-panel-body { overflow-x: auto; }
+}
+
 /* Quality, accessibility and TV resolutions */
 
 .vulcan-command-center[data-quality="low"] .command-grid-plane,

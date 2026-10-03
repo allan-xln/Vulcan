@@ -64,6 +64,15 @@ O administrador configura em `/settings/wallboards`:
 - filial de cada painel;
 - duração, visibilidade e ordem.
 
+Na infraestrutura, a rotação inclui painéis de leitura rápida para TV com dados reais:
+
+- unidade: disponibilidade, links/firewall, rede/Wi-Fi, alertas, servidores e impressão;
+- servidores: estado, CPU, memória, disco, backups e agentes;
+- rede: switches, access points, clientes, disponibilidade e alertas.
+
+Cada item da playlist pode filtrar uma filial. Unidades ainda não cadastradas não recebem
+números ilustrativos: aparecem somente depois do cadastro e da primeira coleta real.
+
 As mudanças são persistidas em PostgreSQL, isoladas por `tenant_id`, protegidas por RLS e
 registradas na auditoria.
 

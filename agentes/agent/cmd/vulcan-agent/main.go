@@ -140,7 +140,7 @@ func enroll(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	deviceFingerprint, err := identity.DeviceFingerprint()
+	deviceFingerprint, err := identity.ScopedDeviceFingerprint(os.Getenv("VULCAN_AGENT_SCOPE"))
 	if err != nil {
 		return err
 	}
@@ -177,6 +177,8 @@ func enroll(arguments []string) error {
 		Metadata: map[string]any{
 			"kernelVersion": hostInfo.KernelVersion,
 			"installMode":   installMode(),
+			"osUser":        currentOSUser(),
+			"deployment":    strings.TrimSpace(os.Getenv("VULCAN_AGENT_DEPLOYMENT")),
 		},
 	})
 	if err != nil {
@@ -219,6 +221,18 @@ func enroll(arguments []string) error {
 		response.Status,
 	)
 	return nil
+}
+
+func currentOSUser() string {
+	username := strings.TrimSpace(os.Getenv("USERNAME"))
+	if username == "" {
+		username = strings.TrimSpace(os.Getenv("USER"))
+	}
+	domain := strings.TrimSpace(os.Getenv("USERDOMAIN"))
+	if domain != "" && username != "" {
+		return domain + `\` + username
+	}
+	return username
 }
 
 func run() error {

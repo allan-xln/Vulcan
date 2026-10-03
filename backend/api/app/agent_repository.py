@@ -4,6 +4,7 @@ import base64
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from ipaddress import ip_address
 from uuid import UUID
 
 from cryptography.exceptions import InvalidSignature
@@ -37,6 +38,29 @@ from app.security import AuthContext
 
 def _event_data_origin(event: CanonicalAgentEvent) -> str:
     return "simulated" if event.extensions.get("dataOrigin") == "simulated" else "real"
+
+
+def _agent_user_candidates(*values: str | None) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        value = (raw_value or "").strip()
+        if not value:
+            continue
+        variants = [value]
+        if "\\" in value:
+            variants.append(value.rsplit("\\", 1)[-1])
+        if "/" in value:
+            variants.append(value.rsplit("/", 1)[-1])
+        if "@" in value:
+            variants.append(value.split("@", 1)[0])
+        for candidate in variants:
+            normalized = candidate.strip()
+            key = normalized.casefold()
+            if normalized and key not in seen:
+                seen.add(key)
+                candidates.append(normalized)
+    return candidates
 
 
 class AgentAuthorizationError(ValueError):
@@ -518,6 +542,91 @@ class AgentV2Repository:
                 ),
             ).fetchone()
 
+            os_user = str(request.metadata.get("osUser") or "").strip()
+            if os_user:
+                owner_membership_id = None
+                for user_candidate in _agent_user_candidates(os_user):
+                    owner_membership_id = self.base._resolve_agent_membership(
+                        conn,
+                        token["tenant_id"],
+                        None,
+                        linked_user=user_candidate,
+                        os_user=user_candidate,
+                    )
+                    if owner_membership_id:
+                        break
+                if owner_membership_id:
+                    device = conn.execute(
+                        """
+                        update public.devices
+                        set owner_membership_id = %s,
+                            metadata = metadata || %s,
+                            updated_at = timezone('utc', now())
+                        where tenant_id = %s and id = %s
+                        returning id, owner_membership_id, metadata
+                        """,
+                        (
+                            owner_membership_id,
+                            Jsonb({"osUser": os_user, "adoptionStatus": "adopted"}),
+                            token["tenant_id"],
+                            device["id"],
+                        ),
+                    ).fetchone()
+
+            asset_type = {
+                "workstation": "workstation",
+                "server": "server",
+                "collector": "other",
+            }[request.profile]
+            conn.execute(
+                """
+                insert into public.infrastructure_assets (
+                  tenant_id, site_id, owner_membership_id, department_id,
+                  endpoint_device_id, asset_type, name, hostname,
+                  operating_system, status, criticality, lifecycle_state,
+                  tags, source, source_key, confidence, discovered_at,
+                  last_seen_at, metadata
+                )
+                values (
+                  %s, %s, %s, %s,
+                  %s, %s, %s, %s,
+                  %s, 'online', %s, 'managed',
+                  %s, 'agent', %s, 1, timezone('utc', now()),
+                  timezone('utc', now()), %s
+                )
+                on conflict (tenant_id, source, source_key)
+                  where source_key is not null and btrim(source_key) <> ''
+                do update set
+                  site_id = coalesce(excluded.site_id, public.infrastructure_assets.site_id),
+                  owner_membership_id = coalesce(excluded.owner_membership_id, public.infrastructure_assets.owner_membership_id),
+                  department_id = coalesce(excluded.department_id, public.infrastructure_assets.department_id),
+                  endpoint_device_id = excluded.endpoint_device_id,
+                  asset_type = excluded.asset_type,
+                  name = excluded.name,
+                  hostname = excluded.hostname,
+                  operating_system = excluded.operating_system,
+                  status = excluded.status,
+                  last_seen_at = excluded.last_seen_at,
+                  metadata = public.infrastructure_assets.metadata || excluded.metadata,
+                  updated_at = timezone('utc', now())
+                """,
+                (
+                    token["tenant_id"],
+                    token["site_id"],
+                    device["owner_membership_id"],
+                    token["department_id"],
+                    device["id"],
+                    asset_type,
+                    request.hostname,
+                    request.hostname,
+                    request.operating_system,
+                    "high" if request.profile == "server" else "medium",
+                    ["vulcan-agent", request.profile],
+                    f"device:{device['id']}",
+                    Jsonb({"agentVersion": request.agent_version, "profile": request.profile}),
+                ),
+            )
+
             conn.execute(
                 """
                 update public.agent_identities
@@ -702,6 +811,30 @@ class AgentV2Repository:
             signed_policy = self._signed_policy(conn, principal)
             effective_revision = signed_policy["revision"]
             status = "online" if request.status in {"online", "syncing"} else request.status
+            site_id = principal.site_id
+            network_id = None
+            parsed_local_ip = None
+            if request.local_ip:
+                try:
+                    parsed_local_ip = str(ip_address(request.local_ip))
+                except ValueError:
+                    parsed_local_ip = None
+                if parsed_local_ip:
+                    network = conn.execute(
+                        """
+                        select id, site_id
+                        from public.infrastructure_networks
+                        where tenant_id = %s
+                          and status = 'active'
+                          and network_cidr >>= %s::inet
+                        order by masklen(network_cidr) desc
+                        limit 1
+                        """,
+                        (principal.tenant_id, parsed_local_ip),
+                    ).fetchone()
+                    if network:
+                        network_id = network["id"]
+                        site_id = network["site_id"]
             conn.execute(
                 """
                 update public.agent_identities
@@ -754,6 +887,42 @@ class AgentV2Repository:
                             "localIp": request.local_ip,
                             "agentIdentityId": str(principal.agent_id),
                             "profile": principal.profile,
+                            "siteId": str(site_id) if site_id else None,
+                        }
+                    ),
+                    principal.tenant_id,
+                    principal.device_id,
+                ),
+            )
+            conn.execute(
+                """
+                update public.infrastructure_assets
+                set site_id = coalesce(%s, site_id),
+                    network_id = coalesce(%s, network_id),
+                    ip_address = coalesce(%s::inet, ip_address),
+                    status = %s,
+                    last_seen_at = timezone('utc', now()),
+                    metadata = metadata || %s,
+                    updated_at = timezone('utc', now())
+                where tenant_id = %s
+                  and endpoint_device_id = %s
+                  and source = 'agent'
+                """,
+                (
+                    site_id,
+                    network_id,
+                    parsed_local_ip,
+                    {
+                        "online": "online",
+                        "offline": "offline",
+                        "degraded": "degraded",
+                    }.get(status, "degraded"),
+                    Jsonb(
+                        {
+                            "agentVersion": request.agent_version,
+                            "queueDepth": request.queue_depth,
+                            "lastError": request.last_error,
+                            "modules": request.modules,
                         }
                     ),
                     principal.tenant_id,
@@ -922,6 +1091,27 @@ class AgentV2Repository:
                             ),
                         ),
                     )
+                    if event.event_type in {"endpoint.health.sample", "endpoint.inventory.snapshot"}:
+                        asset_status = "degraded" if event.severity in {"warning", "error", "critical"} else "online"
+                        conn.execute(
+                            """
+                            update public.infrastructure_assets
+                            set status = %s,
+                                last_seen_at = %s,
+                                metadata = metadata || %s,
+                                updated_at = timezone('utc', now())
+                            where tenant_id = %s
+                              and endpoint_device_id = %s
+                              and source = 'agent'
+                            """,
+                            (
+                                asset_status,
+                                event.occurred_at,
+                                Jsonb({**event_context, **event.metrics}),
+                                principal.tenant_id,
+                                principal.device_id,
+                            ),
+                        )
                 else:
                     duplicates += 1
                 acknowledged.append(event.event_id)

@@ -65,6 +65,11 @@ LDFLAGS="-s -w -X main.version=$VERSION -X main.commitSHA=$COMMIT_SHA -X main.bu
     -trimpath -ldflags "$LDFLAGS" \
     -o "$DIST_DIR/VulcanAgent.exe" \
     ./cmd/vulcan-agent
+
+  CGO_ENABLED=0 GOOS=windows GOARCH=amd64 "$GO_BINARY" build \
+    -trimpath -ldflags "$LDFLAGS -H=windowsgui" \
+    -o "$DIST_DIR/VulcanAgentUser.exe" \
+    ./cmd/vulcan-agent
 )
 
 chmod 0755 "$STAGING_DIR/linux-amd64/usr/bin/vulcan-agent"
@@ -155,6 +160,7 @@ fi
   cd "$DIST_DIR"
   sha256sum \
     "VulcanAgent.exe" \
+    "VulcanAgentUser.exe" \
     "VulcanAgent-Windows-x64.msi" \
     "vulcan-agent_${VERSION}_amd64.deb" \
     "vulcan-agent_${VERSION}_sbom.cdx.json"
@@ -163,12 +169,16 @@ fi
 mkdir -p "$REPOSITORY_ROOT/frontend/web/public/agent-v2"
 install -m 0644 "$DIST_DIR/VulcanAgent-Windows-x64.msi" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/VulcanAgent-Windows-x64.msi"
 install -m 0644 "$DIST_DIR/VulcanAgent.exe" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/VulcanAgent.exe"
+install -m 0644 "$DIST_DIR/VulcanAgentUser.exe" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/VulcanAgentUser.exe"
+install -m 0644 "$AGENT_ROOT/packaging/windows/ers-gpo-user-logon.ps1" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/ers-gpo-user-logon.ps1"
 install -m 0644 "$DIST_DIR/vulcan-agent_${VERSION}_amd64.deb" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/vulcan-agent_amd64.deb"
 install -m 0644 "$DIST_DIR/vulcan-agent_${VERSION}_sbom.cdx.json" "$REPOSITORY_ROOT/frontend/web/public/agent-v2/vulcan-agent_sbom.cdx.json"
 (
   cd "$REPOSITORY_ROOT/frontend/web/public/agent-v2"
   sha256sum \
     "VulcanAgent.exe" \
+    "VulcanAgentUser.exe" \
+    "ers-gpo-user-logon.ps1" \
     "VulcanAgent-Windows-x64.msi" \
     "vulcan-agent_amd64.deb" \
     "vulcan-agent_sbom.cdx.json"

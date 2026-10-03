@@ -1,6 +1,12 @@
 # Vulcan Agent — implantação por GPO
 
-Este runbook prepara uma implantação; ele não autoriza nem executa alterações em GPO.
+O fluxo ERS usa o agente v2 assinado em sessão de usuário. A GPO inicia o agente somente
+em Windows cliente; Windows Server é descartado pelo próprio script antes de qualquer
+gravação local.
+
+O agente coleta inventário e saúde do equipamento, aplicativo em foco, duração do contexto
+e ociosidade. A política padrão mantém desligados título de janela, conteúdo digitado,
+URL/histórico do navegador, tela, área de transferência, áudio e câmera.
 
 ## Pré-requisitos
 
@@ -12,7 +18,31 @@ Este runbook prepara uma implantação; ele não autoriza nem executa alteraçõ
 - política do agente criada e revisada no Vulcan;
 - janela de mudança e rollback aprovados.
 
-## Opção recomendada: startup script
+## Disparo ERS
+
+A senha do AD nunca entra na linha de comando. Grave-a em um arquivo local com permissão
+`600` e use um token de enrollment temporário, com aprovação automática e limite de usos
+compatível com as estações ativas:
+
+```bash
+chmod 600 /caminho/credencial-ad /caminho/enrollment.token
+ERS_WINRM_USER='ERSTRANSPORTES.LOCAL\\administrador' \
+ERS_WINRM_PASSWORD_FILE='/caminho/credencial-ad' \
+.venv/bin/python scripts/deploy_ers_agent_gpo.py \
+  --token-file /caminho/enrollment.token
+```
+
+Sem `--confirm-deploy`, o comando apenas valida AD, módulos e quantidade de estações.
+Depois da conferência, repita com `--confirm-deploy`. O disparo:
+
+- publica binário, script e token curto em `SYSVOL`;
+- valida o SHA-256 do binário após a cópia;
+- cria/vincula `Vulcan Agent - Estacoes ERS` no domínio;
+- configura o início no logon de cada usuário;
+- agenda a exclusão do token do `SYSVOL` em até 36 horas;
+- ignora controladores e demais Windows Server.
+
+## Alternativa: MSI por computador
 
 Mantenha o MSI em um compartilhamento somente leitura para computadores e use um script de
 startup equivalente:

@@ -20,6 +20,7 @@ export const WORKFORCE_SCENES = [
 
 export const INFRASTRUCTURE_SCENES = [
   "command",
+  "site",
   "topology",
   "connectivity",
   "proxmox",
@@ -31,6 +32,7 @@ export const INFRASTRUCTURE_SCENES = [
 
 export const SCENE_LABELS: Record<string, string> = {
   command: "Resumo agora",
+  site: "Painel da unidade",
   economy: "Tempo e economia",
   pulse: "Movimento das últimas 24h",
   teams: "Situação por filial",
